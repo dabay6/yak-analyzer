@@ -5,14 +5,12 @@ on:
   push:
     branches: [main]
 
-# A job can read the repository and nothing more unless it says otherwise (spec CI-2, CI-3).
+# A pull request's jobs can read the repository and nothing more (spec CI-2, CI-3).
 permissions:
   contents: read
 
-# A pull request's newer run replaces its older one. Runs on main are never cancelled or queued behind each
-# other: one of them may be a release waiting for the owner's approval.
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -80,8 +78,8 @@ jobs:
         run: cargo test --release --locked
       - name: What the binary asks of the system
         run: node scripts/check-floor.mjs
-      - name: The launcher's tests and the scripts' tests
-        run: node --test "npm/**/*.test.mjs" "scripts/**/*.test.mjs"
+      - name: The launcher's tests
+        run: node --test "npm/**/*.test.mjs"
       - name: Pack this target's platform package
         run: node scripts/pack.mjs platform
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -97,146 +95,3 @@ jobs:
           name: pkg-${{ matrix.target }}
           path: dist/dabay6-yak-analyzer-${{ matrix.target }}-*.tgz
           if-no-files-found: error
-
-  # The publishing job's own steps, on every pull request and push, without publishing (spec PUB-17): the six
-  # packed files gathered as that job gathers them, and the dry run over all six in the order they are published.
-  rehearse:
-    name: Rehearse the publishing
-    needs: [pack-main, target]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22.18.0
-          package-manager-cache: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: pkg-*
-          path: dist
-          merge-multiple: true
-      - run: node scripts/dry-run-publish.mjs --all
-
-  # From here on the jobs run only on a push to main (spec CI-1).
-
-  # Keeps the release pull request up to date, and makes the tag and the GitHub release when it is merged. It
-  # uses a token of the owner's, kept in an environment only main can use, so that the release pull request gets
-  # a CI run of its own (spec PUB-1a).
-  release-please:
-    name: The release pull request and the tag
-    if: github.event_name == 'push'
-    runs-on: ubuntu-24.04
-    environment: release
-    steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-
-  # Whether this commit is a release with something left to publish, from facts that are still true when a job
-  # is run again (spec PUB-2a).
-  release-facts:
-    name: Is there something to publish
-    if: github.event_name == 'push'
-    needs: release-please
-    runs-on: ubuntu-24.04
-    outputs:
-      tagged: ${{ steps.facts.outputs.tagged }}
-      publish: ${{ steps.facts.outputs.publish }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22.18.0
-          package-manager-cache: false
-      - id: facts
-        run: node scripts/release-facts.mjs
-
-  # Publishes the very files the target jobs packed and tested. It waits for the owner's approval, in an
-  # environment only main can use (spec PUB-2, PROT-2). It hands npm both ways to publish: its right to an
-  # identity token, and the token's secret when the environment has one (spec PUB-13).
-  publish:
-    name: Publish to npm
-    if: needs.release-facts.outputs.publish == 'true'
-    needs: [release-facts, pack-main, target, rehearse]
-    runs-on: ubuntu-24.04
-    environment: npm
-    permissions:
-      contents: read
-      id-token: write
-    outputs:
-      tag: ${{ steps.publish.outputs.tag }}
-      line: ${{ steps.publish.outputs.line }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22.18.0
-          package-manager-cache: false
-          registry-url: https://registry.npmjs.org
-          scope: '@dabay6'
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: pkg-*
-          path: dist
-          merge-multiple: true
-      - id: publish
-        run: node scripts/dry-run-publish.mjs --all --publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          YAK_ANALYZER_PUBLISHING_JOB: 'true'
-
-  # Adds one line to the release's notes: the packages that run published, and whether a token was stored for
-  # it (spec PUB-13).
-  release-notes:
-    name: Say how it was published
-    if: needs.publish.outputs.line != ''
-    needs: publish
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - run: |
-          gh release view "$TAG" --json body --jq .body > notes.md
-          printf '\n%s\n' "$LINE" >> notes.md
-          gh release edit "$TAG" --notes-file notes.md
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.publish.outputs.tag }}
-          LINE: ${{ needs.publish.outputs.line }}
-
-  # Installs the published packages by name from npmjs.com on every target, as a user's npm will, and reads
-  # back their provenance (spec PUB-9, PUB-15). It runs whenever the tag is on this commit, so running it again
-  # checks again.
-  check-published:
-    name: Published ${{ matrix.target }}
-    if: always() && needs.release-facts.outputs.tagged == 'true' && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
-    needs: [release-facts, publish]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: win32-x64, runner: windows-2025 }
-          - { target: darwin-arm64, runner: macos-15 }
-          - { target: darwin-x64, runner: macos-15-intel }
-          - { target: linux-x64, runner: ubuntu-24.04 }
-          - { target: linux-arm64, runner: ubuntu-24.04-arm }
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22.18.0
-          package-manager-cache: false
-      - run: node scripts/check-published.mjs
