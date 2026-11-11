@@ -7,9 +7,12 @@
 **Builds from:** the analyzer's design spec,
 `docs/specs/2026-11-10-in-house-code-analyzer-design.md` in the yakshaver repository, called **the
 design spec** below. That repository is not public yet, so this spec says in its own words
-everything a builder needs from it. This spec changes nothing in the design spec. It covers the
-design spec's AN-1, the version answer of IF-1, and REL-1 to REL-3 in full, and AN-2, REL-4 and
-REL-6 as far as a program with no analysis can.
+everything a builder needs from it. This spec changes nothing in the design spec. From it, this
+item builds REL-1 to REL-3 (the npm packages, where they are published, and the targets) and
+the first of the answers IF-1 lists, the version. It builds AN-2 (exact pins), REL-4 (every
+released binary tested on its own platform) and REL-6 (pull requests that move the pins) as far
+as a program with no analysis can. AN-1, a separate program in a public repository of its own
+under the MIT license, was met when this repository was created.
 
 How to read the marks: "(design REL-1)" after a sentence names the design spec's requirement that
 sentence follows from. Everything else is the session's call: the session that wrote this spec
@@ -42,13 +45,17 @@ Every later item ships through what this one builds.
 
 Terms:
 
+- **The owner** is the person who owns this repository and approves its specs, plans and
+  releases. **A session** is an AI agent's working session on the owner's behalf; one wrote this
+  spec, and one will usually be the builder.
 - **yak** is the command of yakshaver, the developer tool the analyzer is built for. It runs on
   Node.
 - **A pack** is a folder of content yak loads. Among other things a pack can declare a **tool
   server**: a program yak installs at one exact pinned version, from npm, into **yak's tools
   folder** under the user's home, each version in a folder of its own. A pack's declaration gives
-  the package, the version, the probe, and the command that starts the tool's server. `yak tools
-  install` does the install and asks the person at the terminal to confirm it first.
+  the package, the version, the probe, and the command that starts the tool's server; CHK-2
+  shows one. `yak tools install` does the install and asks the person at the terminal to confirm
+  it first.
 - **The probe** is the command yak runs after an install to read the installed version; yak
   accepts the install when the output contains the pinned version.
 - **A host** is an agent program, such as Claude Code, that yak sets up to use a project's tool
@@ -61,8 +68,10 @@ Terms:
   first findings. This item is the first part of it. **The swap** is the design spec's last
   stage, when yakshaver's own pack first declares the analyzer in place of the tool it uses
   today. Nothing installs the analyzer from npm for real use before the swap.
-- **The binary** is the Rust program, `yak-analyzer`. **The launcher** is the JavaScript file the
-  main npm package names as its `bin`.
+- **The binary** is the Rust program, `yak-analyzer`. **The crate** is its Rust package, whose
+  manifest is `Cargo.toml` and whose lock file is `Cargo.lock`; "the lock file" below always
+  means `Cargo.lock`. **The launcher** is the JavaScript file the main npm package names as its
+  `bin`.
 - **The main package** is the one yak pins and installs. **A platform package** holds the binary
   for one target.
 - **A target** is what a binary is built for: an operating system and a processor, and on Linux
@@ -71,8 +80,8 @@ Terms:
   published package.
 - **Trusted publishing** is npm's way of letting one named workflow of one repository publish a
   package with no stored token.
-- **release-please** is the release tool the owner's other repositories use. A workflow runs it
-  on every push to `main`. It keeps one open pull request, **the release pull request**, that
+- **release-please** is the release tool the owner's other repositories use. It runs as one job
+  of this repository's workflow (CI-1), on every push to `main`. It keeps one open pull request, **the release pull request**, that
   holds the next version and its notes, worked out from the Conventional Commits on `main`. When
   that pull request is merged, release-please's run on the merge creates the version's tag and
   its GitHub release.
@@ -93,8 +102,8 @@ Terms:
 **Non-goals:**
 
 - Any analysis: no parsing, no findings, no report, no server. Each comes in a later item.
-- The interface version's answer (design IF-1), a number later items use to tell whether yak and
-  the analyzer agree. It comes with the item that first needs it.
+- The interface version, the second answer design IF-1 lists: a number later items use to tell
+  whether yak and the analyzer agree. It comes with the item that first needs it.
 - What happens to the binary when the launcher is stopped. The skeleton's binary ends at once;
   the item that adds the first long-running command states and tests it.
 - Fixing how the rest of stage 1 is split into items.
@@ -132,8 +141,9 @@ Terms:
     platform names. All six were unused on npmjs.com on 2026-11-11. Anyone could then register a
     later platform's name first.
 
-  The binary, the repository and the command keep the name `yak-analyzer` whatever the packages
-  are called.
+  The owner's choice is written into this requirement before the spec is approved, so the plan
+  reads the names here. The binary, the repository and the command keep the name `yak-analyzer`
+  whatever the packages are called.
 
 ### The binary
 
@@ -164,15 +174,22 @@ Terms:
 
 ### Continuous integration
 
-- **CI-1** One workflow runs on every pull request and every push to `main`. Its per-target job
-  builds the binary for one target and runs the gates, the launcher's tests and the packed
-  install (PKG-9) on a runner of that target's own operating system and processor. It runs for
-  all five targets (PKG-2). The runners are GitHub's own, which are free for a public
-  repository. Each target's job keeps its packed files with the run, for PUB-2.
+- **CI-1** One workflow runs on every pull request and every push to `main`. It has three jobs.
+  The per-target job runs on both, once for each of the five targets (PKG-2), on a runner of
+  that target's own operating system and processor. It builds the binary once, as a release
+  build, runs the gates against that build, runs the launcher's tests and the packed install
+  (PKG-9), and keeps its packed files with the run, for PUB-2. The file the tests start is the
+  file that is packed. The release-please job and the publishing job run only on a push to
+  `main` (PUB-2). The runners are GitHub's own, which are free for a public repository.
+- **CI-1a** CI runs the launcher's tests and the packed install on Node 22.18, the oldest Node
+  yak supports (PKG-5), written in the workflow. It is a floor kept on purpose, so no pin pull
+  request moves it (PUB-7).
 - **CI-2** On a pull request only the per-target job runs, with a read-only token and no secret.
   No workflow uses `pull_request_target`, or any other trigger that runs a fork's code with the
   repository's rights.
 - **CI-3** Each job asks for the least permission it needs, stated in the workflow.
+- **CI-4** Every action a workflow uses is pinned to a full commit hash, with its version in a
+  comment beside it. A tag can be moved to other code after the fact; a hash cannot.
 
 ### The npm packages
 
@@ -237,12 +254,14 @@ Terms:
   its own operating system and processor (design REL-4). The design spec allows a target with no
   free runner to be released untested; nothing is built for that here, since all five have a
   runner, and a release that cannot test a target fails.
-- **PUB-3** When a target's job fails on the release run, nothing is published. If the failure
-  is the runner's and not the code's, anyone who may write to the repository runs the failed job
-  again from GitHub, and the publishing job follows. If it is a fault in the code, the tag and
-  the GitHub release stay, the workflow adds a line to that GitHub release saying the version
-  was not published to npm, and the fix goes out as the next version, by the next release pull
-  request. The same job passed on the release pull request before the merge, so this is rare.
+- **PUB-3** When a target's job fails on the release run, nothing is published, and a person
+  decides what it was: the owner, or a session with the owner's yes. They run the failed job
+  again from GitHub. If it passes, the failure was the runner's, and the publishing job follows
+  with nothing more to do. If it fails again, the fault is in the code: the tag and the GitHub
+  release stay, that person edits the GitHub release to say the version was not published to
+  npm, and the fix goes out as the next version, by the next release pull request. No workflow
+  writes that line. The same job passed on the release pull request before the merge, so this
+  is rare.
 - **PUB-4** The packages are published to npmjs.com, public, with provenance (design REL-2). The
   platform packages go first and the main package last, so a main package never exists without
   its platform packages.
@@ -258,7 +277,7 @@ Terms:
   the owner. The builder checks npm's rules when the plan is written; if npm then lets a new
   package start with trusted publishing, the token is never made.
 - **PUB-7** Pull requests that move each pin are opened without anyone asking: the Cargo
-  dependencies, the workflow actions and the Rust version of GATE-1. Dependabot, GitHub's own
+  dependencies, the workflow actions' hashes (CI-4) and the Rust version of GATE-1. Dependabot, GitHub's own
   dependency-update service, does this from a configuration file, and its pull requests start CI
   with a read-only token, which fits CI-2. The builder checks that it can move the Rust version,
   and says who does where it cannot. CI decides whether one can merge; none merges by itself.
@@ -273,16 +292,36 @@ Terms:
   runs its probe, on a machine whose own npm settings map the `@dabay6` scope to GitHub Packages
   (design REL-2). NAME-1 settled the name and PKG-9 the packaging; this confirms what neither
   can: the registry, and yak's own install.
-- **CHK-2** The builder makes a pack for the check that declares the released version as a tool
-  server, and an empty project that no host is set up from, and adds the pack to that project
-  with `yak pack add --project`. A pack must give a tool server a command that starts its
-  server, and the skeleton has none, so that line is a stand-in and is never run. The owner runs
-  `yak tools install` in that project at a terminal, since yak asks a person to confirm every
-  install. The pack and the project are removed after. yakshaver's own pack is not changed.
+- **CHK-2** The builder makes two folders for the check, outside every repository, and removes
+  both after. One is a pack: a `pack.json` that names it, and one file, `tools/yak-analyzer.md`,
+  that declares the released version as a tool server:
+
+  ```markdown
+  ---
+  summary: The released yak-analyzer, for the install check
+  install:
+    kind: npm
+    package: <the main package's name>
+    version: <the released version>
+  probe: [yak-analyzer, --version]
+  serve: [yak-analyzer]
+  ---
+  Made for one install check and removed after it.
+  ```
+
+  The `probe` line uses whatever the version option is named. A pack must give a tool server a
+  `serve` command, the one that starts its server; the skeleton has no server, so that line is a
+  stand-in. The other folder is a new, empty project. The pack is added to it with `yak pack add
+  --project path:<the pack's folder>`, run inside it. No agent program is pointed at that
+  project, so nothing ever starts the stand-in. The builder checks the pack's exact shape
+  against the yak version in use when the plan is written. The owner runs `yak tools install`
+  in that project at a terminal, since yak asks a person to confirm every install. yakshaver's
+  own pack is not changed.
 - **CHK-3** The check passes when the install succeeds, which means the probe printed the
   released version; the platform package for that machine is in the install folder; and every
-  installed package came from npmjs.com, read from the address npm records for each package in
-  the install folder. yak's own npm command leaves no optional dependency out and turns no
+  installed package came from npmjs.com. That is read from `node_modules/.package-lock.json` in
+  the install folder, `tools/yak-analyzer/<version>/` under yak's home, where npm records the
+  address each package was fetched from. yak's own npm command leaves no optional dependency out and turns no
   install script off; only a machine's npm settings could, and the launcher says so when they do
   (PKG-6).
 - **CHK-4** The result, with the registry each package came from, is written on the work item's
@@ -343,7 +382,7 @@ Terms:
   sooner. The five-target build and the publishing would then be tested for the first time with
   real work depending on them.
 - **Answering the interface version now.** The design spec lists it among stage 1's answers.
-  Nothing reads it until a later item, and it would publish a shape with placeholder values.
+  Nothing reads it until a later item, and the number would mean nothing yet.
 
 ## Risks
 
