@@ -6,8 +6,9 @@ third-party analyzer yakshaver wraps today, so that yakshaver depends on an inte
 
 ## Status
 
-Nothing is built yet. This repository was created on 2026-11-11 to hold the work. The design is
-written and approved; the first stage has not started, and there is no release.
+The walking skeleton is in: a binary that answers its version, built and tested on five targets,
+with its npm packages put together and installed in CI. It analyzes nothing yet, and there is no
+release.
 
 ## What it will do
 
