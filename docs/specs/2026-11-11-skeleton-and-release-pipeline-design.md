@@ -318,7 +318,10 @@ Terms:
   After the install check passes, the owner sets up trusted publishing on each of the six packages
   and deletes the secret. The plan lists these steps for the owner. The builder checks npm's rules
   when the plan is written; if npm then lets a new package start with trusted publishing, the token
-  is never made.
+  is never made. This item ends with trusted publishing set up and read back, not used: PUB-8 asks
+  for no second release to prove it. Its first use is the next release the owner chooses. A failure
+  then is a setting to put right and the publishing job to run again (PUB-2a), and nothing is lost
+  by it.
 - **PUB-7** Pull requests that move each pin are opened without anyone asking: the Cargo
   dependencies, the workflow actions' hashes (CI-4) and the Rust version of GATE-1. Dependabot,
   GitHub's own dependency-update service, does this from a configuration file, and its pull requests
@@ -339,8 +342,12 @@ Terms:
   again checks again.
 - **PUB-10** The publishing steps are tried on every pull request and push, without publishing: each
   per-target job runs npm's publish in its dry-run form on its packed files, and the main package's
-  job does the same. So the first real release is not the first time those steps run. What a dry run
-  cannot show, the rights and the registry's answer, is what PUB-6 and PUB-9 are for.
+  job does the same. They use the Node and npm the publishing job uses (CI-1a), since that is the
+  npm that will publish. Between releases the version in the tree is one already on npmjs.com, so
+  the dry run must pass there too: if npm's dry run refuses a version that exists, the step counts
+  that one refusal as a pass and fails on anything else. So the first real release is not the first
+  time those steps run. What a dry run cannot show, the rights and the registry's answer, is what
+  PUB-6 and PUB-9 are for.
 
 ### Who can change `main`, and who can publish
 
