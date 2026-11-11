@@ -16,9 +16,10 @@ can. AN-1, a separate program in a public repository of its own under the MIT li
 this repository was created.
 
 How to read the marks: "(design REL-1)" after a sentence names the design spec's requirement that
-sentence follows from. Everything else is the session's call: the session that wrote this spec
-decided it, and the owner has not ruled on it. The owner asked for this spec to be written from what
-the design spec already decides.
+sentence follows from, and "(owner)" marks what the owner decided while this spec was written.
+Everything else is the session's call: the session that wrote this spec decided it, and the owner
+has not ruled on it. The owner asked for this spec to be written from what the design spec already
+decides.
 
 ## Intent
 
@@ -31,19 +32,21 @@ Two things about that path do not depend on any analysis being written:
 - Whether five native binaries can be built, tested on their own operating system and architecture,
   and published together from GitHub's runners. This is unknown.
 - Whether the package's name works. The design spec places the packages on npmjs.com under the
-  `@dabay6` scope, and has the name checked before it is fixed (design REL-2). The answer was worked
-  out on 2026-11-11, before this spec, from two things that were read: yak's own code for installing
-  a tool, and npm's answer on the owner's machine. No install was tried, and none could be: an
-  install needs a published package, and publishing is what fixes a name. So the design spec's
-  order, check then fix, cannot be kept to the letter; the name is fixed from this reasoning, and
-  the install check (CHK) confirms it after the first release. yak installs a tool by running `npm
-  install` from its own tools folder, outside any project, so the npm settings that apply are the
-  user's and the machine's own: their configuration files, and any npm setting in the environment
-  yak was started with. And on the owner's machine, npm asked from that folder which registry serves
-  `@dabay6` answers GitHub Packages. npm sends every request for a scoped name to the registry its
-  scope is mapped to and tries no other. So yak on that machine cannot install a `@dabay6` package
-  from npmjs.com, and the design spec's answer applies: the packages take a name the mapping does
-  not catch (NAME-1).
+  `@dabay6` scope, and has yak's install of the package checked before the name is fixed (design
+  REL-2). No install could be tried before this spec: an install needs a published package, and
+  publishing is what fixes a name. So the question was answered on 2026-11-11 from two things that
+  were read: yak's own code for installing a tool, and npm's settings on the owner's machine. yak
+  installs a tool by running `npm install` from its own tools folder, outside any project, so the
+  npm settings that apply are the user's and the machine's own: their configuration files, and any
+  npm setting in the environment yak was started with. On the owner's machine, one line of the
+  user's npm configuration file maps `@dabay6` to GitHub Packages, where the owner's private
+  packages are. npm sends every request for a scoped name to the registry its scope is mapped to and
+  tries no other, so yak there could not install a `@dabay6` package from npmjs.com. The design
+  spec's answer to that was a name the mapping does not catch. The owner decided otherwise on
+  2026-11-11: the packages keep `@dabay6`, and the mapping leaves the user's settings (NAME-1,
+  NAME-2). Each project that needs `@dabay6` from GitHub Packages states the mapping in its own
+  `.npmrc`, which yak's install never reads. The install check (CHK) confirms all of this after the
+  first release.
 
 So the first item is a walking skeleton: a binary that only answers its version, taken the whole way
 through the gates, the build, the packaging, a real release and one install through yak. Every later
@@ -95,7 +98,8 @@ Terms:
 
 - A release of this repository puts a working `yak-analyzer` on npmjs.com for five targets, and yak
   installs it and reads its version.
-- The packages have a name yak can install on a machine that maps `@dabay6` elsewhere.
+- yak installs the packages from npmjs.com on the owner's machines, while the owner's projects go on
+  taking their private `@dabay6` packages from GitHub Packages.
 - Every binary released has run its tests on its own operating system and processor.
 - The owner's part in a release is one merge and one approval of the publishing (PROT-2), after a
   setup done once for the first release (PUB-6).
@@ -125,33 +129,29 @@ Terms:
 - A long-lived npm token in the repository's secrets.
 - A workflow that gives a pull request from a fork a token that can write or publish.
 - Committed text that names a machine, or any private repository other than yakshaver itself, which
-  this program is built for and has to name.
+  this program is built for and may name (owner: yakshaver is to be public).
 
 ## Requirements
 
 ### The name
 
-- **NAME-1** The npm packages are not under the `@dabay6` scope, or under any scope the owner's
-  machines map to another registry. The owner chooses the name before this spec is approved, between
-  two ways.
-  - A scope of the analyzer's own on npmjs.com, which the owner creates as a free npm organization
-    before any package name is committed here. The session proposes this, with the names
-    `@yak-analyzer/cli` for the main package and `@yak-analyzer/` followed by the platform for each
-    platform package: `win32-x64`, `darwin-arm64`, `darwin-x64`, `linux-x64` and `linux-arm64`, the
-    names Node gives the operating system and processor. Whether the organization's name is free is
-    known only when the owner creates it; if it is taken, the owner picks another. Once the
-    organization exists, nobody else can publish under it: the five names are safe from the first
-    commit that shows them, the names of the platforms left for later (design REL-3) are held too,
-    and the first release's token (PUB-6) can be limited to the scope.
-  - No scope: `yak-analyzer` for the main package and `yak-analyzer-` followed by the same platform
-    names. All six were unused on npmjs.com on 2026-11-11. A name with no scope is held only by
-    publishing it, and these can be guessed from the repository's own name. So until the first
-    release, and for every later platform, anyone could register one first; and the first release's
-    token may have to be one that can publish any of the owner's packages.
-
-  The owner's choice, and for a scope the organization the owner created, are written into this
-  requirement before the spec is approved, so the plan reads the six names here. The binary, the
-  repository and the command keep the name `yak-analyzer` whatever the packages are called.
+- **NAME-1** The npm packages are under the `@dabay6` scope on npmjs.com, as the design spec places
+  them (owner; design REL-2). The main package is `@dabay6/yak-analyzer`. Each platform package is
+  `@dabay6/yak-analyzer-` followed by the platform: `win32-x64`, `darwin-arm64`, `darwin-x64`,
+  `linux-x64` and `linux-arm64`, the names Node gives the operating system and processor. This rests
+  on the owner holding the `@dabay6` scope on npmjs.com. The plan's first step has the owner confirm
+  that by signing in to npm, before anything else is done; if the scope is not the owner's, the work
+  stops and the name comes back to the owner. A scope the owner holds lets nobody else publish under
+  it, so the six names, and those of the platforms left for later (design REL-3), are safe from the
+  start. The binary, the repository and the command are named `yak-analyzer`.
+- **NAME-2** The line that maps `@dabay6` to GitHub Packages is removed from the user's npm
+  configuration on each of the owner's machines where yak installs the analyzer (owner). It is
+  removed with npm's own command for deleting a setting, never by editing the file by hand. This
+  replaces the design spec's fallback of a name the mapping does not catch. Before the line is
+  removed on a machine, the builder checks that each project there that uses a private `@dabay6`
+  package states the mapping in its own `.npmrc`, and adds it where it is missing, with the owner's
+  yes for each project. A project's `.npmrc` does not reach yak's install, which runs outside every
+  project. The owner does the removal, or a session with the owner's yes on that machine.
 
 ### The binary
 
@@ -312,8 +312,8 @@ Terms:
 - **PUB-6** Releases publish by trusted publishing, so the repository holds no npm token. The first
   release cannot, because npm sets trusted publishing up on a package that already exists. For that
   one release the owner creates an npm access token that expires within days and can publish under
-  the chosen scope and nothing else, where npm can limit it so; where it cannot, the plan says what
-  else the token could publish. The owner stores it as a secret of the publishing environment
+  the `@dabay6` scope and nothing else, where npm can limit it so; where it cannot, the plan says
+  what else the token could publish. The owner stores it as a secret of the publishing environment
   (PROT-2), never of the repository at large; the release publishes with it, still with provenance.
   After the install check passes, the owner sets up trusted publishing on each of the six packages
   and deletes the secret. The plan lists these steps for the owner. The builder checks npm's rules
@@ -359,21 +359,21 @@ Terms:
 - **PROT-1a** A rule on the release tags lets only the release-please job create one, and lets
   nobody move or delete one, since the publishing job trusts the tag (PUB-2a).
 - **PROT-2** The publishing job runs in a GitHub environment that only `main` can use and that asks
-  the owner to approve each run before it starts. The first release's token is that environment's
-  secret, and npm's trusted publishing is set up to trust that workflow in that environment. So a
-  pull request, from a fork or from a branch of this repository, cannot reach either, whatever its
-  copy of the workflow says; and even a merge the owner did not make publishes nothing until the
-  owner approves. Any credential PUB-1a needs is kept the same way, in an environment only `main`
-  can use.
+  the owner to approve each run before it starts (owner). The first release's token is that
+  environment's secret, and npm's trusted publishing is set up to trust that workflow in that
+  environment. So a pull request, from a fork or from a branch of this repository, cannot reach
+  either, whatever its copy of the workflow says; and even a merge the owner did not make publishes
+  nothing until the owner approves. Any credential PUB-1a needs is kept the same way, in an
+  environment only `main` can use.
 - **PROT-3** PROT-1, PROT-1a, PROT-2 and PUB-6 are settings on GitHub and npmjs.com, not files. The
   plan lists each as a step, says who does it, and has it read back once set.
 
 ### The install check
 
 - **CHK-1** After the first release, yak installs the released main package as a tool server and
-  runs its probe, on a machine whose own npm settings map the `@dabay6` scope to GitHub Packages
-  (design REL-2). NAME-1 settled the name and PKG-9 the packaging; this confirms what neither can:
-  the registry, and yak's own install.
+  runs its probe, on the owner's machine, once NAME-2's line is gone from it (design REL-2). NAME-1
+  settled the name and PKG-9 the packaging; this confirms what neither can: the registry, and yak's
+  own install.
 - **CHK-2** The builder makes two folders for the check, outside every repository, and removes both
   after, with the install the check leaves in yak's tools folder. yak skips an install it has
   already made, so a check that is repeated starts with that install folder removed. One is a pack:
@@ -395,11 +395,13 @@ Terms:
 
   The `probe` line uses whatever the version option is named. A pack must give a tool server a
   `serve` command, the one that starts its server; the skeleton has no server, so that line is a
-  stand-in. The other folder is a new, empty project. The pack is added to it with `yak pack add
-  --project path:<the pack's folder>`, run inside it. No agent program is pointed at that project,
-  so nothing ever starts the stand-in. The builder checks the pack's exact shape against the yak
-  version in use when the plan is written. The owner runs `yak tools install` in that project at a
-  terminal, since yak asks a person to confirm every install. yakshaver's own pack is not changed.
+  stand-in. The other folder is a new project that holds one file, an `.npmrc` mapping `@dabay6` to
+  GitHub Packages as the owner's projects do, to show that a project's mapping does not reach yak's
+  install. The pack is added to it with `yak pack add --project path:<the pack's folder>`, run
+  inside it. No agent program is pointed at that project, so nothing ever starts the stand-in. The
+  builder checks the pack's exact shape against the yak version in use when the plan is written. The
+  owner runs `yak tools install` in that project at a terminal, since yak asks a person to confirm
+  every install. yakshaver's own pack is not changed.
 - **CHK-3** The check passes when the install succeeds, which means the probe printed the released
   version; the platform package for that machine is in the install folder; and every installed
   package came from npmjs.com. That is read from `node_modules/.package-lock.json` in the install
@@ -425,22 +427,21 @@ Terms:
   `README.md` gains how to install and run the released binary, and its status section says what
   exists: a binary that answers its version and analyzes nothing yet. `CONTRIBUTING.md`'s rule on
   private names is reworded to match the anti-goal above: it reads today as if it barred naming
-  yakshaver, which that file itself names.
+  yakshaver, which that file itself names. The README's install section says that a user-level npm
+  setting mapping `@dabay6` to another registry must be removed first, and how.
 - **DOC-2** A `CLAUDE.md` points an agent session at `CONTRIBUTING.md` for the rules, repeating none
   of them, and holds only what a session needs beyond them: where the design spec is, and that a
   work item here names the design spec's requirements it covers.
 
 ## Alternatives considered
 
-- **Keeping the `@dabay6` scope, and changing each machine's npm settings.** The owner's private
-  packages are on GitHub Packages under that scope and need the mapping until they are public, and
-  every machine that installs the analyzer would need the change. The design spec already says which
-  way to go (design REL-2).
+- **A name the mapping does not catch:** a scope of the analyzer's own, or no scope at all. This is
+  the design spec's own fallback, and no machine's settings would have to change. The owner chose to
+  keep one scope for every package: the mapping is one line, the projects that need it carry their
+  own, and it goes away altogether when the owner's private packages are public.
 - **Publishing the analyzer to GitHub Packages as well.** yak would find it where the mapping
   points. GitHub Packages asks for a token on every read, and the design spec wants an install that
   needs none.
-- **An unscoped name against a scope of the analyzer's own.** Both escape the mapping. NAME-1 sets
-  out the difference and leaves the choice to the owner.
 - **Reserving the six names with placeholder versions published by hand,** so that even the first
   release could use trusted publishing. Six versions that do nothing would be public for good, with
   no provenance. A token that lives for days does the same job and leaves nothing behind.
@@ -475,15 +476,13 @@ Terms:
 ## Risks
 
 - **A name once published cannot be taken back.** npm lets a package be deprecated, not removed.
-  Handled by settling the name before the plan (NAME-1), so the first publish is under the name that
-  stays.
+  Handled by the owner's choice of the name before the plan (NAME-1), and by the plan's first step,
+  which confirms the scope is the owner's before anything is published.
 - **A token that can publish exists for the first release.** Handled by PUB-6 and PROT-2: it expires
   within days, it is limited to the scope where npm allows, only the publishing environment on
   `main` can read it, and it is deleted once the install check passes.
-- **Someone registers one of the package names first.** Until the first release, a name with no
-  scope belongs to whoever publishes it, and these names can be guessed today. Handled for a scope
-  by creating the organization first (NAME-1), and in either case by PKG-9's install fetching
-  nothing and running no script.
+- **A platform package is not yet published when CI installs.** Handled by PKG-9's install fetching
+  nothing and running no script, and by the scope: nobody but the owner can publish under `@dabay6`.
 - **The published files are built from a commit other than the tagged one,** or a rerun skips
   publishing for good. Handled by PUB-2a.
 - **The binary needs newer system libraries than a user's machine has.** Handled by PKG-2a's floor
@@ -511,8 +510,11 @@ Terms:
 - **The binary and the package disagree on the version.** Handled by one change that writes the
   version everywhere (PKG-8), a test that they agree (GATE-3), and the packed install comparing the
   printed version with the packages' (PKG-9).
-- **Another machine maps a different scope, or the default registry.** Not handled: a machine that
-  points its default registry elsewhere cannot install most of npm either.
+- **A machine still maps `@dabay6` in the user's settings.** yak's install of the analyzer fails
+  there, with npm's not-found answer from the other registry. Handled for the owner's machines by
+  NAME-2 and the install check; the README says what to remove (DOC-1).
+- **A project that maps `@dabay6` to GitHub Packages cannot take the analyzer as a dependency of its
+  own.** Not handled, and not needed: yak installs it outside every project.
 
 ## Left to the builder
 
@@ -530,4 +532,4 @@ Terms:
 - npm's current rules for trusted publishing and a new package (PUB-6).
 - How GitHub's rules express PROT-1 and PROT-1a. Where they cannot do all of it, the plan says what
   stays a habit.
-- The pack and the empty project made for the install check.
+- The pack and the project made for the install check.
