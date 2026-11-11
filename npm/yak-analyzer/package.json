@@ -1,6 +1,6 @@
 {
   "name": "@dabay6/yak-analyzer",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A static analyzer for TypeScript and JavaScript, built for yakshaver",
   "keywords": [
     "static-analysis",
@@ -35,11 +35,11 @@
     "node": ">=22.18.0"
   },
   "optionalDependencies": {
-    "@dabay6/yak-analyzer-darwin-arm64": "0.0.0",
-    "@dabay6/yak-analyzer-darwin-x64": "0.0.0",
-    "@dabay6/yak-analyzer-linux-arm64": "0.0.0",
-    "@dabay6/yak-analyzer-linux-x64": "0.0.0",
-    "@dabay6/yak-analyzer-win32-x64": "0.0.0"
+    "@dabay6/yak-analyzer-darwin-arm64": "0.1.0",
+    "@dabay6/yak-analyzer-darwin-x64": "0.1.0",
+    "@dabay6/yak-analyzer-linux-arm64": "0.1.0",
+    "@dabay6/yak-analyzer-linux-x64": "0.1.0",
+    "@dabay6/yak-analyzer-win32-x64": "0.1.0"
   },
   "publishConfig": {
     "access": "public"
