@@ -1,0 +1,12 @@
+# Normalize line endings to LF on checkout for all text files.
+# Required so LF-strict tools don't trip on Windows CI runners.
+* text=auto eol=lf
+
+# Explicit overrides for known binary types.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary

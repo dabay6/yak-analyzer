@@ -1,0 +1,5 @@
+# Rust build output
+/target/
+
+# npm packaging
+node_modules/
