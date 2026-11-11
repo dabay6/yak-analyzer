@@ -1,6 +1,6 @@
 {
   "name": "@dabay6/yak-analyzer-linux-x64",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The yak-analyzer binary for Linux on x64, for glibc",
   "keywords": [
     "yak-analyzer",
