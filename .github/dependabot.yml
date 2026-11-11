@@ -1,0 +1,16 @@
+# Pull requests that move each pin, opened without anyone asking (spec PUB-7). CI decides whether one can
+# merge; none merges by itself. The npm that publishes is not here: it is moved by hand (spec CI-5).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: weekly

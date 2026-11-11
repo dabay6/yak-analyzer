@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "rust",
+      "package-name": "yak-analyzer",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "bump-minor-pre-major": true,
+      "extra-files": [
+        "npm/yak-analyzer/package.json",
+        {
+          "type": "json",
+          "path": "npm/yak-analyzer/package.json",
+          "jsonpath": "$.optionalDependencies.*"
+        },
+        "npm/platforms/win32-x64/package.json",
+        "npm/platforms/darwin-arm64/package.json",
+        "npm/platforms/darwin-x64/package.json",
+        "npm/platforms/linux-x64/package.json",
+        "npm/platforms/linux-arm64/package.json"
+      ]
+    }
+  }
+}
