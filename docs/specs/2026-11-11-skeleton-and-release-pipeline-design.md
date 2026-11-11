@@ -563,23 +563,43 @@ PUB-6 asked the builder to check npm's rules when the plan was written. They wer
 The owner decided on 2026-11-11 to leave trusted publishing for the next release, and not to
 publish a second version of a binary that does nothing only to prove it.
 
-- **PUB-11** This item sets up no trusted publishing (owner). Its one release publishes with the
-  token of PUB-6, and the owner deletes that token once the install check has passed. The item
-  then ends with no stored right to publish at all. This replaces the part of PUB-6 from "After
-  the install check passes" to its end, and PROT-2's words about trusted publishing being set up
-  in the publishing environment; the rest of both stands.
-- **PUB-12** Trusted publishing is set up by whoever cuts the next release, just before its
-  release pull request is merged, so that the publish follows inside npm's two days. It is set up
+- **PUB-11** This item sets up no trusted publishing (owner). Every release made inside this
+  item publishes with the token of PUB-6: the first, and any made to put a failed one right
+  (PUB-3, PUB-5). The owner deletes the token once the install check has passed, and the item
+  then ends with no stored right to publish at all. "The next release" below means the first one
+  after the token is deleted. This replaces the part of PUB-6 from "After the install check
+  passes" to its end, and PROT-2's words about trusted publishing being set up in the publishing
+  environment; the rest of both stands. Three other places read differently for it. The goal's
+  "setup done once for the first release" is the token alone. PUB-1's "once PUB-6's setup is
+  done" is the same. And the settings PROT-3 has listed and read back are the token's, with no
+  trusted publishing among them.
+- **PUB-12** The owner sets up trusted publishing for the next release while its publishing job
+  waits for the owner's approval (PROT-2): the release pull request is merged, the five target
+  jobs have passed, and nothing is published yet. So npm's two days start with the publish only
+  an approval away, and a setup is never made for a release whose tests then fail. It is set up
   on each of the six packages, naming this repository, the workflow's file and the publishing
-  environment (PROT-2), with direct publishing chosen. `CONTRIBUTING.md` gains these steps, under
-  a heading of their own for releasing.
+  environment, with direct publishing chosen, and each setting is read back before the owner
+  approves. npm's rules are read again first, since they have changed twice in a year.
+  `CONTRIBUTING.md` gains these steps, under a heading of their own for releasing.
 - **PUB-13** The publishing job needs no change for that release. It publishes with the token
   when the publishing environment holds one, and by trusted publishing when it holds none. The
   plan says how. The second way cannot run in this item, since it needs packages that exist and
   a release to publish; the plan says what of it was checked without one, and the next release
-  is its first real use. A failure then is a setting to put right and the publishing job to run
-  again (PUB-2a).
+  is its first real use. What that costs is said plainly: a wrong setting on npmjs.com is put
+  right and the publishing job run again (PUB-2a), with nothing lost; a fault in the job's own
+  steps on that path cannot be fixed on the tagged commit, and costs that version, as PUB-5 says
+  of any such fault. The owner accepted this over a second release now.
 - **CI-5** The publishing job runs on Node 22.18, as every other job does, with npm fetched at
   one exact version of 11.5.1 or later that runs on that Node. It is the npm the dry run uses
-  (PUB-10), written in one place and moved by hand. This replaces CI-1a's sentence that the
-  publishing job runs on a newer Node; CI-1a's floor of Node 22.18 stands.
+  (PUB-10). The version is written in one place, the scripts' shared module, where the dry run
+  and the publish both read it with the registry they name, and it is moved by hand. If npm's
+  rules come to need an npm that no longer runs on Node 22.18, the publishing job and the dry
+  run move to a newer Node together, in a change of its own. This replaces CI-1a's sentence that
+  the publishing job runs on a newer Node; CI-1a's floor of Node 22.18 for the tests and the
+  packed install stands.
+
+One risk is added by this amendment. **The trusted-publishing path is first used by a real
+release.** Handled in part: the dry run tries the same npm and the same steps on every pull
+request (PUB-10), PUB-12 has each setting read back before the approval, and a wrong setting
+costs only a rerun. Not handled: a fault in the job's own steps on that path costs one version
+(PUB-13).
