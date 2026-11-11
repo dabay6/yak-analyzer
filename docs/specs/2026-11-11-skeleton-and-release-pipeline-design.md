@@ -550,147 +550,149 @@ Terms:
 
 PUB-6 asked the builder to check npm's rules when the plan was written. They were read on
 2026-11-11, from npm's own documentation on docs.npmjs.com: the pages on trusted publishers, on
-staged publishing and on access tokens, and the page of the `npm trust` command. The first rule
-is as PUB-6 expected; the others change what this spec says:
+staged publishing and on access tokens, and the page of the `npm trust` command. The first rule is
+as PUB-6 expected; the others change what this spec says:
 
 - Trusted publishing can be set up only on a package that already exists.
 - A new setup must complete its first publish within two days, or it has to be deleted and made
-  again. PUB-6 ends this item with trusted publishing "set up and read back, not used", which
-  npm would void two days later.
+  again. PUB-6 ends this item with trusted publishing "set up and read back, not used", which npm
+  would void two days later.
 - A setup offers two kinds of publishing. **Direct publishing** is what this spec means by
   publishing: the workflow's `npm publish` puts the version on npmjs.com. **Staged publishing**
   holds the version back until a person approves it on npmjs.com. A setup made today allows only
-  staged publishing unless direct publishing is also chosen when it is made. The page does not
-  say what `npm publish` does against a setup that allows staged publishing alone.
-- Trusted publishing needs npm 11.5.1 or later, on Node 22.14 or later. The newest npm, 12,
-  names in its own manifest the Node versions it runs on, and 22.18 is not among them.
+  staged publishing unless direct publishing is also chosen when it is made. The page does not say
+  what `npm publish` does against a setup that allows staged publishing alone.
+- Trusted publishing needs npm 11.5.1 or later, on Node 22.14 or later. The newest npm, 12, names in
+  its own manifest the Node versions it runs on, and 22.18 is not among them.
 - When a job can ask for an identity token and also holds an access token, npm tries trusted
   publishing first and falls back to the access token.
-- An access token publishes from an unattended job only when it was made with npm's "Bypass
-  2FA" option, which is off unless chosen.
-- npm writes provenance by itself only for a trusted publish. A publish with an access token
-  carries provenance only when the publish asks for it, and it is written from the job's
-  identity token.
+- An access token publishes from an unattended job only when it was made with npm's "Bypass 2FA"
+  option, which is off unless chosen.
+- npm writes provenance by itself only for a trusted publish. A publish with an access token carries
+  provenance only when the publish asks for it, and it is written from the job's identity token.
 - A package can be set to refuse access tokens altogether, which npm recommends once trusted
   publishing is set up. Trusted publishing still works for such a package.
 
-Two terms used below. **The token** is the npm access token of PUB-6: made on npmjs.com, and
-stored as a secret of the publishing environment on GitHub. **Deleting the token** means both:
-the secret is removed from the environment, and the token is revoked on npmjs.com.
+Two terms used below. **The token** is the npm access token of PUB-6: made on npmjs.com, and stored
+as a secret of the publishing environment on GitHub. **Deleting the token** means both: the secret
+is removed from the environment, and the token is revoked on npmjs.com.
 
-The owner decided on 2026-11-11 to leave trusted publishing for the first release after this
-item, and not to publish a second version of a binary that does nothing only to prove it.
+The owner decided on 2026-11-11 to leave trusted publishing for the first release after this item,
+and not to publish a second version of a binary that does nothing only to prove it.
 
-- **PUB-11** This item sets up no trusted publishing (owner). Every release made inside this
-  item publishes with the token: the first, and any made to put a failed one right, whatever
-  failed (PUB-3, PUB-5, PUB-9, CHK-4). The token is made with write access to the `@dabay6`
-  scope and with "Bypass 2FA" chosen, since a job cannot answer a two-factor prompt. Once the
-  install check has passed, the owner deletes the token and sets each of the six packages to
-  refuse access tokens. The item then ends with nothing that can publish: the builder reads
-  back that the publishing environment holds no npm token, and the owner that npmjs.com lists
-  no token that can write to `@dabay6` and that each package refuses tokens. This replaces the
-  part of PUB-6 from "After the install check passes" to its end, and PROT-2's words about
-  trusted publishing being set up in the publishing environment; the rest of both stands. Other
-  places read differently for this amendment:
-  - The goal's "setup done once for the first release" is the token alone, and PUB-1's "once
-    PUB-6's setup is done" is the same.
-  - The goal that a later item "adds analysis and nothing else" still holds for the code; the
-    first release after this item also has the owner's steps of PUB-12.
-  - PROT-3's list keeps PROT-1, PROT-1a and PROT-2. Of PUB-6 it now holds the token's settings
-    only, with no trusted publishing among them.
+- **PUB-11** This item sets up no trusted publishing (owner). Every release made inside this item
+  publishes with the token: the first, and any made to put a failed one right, whatever failed
+  (PUB-3, PUB-5, PUB-9, CHK-4). The token is made with write access to the `@dabay6` scope and with
+  "Bypass 2FA" chosen, since a job cannot answer a two-factor prompt. Once the install check has
+  passed, the owner deletes the token and sets each of the six packages to refuse access tokens. The
+  item then ends with nothing that can publish: the builder reads back that the publishing
+  environment holds no npm token, and the owner that npmjs.com lists no token that can write to
+  `@dabay6` and that each package refuses tokens. This replaces the part of PUB-6 from "After the
+  install check passes" to its end, and PROT-2's words about trusted publishing being set up in the
+  publishing environment; the rest of both stands. Other places read differently for this amendment:
+  - The goal's "setup done once for the first release" is the token alone, and PUB-1's "once PUB-6's
+    setup is done" is the same.
+  - The goal that a later item "adds analysis and nothing else" still holds for the code; the first
+    release after this item also has the owner's steps of PUB-12.
+  - PROT-3's list keeps PROT-1, PROT-1a and PROT-2. Of PUB-6 it now holds the token's settings only,
+    with no trusted publishing among them.
   - PUB-4's "with provenance" is asked for and read back as PUB-15 says.
   - PUB-5 is read together with PUB-14.
   - PUB-10's "(CI-1a)" is now CI-5, and PUB-17 adds to it.
+  - CI-2's "only the per-target job runs" on a pull request reads: only the jobs that publish
+    nothing, which are the job that packs the main package, the five target jobs and PUB-17's. Those
+    seven are the checks PROT-1 requires on `main`.
   - DOC-1's list of what `CONTRIBUTING.md` gains has one more entry, the section on releasing
     (PUB-12, PUB-14).
   - The risk "A token that can publish exists for the first release" holds for a rescue too
     (PUB-14), with the same handling.
   - The builder's open question on npm's rules for a new package is answered above. The open
-    question of how the work after the merge is carried (ORDER-1) is settled too: by a second
-    plan, which builds the release.
+    question of how the work after the merge is carried (ORDER-1) is settled too: by a second plan,
+    which builds the release.
 - **PUB-12** For each release after this item, the owner sets up trusted publishing while that
   release's publishing job waits for the owner's approval (PROT-2): the release pull request is
-  merged, the five target jobs have passed, and nothing is published yet. So npm's two days
-  start with the publish only an approval away, and a setup is never made for a release whose
-  tests then fail. The setup is made on each package that has not yet been published by trusted
-  publishing; a setup npm has voided is deleted first. It names this repository, the workflow's
-  file and the publishing environment, and it chooses direct publishing, since staged publishing
-  would add a second approval to every release, where PROT-2 already asks for one. Each setting
-  is read back on all six packages before the owner approves: the environment's name, which is
-  what PROT-2's protection rests on, and the choice of direct publishing, since a package left
-  at staged publishing alone is npm's default. A package's setup stands once that package has
-  been published by trusted publishing, and these steps are not done for it again; which
-  packages those are is read from each release's notes (PUB-13). The steps for releasing in
-  `CONTRIBUTING.md` begin with reading npm's page on trusted publishers again. If a rule has
-  changed so that these steps no longer work, the release waits, and the work item that makes
-  that release amends this spec. A package added after this item, a later platform's for one,
-  cannot start this way, since a setup needs a package that exists: the work that adds it
-  publishes it first with a token, as PUB-11 does these six.
+  merged, the five target jobs have passed, and nothing is published yet. So npm's two days start
+  with the publish only an approval away, and a setup is never made for a release whose tests then
+  fail. The setup is made on each package that has not yet been published by trusted publishing; a
+  setup npm has voided is deleted first. It names this repository, the workflow's file and the
+  publishing environment, and it chooses direct publishing, since staged publishing would add a
+  second approval to every release, where PROT-2 already asks for one. Each setting is read back on
+  all six packages before the owner approves: the environment's name, which is what PROT-2's
+  protection rests on, and the choice of direct publishing, since a package left at staged
+  publishing alone is npm's default. A package's setup stands once that package has been published
+  by trusted publishing, and these steps are not done for it again; which packages those are is read
+  from each release's notes (PUB-13). The steps for releasing in `CONTRIBUTING.md` begin with
+  reading npm's page on trusted publishers again. If a rule has changed so that these steps no
+  longer work, the release waits, and the work item that makes that release amends this spec. A
+  package added after this item, a later platform's for one, cannot start this way, since a setup
+  needs a package that exists: the work that adds it publishes it first with a token, as PUB-11 does
+  these six.
 - **PUB-13** The publishing job is the same for both ways, and makes no choice between them. It
-  always has the right to ask GitHub for an identity token, and it hands npm the token's secret
-  when the publishing environment has one. npm then tries trusted publishing first and falls
-  back to the token. In this item no package has a setup, so npm falls back; the first release
-  is what shows that it does. For a later release the setup exists and no token is stored, so
-  npm publishes by trusted publishing. The job adds one line to the release's notes on GitHub:
-  that no token was stored, so the version was published by trusted publishing, or that one
-  was. An expired token fails the publish with npm's own message, and the owner replaces it.
-  The trusted-publishing way cannot run in this item, since it needs packages that exist and a
-  release to publish. So the builder checks it by reading the workflow against npm's page: that
-  the job has that right, and that the workflow's file and the environment are named as PUB-12
-  will give them to npm. The first release after this item is its first real use. The owner
-  accepted this over a second release now.
+  always has the right to ask GitHub for an identity token, and it hands npm the token's secret when
+  the publishing environment has one. npm then tries trusted publishing first and falls back to the
+  token. In this item no package has a setup, so npm falls back; the first release is what shows
+  that it does. For a later release the setup exists and no token is stored, so npm publishes by
+  trusted publishing. Each run of the job that publishes anything adds a line to the release's notes
+  on GitHub: the packages that run published, and whether a token was stored for it. With no token
+  stored, those packages were published by trusted publishing. With one stored, the line cannot say
+  which way npm took, so those packages count as not yet published by trusted publishing (PUB-12).
+  An expired token fails the publish with npm's own message, and the owner replaces it. The
+  trusted-publishing way cannot run in this item, since it needs packages that exist and a release
+  to publish. So the builder checks it by reading the workflow against npm's page: that the job has
+  that right, and that the workflow's file and the environment are named as PUB-12 will give them to
+  npm. The first release after this item is its first real use. The owner accepted this over a
+  second release now.
 - **PUB-14** A later release that trusted publishing fails is saved in one of two ways. A wrong
   setting on npmjs.com is put right and the job run again (PUB-2a); a version npm has staged and
-  held is approved or thrown away there by the owner first. When that does not cure it, the
-  owner lets the packages still unpublished accept tokens again, makes a new token as PUB-6 and
-  PUB-11 describe one, stores it in the publishing environment, and runs the job again on the
-  same tagged commit. npm should fall back to that token, as it did for the first release. If
-  it does not, because trusted publishing fails in a way npm does not fall back from, the owner
-  deletes the setup of those packages, so that the token is the only way left, and runs the job
-  once more. Afterwards the owner deletes the token and sets the packages to refuse tokens
-  again. Neither step of this rescue can be tried before it is needed. A fault in steps both
-  ways share is PUB-5's case, and the fix goes out as the next version. A package saved this way
-  was not published by trusted publishing, so PUB-12's steps are done for it again at the
-  release after.
-- **PUB-15** Every publish asks npm for provenance outright, so a version published with the
-  token carries it as one published by trusted publishing does (PUB-4). The job that checks the
-  published packages (PUB-9) also reads from npmjs.com that each of the six carries provenance
-  at that version, and fails when one does not. A version cannot gain provenance after it is
-  published.
+  held is approved or thrown away there by the owner first. When that does not cure it, the owner
+  lets the packages still unpublished accept tokens again, makes a new token as PUB-6 and PUB-11
+  describe one, stores it in the publishing environment, and runs the job again on the same tagged
+  commit. npm should fall back to that token, as it did for the first release. If it does not,
+  because trusted publishing fails in a way npm does not fall back from, the owner deletes the setup
+  of those packages, so that the token is the only way left, and runs the job once more. Afterwards
+  the owner deletes the token and sets the packages to refuse tokens again. Neither step of this
+  rescue can be tried before it is needed. A fault in steps both ways share is PUB-5's case, and the
+  fix goes out as the next version. A package saved this way was not published by trusted
+  publishing, so PUB-12's steps are done for it again at the release after.
+- **PUB-15** Every publish asks npm for provenance outright, so a version published with the token
+  carries it as one published by trusted publishing does (PUB-4). The job that checks the published
+  packages (PUB-9) also reads from npmjs.com that each of the six carries provenance at that
+  version, and fails when one does not. A version cannot gain provenance after it is published.
 - **PUB-16** Before it publishes the main package, the script reads from npmjs.com that all five
-  platform packages are there at that version, for anyone to install, and stops when one is
-  not. So a platform package that npm staged and held, or that failed, never leaves a main
-  package published without it (PUB-4). Running the job again goes on from there (PUB-5).
-- **PUB-17** The publishing job's own steps run on every pull request and push, without
-  publishing: a job gathers the six packed files as the publishing job gathers them and runs
-  the script's dry run over all six, in the order they are published. This adds to PUB-10, whose
-  per-target dry runs stay. So the gathering, the order and the handling of a version already
-  published are run long before a release depends on them.
-- **CI-5** The publishing job runs on Node 22.18, as every other job does, with npm fetched by
-  `npx` at one exact version of 11.5.1 or later that runs on that Node. `npx` is the program,
-  shipped with npm, that fetches a package at a named version and runs it. It is the npm the dry
-  run uses (PUB-10): the publish and the dry run are one script run two ways, today's
-  `scripts/dry-run-publish.mjs` made to do both, so the npm's version, the registry and the
-  answer for a version already published are written once, in that script. It takes the
-  platform packages first and the main package last (PUB-4), in both ways. Its way without an
-  argument is the dry run. A contributor runs that script, and a machine may be signed in to
-  npm, so its publishing way is guarded: it must be asked for by name, and it runs only where
-  the publishing job has set a marker of its own for it; anywhere else it stops with one line
-  and publishes nothing. A test covers that refusal. The npm's version is moved by hand, by
-  whoever makes a release whose publishing needs a newer npm; no pin pull request moves it. If
-  npm's rules come to need an npm that no longer runs on Node 22.18, the publishing job and the
-  dry run move to a newer Node together, in a change of its own. This replaces CI-1a's sentence
-  that the publishing job runs on a newer Node and that its version is written in the workflow;
-  CI-1a's floor of Node 22.18 for the tests and the packed install stands.
+  platform packages are there at that version, for anyone to install, and stops when one is not. So
+  a platform package that npm staged and held, or that failed, never leaves a main package published
+  without it (PUB-4). Running the job again goes on from there (PUB-5).
+- **PUB-17** The publishing job's own steps run on every pull request and push, without publishing:
+  a job gathers the six packed files as the publishing job gathers them and runs the script's dry
+  run over all six, in the order they are published. This adds to PUB-10, whose per-target dry runs
+  stay. The job has a read-only token and no secret, as every job a pull request runs has (CI-2),
+  and it is one of the checks PROT-1 requires on `main`. So the gathering, the order and the
+  handling of a version already published are run long before a release depends on them.
+- **CI-5** The publishing job runs on Node 22.18, as every other job does, with npm fetched by `npx`
+  at one exact version of 11.5.1 or later that runs on that Node. `npx` is the program, shipped with
+  npm, that fetches a package at a named version and runs it. It is the npm the dry run uses
+  (PUB-10): the publish and the dry run are one script run two ways, today's
+  `scripts/dry-run-publish.mjs` made to do both, so the npm's version, the registry and the answer
+  for a version already published are written once, in that script. It takes the platform packages
+  first and the main package last (PUB-4), in both ways. Its way without an argument is the dry run.
+  A contributor runs that script, and a machine may be signed in to npm, so its publishing way is
+  guarded: it must be asked for by name, and it runs only where the publishing job has set a marker
+  of its own for it; anywhere else it stops with one line and publishes nothing. A test covers that
+  refusal. The npm's version is moved by hand, by whoever makes a release whose publishing needs a
+  newer npm; no pin pull request moves it. If npm's rules come to need an npm that no longer runs on
+  Node 22.18, the publishing job and the dry run move to a newer Node together, in a change of its
+  own. This replaces CI-1a's sentence that the publishing job runs on a newer Node and that its
+  version is written in the workflow; CI-1a's floor of Node 22.18 for the tests and the packed
+  install stands.
 
 Two risks are added by this amendment.
 
-- **The trusted-publishing way is first used by a real release.** The dry runs do not cover it:
-  they use no credential and write no provenance, so they show only what the two ways share
-  (PUB-10, PUB-17). Handled by PUB-12, which has each setting read back before the approval, and
-  by PUB-14's rescue, which is itself untried until it is needed.
-- **A token is what publishes in this item.** While it exists, and while the packages accept
-  tokens, any token on the owner's npm account that can write to `@dabay6` could publish.
-  Handled by the token living for days and being deleted after its use, and by the packages
-  refusing tokens from the end of this item on, opened again only for a rescue (PUB-11, PUB-14).
-  Not handled: another token of the owner's with that right, during those days.
+- **The trusted-publishing way is first used by a real release.** The dry runs do not cover it: they
+  use no credential and write no provenance, so they show only what the two ways share (PUB-10,
+  PUB-17). Handled by PUB-12, which has each setting read back before the approval, and by PUB-14's
+  rescue, which is itself untried until it is needed.
+- **A token is what publishes in this item.** While it exists, and while the packages accept tokens,
+  any token on the owner's npm account that can write to `@dabay6` could publish. Handled by the
+  token living for days and being deleted after its use, and by the packages refusing tokens from
+  the end of this item on, opened again only for a rescue (PUB-11, PUB-14). Not handled: another
+  token of the owner's with that right, during those days.
