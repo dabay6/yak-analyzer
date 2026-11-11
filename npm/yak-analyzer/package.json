@@ -1,0 +1,27 @@
+{
+  "name": "@dabay6/yak-analyzer",
+  "version": "0.0.0",
+  "description": "A static analyzer for TypeScript and JavaScript, built for yakshaver",
+  "keywords": ["static-analysis", "dead-code", "typescript", "javascript", "sarif", "yakshaver"],
+  "homepage": "https://github.com/dabay6/yak-analyzer#readme",
+  "bugs": { "url": "https://github.com/dabay6/yak-analyzer/issues" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dabay6/yak-analyzer.git",
+    "directory": "npm/yak-analyzer"
+  },
+  "license": "MIT",
+  "type": "module",
+  "imports": { "#yak-analyzer/*": "./lib/*" },
+  "bin": { "yak-analyzer": "bin/yak-analyzer.js" },
+  "files": ["bin", "lib"],
+  "engines": { "node": ">=22.18.0" },
+  "optionalDependencies": {
+    "@dabay6/yak-analyzer-darwin-arm64": "0.0.0",
+    "@dabay6/yak-analyzer-darwin-x64": "0.0.0",
+    "@dabay6/yak-analyzer-linux-arm64": "0.0.0",
+    "@dabay6/yak-analyzer-linux-x64": "0.0.0",
+    "@dabay6/yak-analyzer-win32-x64": "0.0.0"
+  },
+  "publishConfig": { "access": "public" }
+}
