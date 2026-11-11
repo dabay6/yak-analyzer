@@ -147,11 +147,21 @@ Terms:
 - **NAME-2** The line that maps `@dabay6` to GitHub Packages is removed from the user's npm
   configuration on each of the owner's machines where yak installs the analyzer (owner). It is
   removed with npm's own command for deleting a setting, never by editing the file by hand. This
-  replaces the design spec's fallback of a name the mapping does not catch. Before the line is
-  removed on a machine, the builder checks that each project there that uses a private `@dabay6`
-  package states the mapping in its own `.npmrc`, and adds it where it is missing, with the owner's
-  yes for each project. A project's `.npmrc` does not reach yak's install, which runs outside every
-  project. The owner does the removal, or a session with the owner's yes on that machine.
+  replaces the design spec's fallback of a name the mapping does not catch. A project's `.npmrc`
+  does not reach yak's install, which runs outside every project. The owner does the removal, or a
+  session with the owner's yes on that machine.
+- **NAME-2a** This item removes the line on one machine, the one the install check runs on (CHK-1).
+  The owner's other machines are done the same way by the owner when the analyzer is first installed
+  there; the README says how (DOC-1). Before the line goes, the builder finds what on that machine
+  leans on it and tells the owner, who decides whether to go ahead:
+  - Projects. The ones looked at are the checkouts yak has registered on the machine and any folder
+    the owner names. One that takes a private `@dabay6` package and has no mapping of its own needs
+    one. That is a change in that project's own repository, made its own way; this item does not
+    make it and does not wait for it to merge, only for the owner's yes to remove the line.
+  - Installs outside any project: packages installed globally with npm, and anything yak itself
+    installs from npm into its own folders. Once the line is gone, a private `@dabay6` package can
+    be installed outside a project only by naming the registry on the command. On 2026-11-11 nothing
+    on the owner's machine was installed that way.
 
 ### The binary
 
