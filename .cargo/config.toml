@@ -1,0 +1,3 @@
+# The Windows binary carries its C runtime inside it, so no separate runtime has to be installed (spec PKG-2a).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
