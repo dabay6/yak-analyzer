@@ -543,3 +543,43 @@ Terms:
 - How GitHub's rules express PROT-1 and PROT-1a. Where they cannot do all of it, the plan says what
   stays a habit.
 - The pack and the project made for the install check.
+
+## Amendments
+
+### 2026-11-11: Trusted publishing waits for the next release, and the publishing job's Node
+
+PUB-6 asked the builder to check npm's rules when the plan was written. They were read on
+2026-11-11, from npm's own documentation, and four of them change what this spec says:
+
+- Trusted publishing can be set up only on a package that already exists. PUB-6 expected this.
+- A new setup must complete its first publish within two days, or it has to be deleted and made
+  again. PUB-6 ends this item with trusted publishing "set up and read back, not used", which
+  npm would void two days later.
+- A setup made today allows only npm's staged publishing, which waits for a person's approval on
+  npmjs.com, unless direct publishing is also chosen when it is made.
+- Trusted publishing needs npm 11.5.1 or later, on Node 22.14 or later. The newest npm, 12, does
+  not run on Node 22.18.
+
+The owner decided on 2026-11-11 to leave trusted publishing for the next release, and not to
+publish a second version of a binary that does nothing only to prove it.
+
+- **PUB-11** This item sets up no trusted publishing (owner). Its one release publishes with the
+  token of PUB-6, and the owner deletes that token once the install check has passed. The item
+  then ends with no stored right to publish at all. This replaces the part of PUB-6 from "After
+  the install check passes" to its end, and PROT-2's words about trusted publishing being set up
+  in the publishing environment; the rest of both stands.
+- **PUB-12** Trusted publishing is set up by whoever cuts the next release, just before its
+  release pull request is merged, so that the publish follows inside npm's two days. It is set up
+  on each of the six packages, naming this repository, the workflow's file and the publishing
+  environment (PROT-2), with direct publishing chosen. `CONTRIBUTING.md` gains these steps, under
+  a heading of their own for releasing.
+- **PUB-13** The publishing job needs no change for that release. It publishes with the token
+  when the publishing environment holds one, and by trusted publishing when it holds none. The
+  plan says how. The second way cannot run in this item, since it needs packages that exist and
+  a release to publish; the plan says what of it was checked without one, and the next release
+  is its first real use. A failure then is a setting to put right and the publishing job to run
+  again (PUB-2a).
+- **CI-5** The publishing job runs on Node 22.18, as every other job does, with npm fetched at
+  one exact version of 11.5.1 or later that runs on that Node. It is the npm the dry run uses
+  (PUB-10), written in one place and moved by hand. This replaces CI-1a's sentence that the
+  publishing job runs on a newer Node; CI-1a's floor of Node 22.18 stands.
