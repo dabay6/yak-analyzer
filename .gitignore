@@ -3,3 +3,10 @@
 
 # npm packaging
 node_modules/
+/dist/
+
+# Copied into each package when it is packed
+/npm/yak-analyzer/LICENSE
+/npm/platforms/*/LICENSE
+/npm/platforms/*/yak-analyzer
+/npm/platforms/*/yak-analyzer.exe
