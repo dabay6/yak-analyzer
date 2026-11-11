@@ -1,0 +1,31 @@
+{
+  "name": "@dabay6/yak-analyzer-darwin-arm64",
+  "version": "0.0.0",
+  "description": "The yak-analyzer binary for macOS on arm64",
+  "keywords": [
+    "yak-analyzer",
+    "static-analysis"
+  ],
+  "homepage": "https://github.com/dabay6/yak-analyzer#readme",
+  "bugs": {
+    "url": "https://github.com/dabay6/yak-analyzer/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dabay6/yak-analyzer.git",
+    "directory": "npm/platforms/darwin-arm64"
+  },
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "yak-analyzer"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

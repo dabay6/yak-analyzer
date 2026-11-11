@@ -1,0 +1,30 @@
+{
+  "name": "required checks on main",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "Pack the main package", "integration_id": 15368 },
+          { "context": "win32-x64", "integration_id": 15368 },
+          { "context": "darwin-arm64", "integration_id": 15368 },
+          { "context": "darwin-x64", "integration_id": 15368 },
+          { "context": "linux-x64", "integration_id": 15368 },
+          { "context": "linux-arm64", "integration_id": 15368 },
+          { "context": "Rehearse the publishing", "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+[package]
+name = "yak-analyzer"
+version = "0.0.0"
+edition = "2024"
+description = "A static analyzer for TypeScript and JavaScript, built for yakshaver"
+license = "MIT"
+repository = "https://github.com/dabay6/yak-analyzer"
+homepage = "https://github.com/dabay6/yak-analyzer#readme"
+keywords = ["static-analysis", "dead-code", "typescript", "javascript", "sarif"]
+categories = ["command-line-utilities", "development-tools"]
+publish = false
+autotests = false
+
+[[bin]]
+name = "yak-analyzer"
+path = "src/main.rs"
+
+[[test]]
+name = "cli"
+path = "tests/cli.test.rs"
+
+[dependencies]
