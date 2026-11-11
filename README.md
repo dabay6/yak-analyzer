@@ -6,9 +6,29 @@ third-party analyzer yakshaver wraps today, so that yakshaver depends on an inte
 
 ## Status
 
-The walking skeleton is in: a binary that answers its version, built and tested on five targets,
-with its npm packages put together and installed in CI. It analyzes nothing yet, and there is no
-release.
+The first release is out. It is a walking skeleton: a binary that
+answers its version and analyzes nothing yet, built and tested on five targets and published to
+npm with provenance.
+
+## Install
+
+yakshaver will install the analyzer by itself, at one pinned version, once its content pack
+declares it. To try the released binary by hand:
+
+```bash
+npm install @dabay6/yak-analyzer
+npx yak-analyzer --version
+```
+
+It needs Node 22.18 or later, and there is a binary for Windows on x64, macOS on arm64 and x64,
+and Linux with glibc on x64 and arm64. No package runs a script when it is installed.
+
+If your own npm settings map the `@dabay6` scope to another registry, npm looks for the package
+there and does not find it. Remove that setting first:
+
+```bash
+npm config delete @dabay6:registry --location=user
+```
 
 ## What it will do
 
