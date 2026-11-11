@@ -33,8 +33,10 @@ Two things about that path do not depend on any analysis being written:
   `@dabay6` scope, and has the name checked before it is fixed (design REL-2). The answer was
   worked out on 2026-11-11, before this spec, from two things that were read and no install that
   was tried. yak installs a tool by running `npm install` from its own tools folder, outside any
-  project, so only the machine's own npm settings apply. And on the owner's machine, npm asked
-  from that folder which registry serves `@dabay6` answers GitHub Packages. npm sends every
+  project, so the npm settings that apply are the user's and the machine's own: their
+  configuration files, and any npm setting in the environment yak was started with. And on the
+  owner's machine, npm asked from that folder which registry serves `@dabay6` answers GitHub
+  Packages. npm sends every
   request for a scoped name to the registry its scope is mapped to and tries no other. So yak on
   that machine cannot install a `@dabay6` package from npmjs.com, and the design spec's answer
   applies: the packages take a name the mapping does not catch (NAME-1).
@@ -122,29 +124,35 @@ Terms:
 - A released binary whose printed version differs from its package's version.
 - A long-lived npm token in the repository's secrets.
 - A workflow that gives a pull request from a fork a token that can write or publish.
-- Committed text that names a machine, or a private repository the analyzer is checked against.
+- Committed text that names a machine, or any private repository other than yakshaver itself,
+  which this program is built for and has to name.
 
 ## Requirements
 
 ### The name
 
 - **NAME-1** The npm packages are not under the `@dabay6` scope, or under any scope the owner's
-  machines map to another registry. The owner chooses the name before the plan is written,
+  machines map to another registry. The owner chooses the name before this spec is approved,
   between two ways.
   - A scope of the analyzer's own on npmjs.com, which the owner creates as a free npm
-    organization. Every package sits under it, so the names of the platforms left for later
-    (design REL-3) are held too. The session proposes this, with the names `@yak-analyzer/cli`
-    for the main package and `@yak-analyzer/` followed by the platform for each platform
-    package: `win32-x64`, `darwin-arm64`, `darwin-x64`, `linux-x64` and `linux-arm64`, the names
-    Node gives the operating system and processor. Whether the organization's name is free is
-    known only when the owner creates it; if it is taken, the owner picks another.
+    organization before any package name is committed here. The session proposes this, with the
+    names `@yak-analyzer/cli` for the main package and `@yak-analyzer/` followed by the platform
+    for each platform package: `win32-x64`, `darwin-arm64`, `darwin-x64`, `linux-x64` and
+    `linux-arm64`, the names Node gives the operating system and processor. Whether the
+    organization's name is free is known only when the owner creates it; if it is taken, the
+    owner picks another. Once the organization exists, nobody else can publish under it: the
+    five names are safe from the first commit that shows them, the names of the platforms left
+    for later (design REL-3) are held too, and the first release's token (PUB-6) can be limited
+    to the scope.
   - No scope: `yak-analyzer` for the main package and `yak-analyzer-` followed by the same
-    platform names. All six were unused on npmjs.com on 2026-11-11. Anyone could then register a
-    later platform's name first.
+    platform names. All six were unused on npmjs.com on 2026-11-11. A name with no scope is
+    held only by publishing it. So between the first commit that shows the names and the first
+    release, and for every later platform, anyone could register one first; and the first
+    release's token may have to be one that can publish any of the owner's packages.
 
-  The owner's choice is written into this requirement before the spec is approved, so the plan
-  reads the names here. The binary, the repository and the command keep the name `yak-analyzer`
-  whatever the packages are called.
+  The owner's choice, and for a scope the organization the owner created, are written into this
+  requirement before the spec is approved, so the plan reads the six names here. The binary,
+  the repository and the command keep the name `yak-analyzer` whatever the packages are called.
 
 ### The binary
 
@@ -167,8 +175,9 @@ Terms:
   for lint, and `cargo test`. The launcher's tests are a fourth command, run with Node's own test
   runner.
 - **GATE-3** The Rust tests start the built binary and check BIN-1 and BIN-2 by their output and
-  exit code. One test checks that every place the version is written agrees (PKG-8), so a
-  mismatch fails a pull request, not a release.
+  exit code. One test checks that every place the version is written agrees (PKG-8), and
+  another that the main package's optional dependencies are exactly the five platform packages,
+  by name (PKG-3). So a mismatch or a missing platform fails a pull request, not a release.
 - **GATE-4** The skeleton keeps its dependencies to the fewest that do the job. A dependency added
   only to parse one option needs a reason in the plan. The launcher's tests need no package
   beyond Node itself.
@@ -184,7 +193,9 @@ Terms:
   `main` (PUB-2). The runners are GitHub's own, which are free for a public repository.
 - **CI-1a** CI runs the launcher's tests and the packed install on Node 22.18, the oldest Node
   yak supports (PKG-5), written in the workflow. It is a floor kept on purpose, so no pin pull
-  request moves it (PUB-7).
+  request moves it (PUB-7). The publishing job runs on a newer Node and npm, since trusted
+  publishing needs a newer npm than Node 22.18 carries; that version is written in the workflow
+  too, and is moved by hand when npm's publishing rules ask for it.
 - **CI-2** On a pull request only the per-target job runs, with a read-only token and no secret.
   No workflow uses `pull_request_target`, or any other trigger that runs a fork's code with the
   repository's rights.
@@ -200,6 +211,13 @@ Terms:
   Linux x64 and Linux arm64, the two Linux ones for glibc (design REL-3). Each states its
   operating system, its processor and, on Linux, its C library in its `package.json`, so npm
   installs only the one that matches.
+- **PKG-2a** A binary runs on any machine that can run the Node yak needs, and asks for nothing
+  more. On Linux that means a glibc no newer than the oldest one Node 22.18's own builds run on,
+  2.28 when this was written; the builder confirms the number. On macOS it means the oldest
+  version that Node supports. On Windows the binary carries its C runtime inside it, so no
+  separate runtime has to be installed. A build made on a runner takes that runner's own
+  libraries as its floor unless told otherwise, and the runner's own test cannot notice, so each
+  per-target job reads what the built binary requires and fails when it is above the floor.
 - **PKG-3** The main package lists every platform package as an optional dependency at the one
   exact version released with it (design REL-1).
 - **PKG-4** No package has an install script of any kind (design REL-1).
@@ -210,13 +228,14 @@ Terms:
   running its `bin` file with the Node that runs yak, not through the small wrapper script npm
   writes for a `bin` at install. So the launcher is one plain script that runs on the oldest
   Node yak supports, 22.18, and the main package says so in its `engines` field.
-- **PKG-6** When the launcher finds no binary, it writes one line on standard error and exits
-  non-zero. There are two cases. Where no package exists for the machine, the line names the
+- **PKG-6** When the launcher cannot run a binary, it writes one line on standard error and exits
+  non-zero. There are three cases. Where no package exists for the machine, the line names the
   targets that have one (design REL-3): that is an operating system or processor outside the
   five, and Linux whose C library is not glibc, which the launcher must tell apart from Linux
   with glibc. Where a package exists but is not installed, the line says the package is missing
-  and that optional dependencies must not be left out of the install.
-- **PKG-7** The launcher's tests cover both cases of PKG-6 and the ordinary run. They give the
+  and that optional dependencies must not be left out of the install. Where the binary is there
+  and cannot be started, the line names the file and gives the system's reason.
+- **PKG-7** The launcher's tests cover the three cases of PKG-6 and the ordinary run. They give the
   launcher a made-up platform and a stand-in program in place of the binary, so they run the same
   on every runner.
 - **PKG-8** The crate and every package have one version number. It is written in the crate's
@@ -225,12 +244,17 @@ Terms:
   in the commit that is tested, and nobody types it by hand.
 - **PKG-9** The packages are put together and run the way npm and yak will, before anything is
   published. On each target's runner, CI packs the main package and that target's platform
-  package into the files npm would publish, installs those files with npm into an empty folder,
-  and runs the main package's `bin` file with Node and the version option, as yak does. It
-  passes when the line that comes back is BIN-1's, with the version the packages carry. This is
-  what first exercises the operating system and processor fields, the optional dependency, the
-  launcher finding the binary inside a real install, and the binary still being runnable after
-  packing.
+  package into the files npm would publish, installs those two files with npm into an empty
+  folder, and runs the main package's `bin` file with Node and the version option, as yak does.
+  It passes when the line that comes back is BIN-1's, with the version the packages carry. The
+  install fetches nothing it was not handed: it runs with install scripts off and with no
+  registry to reach, so the four other platform packages are simply absent, as they are on a
+  user's machine. Their names may not be owned by anyone yet, and a stranger's package must
+  never be installed, let alone run, in the job whose files are published. This shows that npm
+  accepts each platform package on its own platform, that the launcher finds the binary inside
+  a real install, and that the binary still runs after packing. It does not show that the main
+  package's optional dependencies bring the platform package in; GATE-3 checks the list, and
+  PUB-9 the real thing.
 - **PKG-10** Every package carries a description, keywords, the repository, a home page, where to
   report a bug, and the license. So does `Cargo.toml`.
 
@@ -243,18 +267,27 @@ Terms:
   the merge. It needs one: the version is compiled into the binary (BIN-3) and the lock file
   changes with it, so this pull request changes what is built. A pull request a workflow opens
   with its own token starts no other workflow, so the plan says how this one's checks run. If
-  that takes a credential beyond the workflow's own token, the plan names it, the owner creates
-  it, and it can open and update pull requests and nothing more.
+  that takes a credential beyond the workflow's own token, the plan names it and the owner
+  creates it. Updating the release pull request means pushing to its branch, so the credential
+  can write this repository's contents and pull requests; it has no right over workflows or
+  settings, and reaches no other repository. PROT-1 is what keeps it from `main`.
 - **PUB-2** A release is one run of CI-1's workflow, on the push to `main` that the merged
   release pull request makes. Three things happen in that run. release-please creates the tag and
-  the GitHub release. The per-target job runs for all five targets, as on any push. Then a
-  publishing job runs, only when release-please created a release and only when all five target
-  jobs passed. It takes the packed files those jobs kept (CI-1) and publishes them; nothing is
-  built again. The main package holds no binary and is the same from every runner; the one
-  published is the Linux x64 job's. So every binary released has run its tests on a runner of
+  the GitHub release. The per-target job runs for all five targets, as on any push. Then the
+  publishing job runs, after all five target jobs passed. It takes the packed files those jobs
+  kept (CI-1) and publishes them; nothing is built again. The main package holds no binary and
+  must be the same from every runner: the publishing job compares the five and fails on a
+  difference, then publishes the Linux x64 job's. So every binary released has run its tests on a runner of
   its own operating system and processor (design REL-4). The design spec allows a target with no
   free runner to be released untested; nothing is built for that here, since all five have a
   runner, and a release that cannot test a target fails.
+- **PUB-2a** The publishing job decides whether to publish from two facts that are still true
+  when a job is run again: a tag for the version in the tree points at the very commit this run
+  built, and that version is not yet whole on npmjs.com. It runs on every push to `main` and
+  does nothing when either is false. It never asks release-please whether a release was just
+  made, since that answer is given once and lost on a rerun. And it never publishes files built
+  from a commit other than the tag's, so the tag, the provenance and the binary always name one
+  commit.
 - **PUB-3** When a target's job fails on the release run, nothing is published, and a person
   decides what it was: the owner, or a session with the owner's yes. They run the failed job
   again from GitHub. If it passes, the failure was the runner's, and the publishing job follows
@@ -262,7 +295,9 @@ Terms:
   release stay, that person edits the GitHub release to say the version was not published to
   npm, and the fix goes out as the next version, by the next release pull request. No workflow
   writes that line. The same job passed on the release pull request before the merge, so this
-  is rare.
+  is rare. When the release-please job itself fails on that run, it is run again; if another
+  push reached `main` first and its run made the tag, the publishing job of the run on the
+  tagged commit is run again and publishes (PUB-2a).
 - **PUB-4** The packages are published to npmjs.com, public, with provenance (design REL-2). The
   platform packages go first and the main package last, so a main package never exists without
   its platform packages.
@@ -271,8 +306,10 @@ Terms:
   Nothing is ever unpublished or overwritten.
 - **PUB-6** Releases publish by trusted publishing, so the repository holds no npm token. The
   first release cannot, because npm sets trusted publishing up on a package that already exists.
-  For that one release the owner creates an npm access token that can publish under the chosen
-  name and expires within days, and stores it as a repository secret; the release publishes with
+  For that one release the owner creates an npm access token that expires within days and can
+  publish under the chosen scope and nothing else, where npm can limit it so; where it cannot,
+  the plan says what else the token could publish. The owner stores it as a secret of the
+  publishing environment (PROT-2), never of the repository at large; the release publishes with
   it, still with provenance. After the install check passes, the owner sets up trusted
   publishing on each of the six packages and deletes the secret. The plan lists these steps for
   the owner. The builder checks npm's rules when the plan is written; if npm then lets a new
@@ -287,6 +324,25 @@ Terms:
 - **PUB-8** The first release is the only one this item needs. Nothing installs the analyzer
   from npm before the swap, and every published version is public for good, so each later
   release is the owner's choice when its release pull request is open.
+- **PUB-9** After publishing, each target's runner installs the main package by its name and
+  version from npmjs.com into an empty folder and runs the probe through the launcher. It needs
+  no secret. This is the one place the published packages are installed as a user's npm will
+  install them, on all five targets. A failure here cannot stop a publish that is done; it
+  fails the run, and the fix goes out as the next version.
+
+### Who can change `main`, and who can publish
+
+- **PROT-1** A rule on `main` lets it change only by a pull request whose five per-target checks
+  have passed, and nobody pushes to it directly. The owner merges. The organization this
+  repository belongs to already requires pull requests on default branches; this adds the
+  required checks. Without it, "CI decides" and "the same job passed before the merge" are
+  habits and not facts.
+- **PROT-2** The publishing job runs in a GitHub environment that only `main` can use. The
+  first release's token is that environment's secret, and npm's trusted publishing is set up to
+  trust that workflow in that environment. So a pull request, from a fork or from a branch of
+  this repository, cannot reach either, whatever its copy of the workflow says.
+- **PROT-3** PROT-1, PROT-2 and PUB-6 are settings on GitHub and npmjs.com, not files. The plan
+  lists each as a step, says who does it, and has it read back once set.
 
 ### The install check
 
@@ -295,7 +351,8 @@ Terms:
   (design REL-2). NAME-1 settled the name and PKG-9 the packaging; this confirms what neither
   can: the registry, and yak's own install.
 - **CHK-2** The builder makes two folders for the check, outside every repository, and removes
-  both after. One is a pack: a `pack.json` that names it, and one file, `tools/yak-analyzer.md`,
+  both after, with the install the check leaves in yak's tools folder. yak skips an install it
+  has already made, so a check that is repeated starts with that install folder removed. One is a pack: a `pack.json` that names it, and one file, `tools/yak-analyzer.md`,
   that declares the released version as a tool server:
 
   ```markdown
@@ -343,7 +400,9 @@ Terms:
 
 - **DOC-1** `CONTRIBUTING.md` gains the toolchain, how to install it, and the gate commands.
   `README.md` gains how to install and run the released binary, and its status section says what
-  exists: a binary that answers its version and analyzes nothing yet.
+  exists: a binary that answers its version and analyzes nothing yet. `CONTRIBUTING.md`'s rule on
+  private names is reworded to match the anti-goal above: it reads today as if it barred naming
+  yakshaver, which that file itself names.
 - **DOC-2** A `CLAUDE.md` points an agent session at `CONTRIBUTING.md` for the rules, repeating
   none of them, and holds only what a session needs beyond them: where the design spec is, and
   that a work item here names the design spec's requirements it covers.
@@ -392,11 +451,22 @@ Terms:
 - **A name once published cannot be taken back.** npm lets a package be deprecated, not removed.
   Handled by settling the name before the plan (NAME-1), so the first publish is under the name
   that stays.
-- **A token that can publish sits in the repository for the first release.** Handled by PUB-6:
-  it expires within days, it is deleted once the install check passes, and no pull request's
-  workflow can read it (CI-2).
+- **A token that can publish exists for the first release.** Handled by PUB-6 and PROT-2: it
+  expires within days, it is limited to the scope where npm allows, only the publishing
+  environment on `main` can read it, and it is deleted once the install check passes.
+- **Someone registers one of the package names first.** Between the first commit that shows the
+  names and the first release, a name with no scope belongs to whoever publishes it. Handled
+  for a scope by creating the organization first (NAME-1), and in either case by PKG-9's
+  install fetching nothing and running no script.
+- **The published files are built from a commit other than the tagged one,** or a rerun skips
+  publishing for good. Handled by PUB-2a.
+- **The binary needs newer system libraries than a user's machine has.** Handled by PKG-2a's
+  floor and its check in every per-target job.
+- **A credential or a pull request changes `main` or publishes without the owner.** Handled by
+  PROT-1 and PROT-2.
 - **The packaging is wrong in a way only an install shows.** Handled by PKG-9, which installs
-  the packed files on every target before any publish.
+  the packed files on every target before any publish, and by PUB-9, which installs the
+  published packages by name on every target.
 - **A release fails after its tag exists.** Handled by running the same job on the release pull
   request before the merge (PUB-1a), and by PUB-3 saying what is left behind and who acts.
 - **A release fails part of the way through publishing.** Handled by the publishing order
@@ -421,6 +491,8 @@ Terms:
 - The name of the version option.
 - The exact Rust version, the crate layout, and whether the option is parsed by hand.
 - How the launcher tells glibc from another C library.
+- How each build holds to PKG-2a's floor, and how a job reads what the built binary requires.
+- How PKG-9's install is kept from reaching a registry.
 - Which runner builds and tests each target, checked against what GitHub offers when the plan is
   written.
 - release-please's configuration, how it writes one version into every place of PKG-8, and how
