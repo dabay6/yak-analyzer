@@ -81,7 +81,8 @@ Terms:
 - **Trusted publishing** is npm's way of letting one named workflow of one repository publish a
   package with no stored token.
 - **release-please** is the release tool the owner's other repositories use. It runs as one job
-  of this repository's workflow (CI-1), on every push to `main`. It keeps one open pull request, **the release pull request**, that
+  of this repository's workflow (CI-1), on every push to `main`. It keeps one open pull request,
+  **the release pull request**, that
   holds the next version and its notes, worked out from the Conventional Commits on `main`. When
   that pull request is merged, release-please's run on the merge creates the version's tag and
   its GitHub release.
@@ -277,7 +278,8 @@ Terms:
   the owner. The builder checks npm's rules when the plan is written; if npm then lets a new
   package start with trusted publishing, the token is never made.
 - **PUB-7** Pull requests that move each pin are opened without anyone asking: the Cargo
-  dependencies, the workflow actions' hashes (CI-4) and the Rust version of GATE-1. Dependabot, GitHub's own
+  dependencies, the workflow actions' hashes (CI-4) and the Rust version of GATE-1. Dependabot,
+  GitHub's own
   dependency-update service, does this from a configuration file, and its pull requests start CI
   with a read-only token, which fits CI-2. The builder checks that it can move the Rust version,
   and says who does where it cannot. CI decides whether one can merge; none merges by itself.
@@ -321,7 +323,8 @@ Terms:
   released version; the platform package for that machine is in the install folder; and every
   installed package came from npmjs.com. That is read from `node_modules/.package-lock.json` in
   the install folder, `tools/yak-analyzer/<version>/` under yak's home, where npm records the
-  address each package was fetched from. yak's own npm command leaves no optional dependency out and turns no
+  address each package was fetched from. yak's own npm command leaves no optional dependency out
+  and turns no
   install script off; only a machine's npm settings could, and the launcher says so when they do
   (PKG-6).
 - **CHK-4** The result, with the registry each package came from, is written on the work item's
