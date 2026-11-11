@@ -2,17 +2,30 @@
   "name": "@dabay6/yak-analyzer-win32-x64",
   "version": "0.0.0",
   "description": "The yak-analyzer binary for Windows on x64",
-  "keywords": ["yak-analyzer", "static-analysis"],
+  "keywords": [
+    "yak-analyzer",
+    "static-analysis"
+  ],
   "homepage": "https://github.com/dabay6/yak-analyzer#readme",
-  "bugs": { "url": "https://github.com/dabay6/yak-analyzer/issues" },
+  "bugs": {
+    "url": "https://github.com/dabay6/yak-analyzer/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dabay6/yak-analyzer.git",
     "directory": "npm/platforms/win32-x64"
   },
   "license": "MIT",
-  "os": ["win32"],
-  "cpu": ["x64"],
-  "files": ["yak-analyzer.exe"],
-  "publishConfig": { "access": "public" }
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "yak-analyzer.exe"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
