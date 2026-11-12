@@ -6,6 +6,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # The oxc crates are released together, and one moved without the others does not build (spec
+    # DEP-3).
+    groups:
+      oxc:
+        patterns:
+          - "oxc_*"
   - package-ecosystem: github-actions
     directory: /
     schedule:
