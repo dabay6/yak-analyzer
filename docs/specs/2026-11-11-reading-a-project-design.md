@@ -940,3 +940,34 @@ Terms:
   and ignored files.
 - How the work is split into plans and pull requests, and the order in which the readers are
   built.
+
+## Amendments
+
+### 2026-11-12: An untracked name that differs from a tracked name only in letter case
+
+The first plan's trial of git was carried out on 2026-11-12; its report, `trial-git.md`, is in the
+work item's report folder. It found that letter case can count in ignore patterns without changing
+which tracked files git lists, so RUN-6a stands as written. It also found one thing this spec did
+not foresee.
+
+On a file system that ignores letter case, a tracked file can lie on disk under a name that differs
+from the name git holds only in letter case: git holds `docs/Guide.md`, and the disk holds
+`docs/guide.md`. That happens when a file is renamed on such a system without telling git. With the
+repository's own setting, git lists the file once, under the name it holds. With letter case made
+to count, as RUN-6a asks, git lists it twice: the tracked name, and the name on disk as an untracked
+file that nothing ignores. LIST-2 would then put one file into the file list under two names, and
+only on the machines whose disk holds the other spelling, which is the difference between machines
+that RUN-8 forbids.
+
+- **LIST-10** An untracked name that differs from a tracked name only in letter case is left out of
+  the file list, with a notice that names both. The tracked name stands for the file. This narrows
+  LIST-2, which otherwise holds. It applies on every platform: on a file system that keeps letter
+  case apart, a tracked file and an untracked file can differ only in letter case and both be real,
+  and the untracked one is left out there too, so that the same repository gives the same list
+  everywhere. The cost is that such a file is not read there until it is tracked or renamed; the
+  notice is how a person learns of it.
+- **FIX-7** A fixture holds a tracked file and an untracked name that differs from it only in letter
+  case, and checks that the list holds the tracked name alone and that the notice names both. On a
+  target whose file system ignores letter case the two names are one file on disk, made by renaming
+  it; on a target that keeps case apart they are two files. The test makes whichever its target
+  allows, and says which.
