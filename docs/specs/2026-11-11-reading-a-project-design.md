@@ -943,7 +943,7 @@ Terms:
 
 ## Amendments
 
-### 2026-11-12: An untracked path that is a tracked file under another spelling
+### 2026-11-12: An untracked name that differs from a tracked name only in letter case
 
 The first plan's trial of git was carried out on 2026-11-12; its report, `trial-git.md`, is in the
 work item's report folder. It confirmed RUN-6a and found one thing this spec did not foresee.
