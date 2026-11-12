@@ -427,11 +427,11 @@ Terms:
   ends in a script extension's output form, the same path in its source forms (`.js` as `.ts`,
   `.tsx` or `.d.ts`; `.jsx` as `.tsx`; `.mjs` as `.mts` or `.d.mts`; `.cjs` as `.cts` or
   `.d.cts`); the path itself; the path with each script extension added, TypeScript before
-  JavaScript, then `.d.ts`; the path as a folder with an `index` file found the same way. When
-  what is found is a type declaration file and the list also holds the script it describes, the
-  file of the same name ending in `.js`, `.mjs` or `.cjs`, the import leads to both: TypeScript
-  reads the declaration and the program runs the script, and an import that led to the
-  declaration alone would leave the script without an importer. A
+  JavaScript, then `.d.ts`; the path as a folder with an `index` file found the same way. A
+  script ending in `.js`, `.mjs` or `.cjs` and a type declaration file of the same name in the
+  same folder are a pair, and an import that finds either one leads to both, however the
+  specifier is written: TypeScript reads the declaration and the program runs the script, and
+  an import that led to one alone would leave the other without an importer. A
   folder that holds a `package.json` is tried through its `types`, `module` and `main` first,
   and leads to every file they lead to, as in RES-6. A path that leads to a file of the kind
   "other", or to a data file, resolves to that file, and nothing is followed from it (design
@@ -439,10 +439,14 @@ Terms:
 - **RES-4** When a relative specifier, a `#` specifier or a subpath of a workspace package leads
   to no file, the import is ignored or unresolved (design FIND-6). It is ignored when git
   ignores the path as it is written, or one of the source forms RES-3 and MAP-1 tried for it:
-  the paths that end in `.ts`, `.tsx`, `.mts`, `.cts` or a type declaration's ending. An output
-  form that was tried, such as the path with `.js` added, does not count: a repository that
-  compiles beside its sources ignores every `.js` file, and a mistyped import there must stay
-  unresolved. Otherwise it is unresolved. When a `paths` pattern matches and none of its
+  the paths that end in `.ts`, `.tsx`, `.mts`, `.cts` or a type declaration's ending. The path as
+  it is written counts whatever its ending, since the design spec's AN-5 never reports an import
+  whose target git ignores. An output form that RES-3 added and the specifier did not write,
+  such as the path with `.js` put on, does not count. So in a repository that compiles beside
+  its sources and ignores every `.js` file, a mistyped `./fooo` is unresolved, and a mistyped
+  `./fooo.js` is ignored: the analyzer cannot tell that one from an import of a generated file,
+  the project's own compiler reports it, and a false finding here would be one no declaration
+  can settle. Otherwise the import is unresolved. When a `paths` pattern matches and none of its
   targets leads to a file, the import is unresolved or ignored in the same way, with two
   exceptions that send the specifier on down RES-2's order: the pattern is the bare `*`, which
   matches everything; or the specifier names a workspace package or a package that a
@@ -718,7 +722,8 @@ Terms:
   linked folder; an import that leads into a submodule and one into a nested repository
   (LIST-3); a source file that is not UTF-8; a package target in an ignored build folder that
   maps to no source (MAP-4); an import with no extension of a file git ignores by its ending,
-  and a mistyped import in a project that ignores every `.js` file (RES-4); an MDX document
+  and a mistyped import in a project that ignores every `.js` file, written with no extension
+  and written with `.js` (RES-4); an MDX document
   whose prose begins a line with "import" (PARSE-4); and a `package.json` whose `exports` holds
   a list (PACK-6).
 - **FIX-5** Every stop of RUN-4 and every case of KEY-2 has a fixture that checks the line and
@@ -873,9 +878,10 @@ Terms:
   then resolve wrongly. The fixtures cover the layouts the design spec's recon found, and LIVE-2
   judges the rest.
 - **A mistyped import that is called ignored.** RES-4 calls an import ignored when git ignores
-  one of the source forms tried for it. In a repository that ignores a source ending outright,
-  such as every type declaration file, a mistyped import with no extension is then ignored and
-  not unresolved, and a later item will not report it. The other choice reports every import of
+  the path as written or one of the source forms tried for it. In a repository that ignores an
+  ending outright, a mistyped import written with that ending, or with no extension where the
+  ending is a source form such as a type declaration's, is then ignored and not unresolved, and
+  a later item will not report it. The other choice reports every import of
   a generated file. LIVE-2 judges every ignored import, so the named repositories show how often
   it happens.
 - **A standard file with an odd but valid form stops the run.** PACK-6 stops on a field whose
