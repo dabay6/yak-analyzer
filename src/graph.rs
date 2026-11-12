@@ -1,7 +1,7 @@
 //! The `graph` command: reads a project and prints what it read as one JSON document (spec OUT-1).
 //!
-//! So far it reads the hand-off file and the file list: the list of packages is empty until the part
-//! that fills it is built.
+//! So far it reads the hand-off file, the file list, the `data` and `generated` declarations and the
+//! packages. Imports come with the parts that read them.
 
 use std::env;
 use std::path::Path;
@@ -11,17 +11,16 @@ use serde_json::{Value, json};
 use crate::declarations;
 use crate::files::{self, File};
 use crate::hand_off;
+use crate::marks::{self, Marks};
 use crate::notice::{self, Notice};
+use crate::packages::{self, Package, Packages};
 use crate::stop::Stop;
 
 /// Reads the project, with the hand-off file at the path given or with none, and returns the document
 /// to print.
 pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
     let mut notices = Vec::new();
-
-    // The root is the folder the hand-off file names, whatever folder the analyzer was started in, and
-    // without a hand-off file the folder it was started in (spec LIST-1).
-    let root = match hand_off_path {
+    let handed = match hand_off_path {
         Some(path) => {
             let handed = hand_off::read(path)?;
 
@@ -37,7 +36,7 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
                 ));
             }
 
-            handed.root
+            Some(handed)
         }
         None => {
             notices.push(Notice::new(
@@ -48,25 +47,57 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
                     .to_owned(),
             ));
 
-            env::current_dir().map_err(|error| {
-                Stop::new(format!(
-                    "the folder the analyzer was started in cannot be read ({error}); start it in a checkout"
-                ))
-            })?
+            None
         }
     };
+
+    // The root is the folder the hand-off file names, whatever folder the analyzer was started in, and
+    // without a hand-off file the folder it was started in (spec LIST-1).
+    let root = match &handed {
+        Some(handed) => handed.root.clone(),
+        None => env::current_dir().map_err(|error| {
+            Stop::new(format!(
+                "the folder the analyzer was started in cannot be read ({error}); start it in a checkout"
+            ))
+        })?,
+    };
     let files = files::list(&root, &mut notices)?;
+    let marks = marks::apply(&files, handed.as_ref(), &mut notices)?;
+    let packages = packages::read(
+        &root,
+        &files,
+        &marks.data,
+        handed.as_ref().map(|handed| handed.folders.as_slice()),
+        &mut notices,
+    )?;
     let document = json!({
-        "files": files.iter().map(file).collect::<Vec<Value>>(),
-        "handOff": hand_off_path.is_some(),
+        "files": files.iter().map(|each| file(each, &marks, &packages)).collect::<Vec<Value>>(),
+        "handOff": handed.is_some(),
         "notices": notice::printed(notices),
-        "packages": [],
+        "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
     });
 
     Ok(format!("{document:#}"))
 }
 
 /// One file as it is printed.
-fn file(file: &File) -> Value {
-    json!({ "kind": file.kind.name(), "path": file.path, "tracked": file.tracked })
+fn file(file: &File, marks: &Marks, packages: &Packages) -> Value {
+    json!({
+        "data": marks.data.contains(&file.path),
+        "generated": marks.generated.contains(&file.path),
+        "kind": file.kind.name(),
+        "package": packages.of_file.get(&file.path),
+        "path": file.path,
+        "tracked": file.tracked,
+    })
+}
+
+/// One package as it is printed.
+fn package(package: &Package) -> Value {
+    json!({
+        "detected": package.detected,
+        "folder": package.folder,
+        "name": package.name,
+        "workspace": package.workspace,
+    })
 }

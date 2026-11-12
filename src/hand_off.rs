@@ -24,6 +24,8 @@ const COMMIT_NAME_LENGTHS: [usize; 2] = [40, 64];
 pub struct HandOff {
     /// The checkout's root, which is the folder to read whatever folder the analyzer was started in.
     pub root: PathBuf,
+    /// The folders yak's detection looked in, each relative to the root; the first is `.`.
+    pub folders: Vec<String>,
     /// Whether yak's detection stopped at its limit, so the folders it lists are not the whole workspace.
     pub truncated: bool,
     /// The stacks that carry declarations, in the order yak applies them.
@@ -80,7 +82,7 @@ pub fn read(path: &Path) -> Result<HandOff, Stop> {
     // The fields are checked in the order the format's table lists them (spec HO-2).
     let root = absolute_path(fields, "root").map_err(shape)?;
 
-    folders(fields).map_err(shape)?;
+    let folders = folders(fields).map_err(shape)?;
 
     let truncated = truncated(fields).map_err(shape)?;
     let stacks = stacks(fields).map_err(shape)?;
@@ -90,6 +92,7 @@ pub fn read(path: &Path) -> Result<HandOff, Stop> {
 
     let handed = HandOff {
         root,
+        folders,
         truncated,
         stacks,
     };
@@ -173,8 +176,8 @@ fn detection(fields: &Map<String, Value>) -> Result<&Map<String, Value>, String>
     }
 }
 
-/// Checks the folders yak's detection looked in: at least one, the first `.`, each inside the root.
-fn folders(fields: &Map<String, Value>) -> Result<(), String> {
+/// The folders yak's detection looked in: at least one, the first `.`, each inside the root.
+fn folders(fields: &Map<String, Value>) -> Result<Vec<String>, String> {
     let listed = detection(fields)?
         .get("folders")
         .ok_or_else(|| "`detection.folders` is missing".to_owned())?
@@ -198,7 +201,11 @@ fn folders(fields: &Map<String, Value>) -> Result<(), String> {
     }
 
     if listed[0] == "." {
-        Ok(())
+        Ok(listed
+            .iter()
+            .filter_map(Value::as_str)
+            .map(|folder| folder.trim_end_matches('/').to_owned())
+            .collect())
     } else {
         Err("`detection.folders` must begin with `.`, the root itself".to_owned())
     }

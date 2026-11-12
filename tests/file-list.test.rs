@@ -96,7 +96,16 @@ fn lists_tracked_files_and_untracked_files_that_nothing_ignores_each_with_its_ki
         .write(".git/info/exclude", "local/\n");
 
     let document = project.graph();
-    let file = |path: &str, kind: &str, tracked: bool| json!({ "kind": kind, "path": path, "tracked": tracked });
+    let file = |path: &str, kind: &str, tracked: bool| {
+        json!({
+            "data": false,
+            "generated": false,
+            "kind": kind,
+            "package": ".",
+            "path": path,
+            "tracked": tracked,
+        })
+    };
 
     // By path, byte by byte: a dot and capital letters come before small letters (spec RUN-8).
     assert_eq!(
@@ -121,7 +130,10 @@ fn lists_tracked_files_and_untracked_files_that_nothing_ignores_each_with_its_ki
     );
     assert_eq!(document["handOff"], json!(false));
     assert_eq!(notices(&document), ["no-hand-off-file"]);
-    assert_eq!(document["packages"], json!([]));
+    assert_eq!(
+        document["packages"],
+        json!([{ "detected": true, "folder": ".", "name": null, "workspace": true }])
+    );
 }
 
 #[test]
