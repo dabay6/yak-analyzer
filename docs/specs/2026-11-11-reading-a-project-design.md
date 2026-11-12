@@ -540,10 +540,14 @@ Terms:
 
 - **MAP-1** A target in `exports`, `types`, `module`, `main` or `imports` often names build
   output, which a worktree does not have. When a target is not in the file list, the analyzer
-  looks for the source it is built from, in this order. The order is the design spec's ENT-3;
-  what is tried where a config states no `rootDir` is this spec's:
-  1. for each tsconfig that lies directly in the folder of the package whose `package.json`
-     states the target, `tsconfig.json` first and the others by path, and that states an
+  looks for the source it is built from, in this order. The same is done for any other path an
+  import names that leads to no file: a subpath of a workspace package that has no `exports`,
+  and a relative specifier that reaches into a build folder. In every case this comes before
+  RES-4 decides between ignored and unresolved. The order is the design spec's ENT-3; what is
+  tried where a config states no `rootDir`, and applying it to a path that no `package.json`
+  states, are this spec's:
+  1. for each tsconfig that lies directly in the folder of the package the target or path lies
+     in, `tsconfig.json` first and the others by path, and that states an
      `outDir` the target lies in: the same path under that config's `rootDir`; where it states
      no `rootDir`, under `src` in the config's folder, then under the config's folder itself;
   2. the same path with its first folder replaced by `src`.
@@ -754,7 +758,15 @@ Terms:
   file is kept in this work item's report folder, in a folder of its own for each repository;
   its `detection.folders` are the root and the workspace's folders as PACK-3 finds them, its
   `siblings` is the folder it is kept in, and it has one stack, holding the repository's `data`
-  and `generated` globs as the project's. The run with no hand-off file has no declarations, so
+  and `generated` globs as the project's. The session writes those globs from its own reading of
+  the repository: the folders that hold test fixtures and other files that are not the
+  project's code, and the committed files a generator writes. Each glob is written in the report
+  with the reason for it and the number of files it matches, because a `data` glob takes files
+  out of the reading and a wrong one would hide a fault. The owner reads that list when
+  validating the plan that carries this check, which is before the item can close, and a glob
+  the owner rejects is removed and the run judged again. The same globs are the starting point
+  for the files the comparison writes in stage 2, where they are judged a second time. The run
+  with no hand-off file has no declarations, so
   on a repository that holds a file broken on purpose it stops, as PARSE-2 says it must; the
   line it stops with is then that run's result, and is recorded. Each worktree is made with git
   in a temporary folder outside every repository and removed when its runs are judged. What a
