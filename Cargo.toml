@@ -27,6 +27,14 @@ path = "tests/hand-off.test.rs"
 name = "declarations"
 path = "tests/declarations.test.rs"
 
+[[test]]
+name = "hand-off-schema"
+path = "tests/hand-off-schema.test.rs"
+
 [dependencies]
 # Reads the hand-off file and writes what `graph` prints.
 serde_json = "=1.0.154"
+
+[dev-dependencies]
+# Checks the tests' hand-off files against the copy of yakshaver's schema. Never part of the binary.
+jsonschema = { version = "=0.60.2", default-features = false }
