@@ -168,7 +168,10 @@ Terms:
   there. A file's name is written into a line with any line break or control character in it
   escaped, so one line stays one line. A fault in the analyzer itself, which Rust calls a panic,
   is not a stop of RUN-4: the binary then exits 3 and writes one line that says the fault is the
-  analyzer's and what it was.
+  analyzer's and what it was. No test can cause one, so a reviewer reads this in the code. A
+  process that the operating system ends, for want of memory or stack, writes nothing, and a
+  run whose output can no longer be written, because its reader has gone, ends with exit 1 and
+  no line.
 - **RUN-4** These stop a run, each with its own line, and nothing else does. They are checked in
   this order, and the first that fails is the one reported; where several files fail the same
   check, the first by path is:
@@ -214,6 +217,8 @@ Terms:
     would ignore the path on Windows and macOS and not on Linux, and RUN-8 would not hold. The
     plan's first task tries what this does to the file list on a file system that ignores case,
     and a fixture holds such a pattern (FIX-4).
+  - What git writes on standard error is kept from the analyzer's own standard error (RUN-3).
+    When git succeeds and still warns, the first line of the warning becomes a notice.
 - **RUN-7** The interface version is the whole number 1. The design spec makes it cover the
   commands and options, the declaration keys and their shapes, the rule names, the fingerprints
   and the MCP tools, and raises it when a release breaks one of them (design IF-6). Until the end
@@ -222,11 +227,13 @@ Terms:
   before then. `graph`, as a command and in what it prints, is never under the interface version
   (OUT-2).
 - **RUN-8** For the same project and the same hand-off file, the output is the same bytes on every
-  platform. Every path in it is relative to the root and written with forward slashes. Packages
-  and files are listed by path, compared byte by byte, which is also what "first by path" means
-  elsewhere in this spec; a file's imports are listed in the order they are written, and the
-  files one import leads to by path; notices are listed by file, those about no file first, then
-  by kind, then by their sentence.
+  platform. One thing a machine may still change is the user's own excludes there, which the design
+  spec has the analyzer honor (LIST-2): a file one user's git ignores and another's does not is read
+  on one machine only. Every path in it is relative to the root and written with forward slashes.
+  Packages and files are listed by path, compared byte by byte, which is also what "first by path"
+  means elsewhere in this spec; a file's imports are listed in the order they are written, and the
+  files one import leads to by path; notices are listed by file, those about no file first, then by
+  kind, then by their sentence.
 
 ### The file list
 
@@ -240,13 +247,14 @@ Terms:
   The analyzer asks git for the list and keeps, for each file, whether it is tracked.
 - **LIST-3** The list never reaches into a nested repository, a submodule or another worktree
   (design AN-4). The analyzer knows where each one lies, from what git lists, and never asks git
-  about a path inside one; an import that leads into one is outside (RES-1). A tracked file that
-  is missing from the working tree is not in the list. A symbolic link is not in it either: it
-  is never followed and never read, one notice says how many were left out, and an import that
-  names one, or passes through a linked folder, is outside (RES-1). A tracked path is a link when
-  git records it as one, whatever the working tree holds, so that a system that checks links out
-  as ordinary files gives the same result; an untracked path is one when the file system says
-  so.
+  about a path inside one; an import that leads into one is outside (RES-1). A tracked file that is
+  missing from the working tree is not in the list, and one that is gone by the time it is read is
+  treated as missing, with a notice, and not as a file that cannot be read. A symbolic link is not
+  in it either: it is never followed and never read, one notice says how many were left out, and an
+  import that names one, or passes through a linked folder, is outside (RES-1). A tracked path is a
+  link when git records it as one, whatever the working tree holds, so that a system that checks
+  links out as ordinary files gives the same result; an untracked path is one when the file system
+  says so.
 - **LIST-4** Whether a path exists is asked of the file list, never of the file system. Only the
   content of a listed file is read from disk. So a file git ignores cannot change a result by
   being on disk, which is what makes the result the same with and without `node_modules` and
@@ -308,7 +316,9 @@ Terms:
 - **PACK-5** A package is known by the `name` in its `package.json`. When two workspace packages
   have one name, an import by that name resolves to the first by path, and a notice names both.
 - **PACK-6** The analyzer reads these fields of a `package.json`: `name`, `workspaces`,
-  `exports`, `imports`, `types`, `module`, `main`, and the four lists of dependencies. From the
+  `exports`, `imports`, `types` and its older name `typings`, `module`, `main`, and the four
+  lists of dependencies. The plan lists the forms each field may take, from each tool's own
+  documentation, and a fixture holds each form. From the
   workspace's list it reads `packages`, and from a tsconfig the fields of CFG-1. Each is read in
   every form npm, Node, pnpm or TypeScript gives it; a target in `exports` or `imports` that is
   a list is followed entry by entry, as a set of conditions is (RES-5). A field that holds a
@@ -321,9 +331,10 @@ Terms:
 - **PARSE-1** A script is parsed with `oxc_parser` (design AN-2). Its language comes from its
   extension: TypeScript for `.ts`, `.mts` and `.cts`; TypeScript with JSX for `.tsx`; JavaScript
   with JSX allowed for `.js`, `.jsx`, `.mjs` and `.cjs`. A type declaration file is parsed as
-  TypeScript. A `.cjs` or `.cts` file is parsed as a CommonJS script and every other file as a
-  module; a `.js` or `.jsx` file that does not parse as a module is tried as a script before
-  PARSE-2 calls it broken.
+  TypeScript. Every file is parsed as a module first, and one that does not parse as a module is
+  tried as a script before PARSE-2 calls it broken, whatever its extension. A byte-order mark at
+  the start of any file the analyzer reads, a `package.json` and a tsconfig included, is passed
+  over.
 - **PARSE-2** A file does not parse when the parser reports a syntax error in it, or when it is
   not valid UTF-8. A tracked file that does not parse stops the run, with the file and the line
   (RUN-4), the line where there is one. An untracked file that does not parse is skipped with a
@@ -358,8 +369,8 @@ Terms:
   - an `export … from` statement, marked the same way for `export type`, and marked when it is
     `export *`;
   - `import x = require('…')`;
-  - a call of `import(…)` whose one argument is a string literal, or a template literal with no
-    substitution;
+  - a call of `import(…)` whose first argument is a string literal, or a template literal with
+    no substitution; a second argument, which holds options, changes nothing;
   - a call of `require(…)`, where `require` is the bare name, with the same kind of argument;
   - a Vue script block's `src`, and an HTML page's script `src` (PARSE-3, PARSE-5).
 - **IMP-2** A call of `import(…)` or `require(…)` whose argument is anything else cannot be
@@ -376,9 +387,11 @@ Terms:
 
 ### Resolving an import
 
-- **RES-1** Every import gets exactly one outcome:
+- **RES-1** Every import gets exactly one outcome. Where two could apply, such as a path inside a
+  nested worktree that git also ignores, the one earlier in this list holds:
   - **files**: one file in the list, by its path, or several, where a package offers different
-    files for different conditions (RES-5);
+    files for different conditions (RES-5), or a type declaration file lies beside the script it
+    describes (RES-3);
   - **outside**: somewhere the analyzer does not look. There are six such places: a package that
     is not in the project; a module built into Node; a path above the root (LIST-8); a path
     inside a nested repository, a submodule or another worktree (LIST-3); a symbolic link, or a
@@ -388,7 +401,8 @@ Terms:
     never a fault, whether or not the file is on disk (design AN-5);
   - **unresolved**: nothing.
 - **RES-2** A specifier is tried against these in order, and the first that applies decides:
-  1. a relative specifier (`./`, `../`) names a path from the importing file's folder (RES-3);
+  1. a relative specifier, which is `.` or `..` or begins with `./` or `../`, names a path from
+     the importing file's folder (RES-3);
   2. a pattern in the `paths` of the tsconfig that governs the importing file (CFG-2, RES-4);
   3. a specifier that begins with `#` is looked up in the `imports` of the importing file's
      package (RES-5);
@@ -413,7 +427,11 @@ Terms:
   ends in a script extension's output form, the same path in its source forms (`.js` as `.ts`,
   `.tsx` or `.d.ts`; `.jsx` as `.tsx`; `.mjs` as `.mts` or `.d.mts`; `.cjs` as `.cts` or
   `.d.cts`); the path itself; the path with each script extension added, TypeScript before
-  JavaScript, then `.d.ts`; the path as a folder with an `index` file found the same way. A
+  JavaScript, then `.d.ts`; the path as a folder with an `index` file found the same way. When
+  what is found is a type declaration file and the list also holds the script it describes, the
+  file of the same name ending in `.js`, `.mjs` or `.cjs`, the import leads to both: TypeScript
+  reads the declaration and the program runs the script, and an import that led to the
+  declaration alone would leave the script without an importer. A
   folder that holds a `package.json` is tried through its `types`, `module` and `main` first,
   and leads to every file they lead to, as in RES-6. A path that leads to a file of the kind
   "other", or to a data file, resolves to that file, and nothing is followed from it (design
@@ -487,7 +505,8 @@ Terms:
   design spec's ENT-2 names six of these; `include`, `exclude` and `baseUrl` are this spec's
   additions, needed to tell which config governs a file and to resolve as TypeScript does.
 - **CFG-2** The tsconfig that governs a file is found from the file's folder upward: in the
-  nearest folder that holds a `tsconfig.json` or a `jsconfig.json`, that config governs when its
+  nearest folder that holds a `tsconfig.json` or a `jsconfig.json`, the `tsconfig.json` where it
+  holds both, that config governs when its
   `files`, `include` and `exclude` cover the file, which they do by default for everything under
   its folder. When it does not cover the file and has `references`, the first referenced config
   that covers the file governs. When none does, the search goes on upward. A file with no
@@ -505,8 +524,9 @@ Terms:
   is treated the same way.
 - **CFG-4** A tsconfig that cannot be read stops the run when a file the analyzer reads depends on
   it (RUN-4, design AN-7). Whether one does is told without reading it, by where it lies and who
-  names it: it is a `tsconfig.json` or a `jsconfig.json` in the nearest such folder at or above
-  a file the analyzer reads; or a tsconfig that such a config, or one it names in turn, names in
+  names it: it is a `tsconfig.json` or a `jsconfig.json` in any folder at or above a file the
+  analyzer reads, up to the root, since CFG-2's search may pass the nearest one and go on
+  upward; or a tsconfig that such a config, or one it names in turn, names in
   `extends` or `references`, a config above the root included (CFG-3). Any other tsconfig that
   cannot be read is skipped with a notice. An `extends` target that should be read and is not
   there stops the run too, naming both files. A `references` entry that names no tsconfig in
@@ -524,8 +544,10 @@ Terms:
      no `rootDir`, under `src` in the config's folder, then under the config's folder itself;
   2. the same path with its first folder replaced by `src`.
 
-  In each place the extension is replaced by its source forms as in RES-3, and `.d.ts` by `.ts`
-  and `.tsx`.
+  In each place the target's ending, whether a script's output form (`.js`, `.mjs`, `.cjs`) or a
+  type declaration's, is replaced by each source extension in turn: `.ts`, `.tsx`, `.mts`,
+  `.cts`, then `.js`, `.jsx`, `.mjs`, `.cjs`. This is wider than RES-3's pairs on purpose: a
+  bundler writes `.mjs` and `.cjs` files from one `.ts` source.
 - **MAP-2** A target that is in the file list is that file: a committed JavaScript file is its own
   source. A target git ignores is never used, on disk or not (LIST-4).
 - **MAP-3** A target with a `*` is mapped as a pattern, by rewriting its folder and extension,
@@ -706,6 +728,15 @@ Terms:
   stop that a target does not let a test cause, such as a file that cannot be read where the
   tests run as an administrator, is checked on the targets that allow it, and the test says
   which.
+- **FIX-6** Three of the rules about what the analyzer may touch are tested, on a fixture of
+  their own. After a run, nothing under the root has changed, the `.git` folder included, by a
+  comparison of every file's content before and after. A run started with the environment's
+  variables pointing git at another repository, work tree and index gives the output it gives
+  without them. And a run on a repository whose own settings name a program for git to start
+  does not start it, which the test sees because the program would leave a file behind. That
+  the analyzer uses no network and runs no project code cannot be tested; a reviewer reads the
+  code for it, as the skeleton spec's GATE-4 says. Also among the fixtures: a script with a type
+  declaration file of the same name beside it, imported with and without an extension (RES-3).
 
 ### The check on real repositories
 
@@ -720,17 +751,26 @@ Terms:
   `siblings` is the folder it is kept in, and it has one stack, holding the repository's `data`
   and `generated` globs as the project's. The run with no hand-off file has no declarations, so
   on a repository that holds a file broken on purpose it stops, as PARSE-2 says it must; the
-  line it stops with is then that run's result, and is recorded.
+  line it stops with is then that run's result, and is recorded. Each worktree is made with git
+  in a temporary folder outside every repository and removed when its runs are judged. What a
+  run prints is saved in the report folder, apart from the folders that hold the hand-off
+  files, which hold nothing else.
 - **LIVE-2** For each run with a hand-off file the session checks that it finishes, and that the
-  file list is git's own: the paths in the output are the paths git itself prints, asked separately,
-  for the tracked files and the untracked files it does not ignore under the root, less the links.
+  file list is git's own: the paths in the output are the paths git itself prints, asked separately
+  with the command the plan names, for the tracked files and the untracked files it does not ignore
+  under the root, less the links.
   It records the time the run took. The time is set beside what the design spec measured for the
   same work with a throwaway script, about 1.8 seconds on one thread on the two largest of these
-  repositories, and beside its bar of 3 seconds for an audit after an edit; a run slower than that
-  bar is reported to the owner and not fixed in this item. It judges, by reading the code, every
+  repositories, and beside its bar of 3 seconds for an audit after an edit. An audit reads twice,
+  the working tree and the base, and stage 1 has no cache, so twice the measured time is what is
+  held against the bar; a result over it is reported to the owner and not fixed in this item. It
+  judges, by reading the code, every
   import that is unresolved, every import that is ignored (MAP-4), and every import that is outside
-  in a package no `package.json` lists, in another repository or through a link (RES-8): true, or
-  false. Imports with the same specifier and the same outcome are one case and are judged once. An
+  in a package no `package.json` lists, in another repository, through a link, or at an absolute
+  path (RES-8): true, or false. Imports that name the same thing with the same outcome are one case
+  and are judged once: the same path for a relative specifier, the same specifier under the same
+  governing tsconfig for an alias, and the same specifier in the same package for a `#` specifier
+  or a package's name. An
   import that led to the wrong file shows in none of these lists, so it also checks against the code
   one import of each kind that could: one for each workspace package imported by name, one for each
   `paths` pattern and each `imports` key that led to files, and each case that led to more than one
@@ -755,8 +795,12 @@ Terms:
   uses work with, the README states it, and a git older than that stops the run with a line
   (RUN-4). The images CI builds and tests the Linux targets in must hold a git at least that
   new, since the fixtures run there (FIX-1).
+- **DEP-3** The oxc crates are released together and must move together. The repository's
+  Dependabot settings put them in one group, so one pull request moves all their pins; moved one
+  at a time, each pull request would fail to build.
 - **DOC-1** `CONTRIBUTING.md` gains how a fixture is written and run, and the two new commands. The
-  README's status says what the analyzer reads and that it reports no findings yet.
+  README's status says what the analyzer reads and that it reports no findings yet, and the test
+  that holds the README to its present status text changes with it.
 
 ## Alternatives considered
 
@@ -785,6 +829,12 @@ Terms:
   chosen loses an importer and would later be reported as unused, with nothing to show why.
 - **Going on past a syntax error.** The parser can hand back a partial tree. Rejected by the
   design spec's AN-7: an import list read from half a file is a guess.
+- **An existing parser for Vue components, MDX documents and HTML pages.** Each would read its
+  format whole and correctly. Rejected because the analyzer needs three small things from them:
+  the script blocks, the import statements and the `src` of a script element; the compilers Vue
+  and MDX themselves ship are JavaScript programs, not Rust crates; and each crate added is a
+  pinned dependency to keep moving. The fixtures hold the forms the design spec names, and the
+  two readers cannot stop a run by being wrong (PARSE-4, PARSE-5).
 - **A separate item for Vue, MDX and HTML.** It would make this item smaller. Rejected because the
   named repositories hold all three, so the check of LIVE-1 would be judging imports the analyzer
   cannot yet read. The plan may still build them last.
