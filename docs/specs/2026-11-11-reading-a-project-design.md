@@ -179,7 +179,9 @@ Terms:
   The analyzer asks git for the list and keeps, for each file, whether it is tracked.
 - **LIST-3** The list never reaches into a nested repository, a submodule or another worktree
   (design AN-4). A tracked file that is missing from the working tree is not in it. A symbolic
-  link is never followed and never read.
+  link is never followed and never read. A tracked path is a link when git records it as one,
+  whatever the working tree holds, so that a system that checks links out as ordinary files
+  gives the same result; an untracked path is one when the file system says so.
 - **LIST-4** Whether a path exists is asked of the file list, never of the file system. Only the
   content of a listed file is read from disk. So a file git ignores cannot change a result by
   being on disk, which is what makes the result the same with and without `node_modules` and
@@ -191,14 +193,18 @@ Terms:
 - **LIST-6** A listed file has one kind, from its name: a script (`.ts`, `.tsx`, `.mts`, `.cts`,
   `.js`, `.jsx`, `.mjs`, `.cjs`); a type declaration file (`.d.ts`, `.d.mts`, `.d.cts`); a Vue
   component (`.vue`); an MDX document (`.mdx`); an HTML page (`.html`); a package manifest
-  (`package.json`); a tsconfig (`tsconfig.json`, any `tsconfig.*.json`, `jsconfig.json`); or
-  other. A file of the kind "other", such as CSS or JSON, is never read (design AN-3).
+  (`package.json`); a tsconfig (`jsconfig.json`, and any file whose name begins with `tsconfig`
+  and ends with `.json`, as the design spec's ENT-2 has it); or other. A file of the kind "other", such as CSS or JSON, is never read (design AN-3).
 - **LIST-7** A path that is not valid UTF-8 is left out of the list, with a notice.
 - **LIST-8** Nothing above the root is part of the project, also when the root is a sub-folder of
   a work tree. Every search that goes upward from a file, for its package, its tsconfig or a
   `package.json` that lists a dependency, ends at the root. An import that leads above the root
   is outside (RES-1). The one thing read above the root is a tsconfig that a tsconfig under the
   root extends (CFG-3).
+- **LIST-9** Everything after the file list works from two things only: the list, and a way to
+  read a listed file's content. The item that tells new findings from inherited ones reads a
+  commit and not a working tree (design BASE-1), and supplies both from git's stored files. How
+  "git ignores it" is answered for a commit is that item's to say.
 
 ### Packages
 
@@ -249,6 +255,8 @@ Terms:
 
 - **IMP-1** These are imports, each recorded with its specifier, its form and its line:
   - an `import` statement, marked when the whole statement is `import type`;
+  - a TypeScript import type, `import('…')` written where a type is expected, marked as a type
+    import;
   - an `export … from` statement, marked the same way for `export type`, and marked when it is
     `export *`;
   - `import x = require('…')`;
@@ -300,8 +308,8 @@ Terms:
   that leads to a file of the kind "other", or to a data file, resolves to that file, and nothing
   is followed from it (design AN-3, FIND-10).
 - **RES-4** When a relative specifier, a `#` specifier or a subpath of a workspace package leads
-  to no file, the import is ignored if git ignores the path it names, and unresolved if not
-  (design FIND-6). When a `paths` pattern matches and none of its targets leads to a file, the
+  to no file, the import is ignored if git ignores the path it names, or any of the paths RES-3
+  and MAP-1 tried for it, and unresolved if not (design FIND-6). When a `paths` pattern matches and none of its targets leads to a file, the
   import is unresolved or ignored in the same way, with two exceptions that send the specifier on
   down RES-2's order: the pattern is the bare `*`, which matches everything; or the specifier
   names a workspace package or a package that a `package.json` at or above the importing file
@@ -345,8 +353,10 @@ Terms:
 
   The plan's first task tries the library's half against this spec's fixtures on the version it
   pins. A rule the library does not give as written here moves to the analyzer's own code, and
-  the plan says so; the rule and its fixture do not change. Only if the library cannot be used
-  at all is the design spec's AN-2 amended, before any other code is written.
+  the plan says so; the rule and its fixture do not change. If the trial leaves the library
+  nothing but finding a file for a path, or shows it cannot be used at all, it is not worth a
+  dependency that changes every week: the design spec's AN-2 is then amended, before any other
+  code is written, and the analyzer resolves in its own code.
 - **RES-10** Matching a path against the file list is exact on letter case on every platform. An
   import whose case differs from the file's name is unresolved everywhere, as it is on a
   case-sensitive file system.
@@ -393,7 +403,9 @@ Terms:
 - **MAP-3** A target with a `*` is mapped as a pattern, by rewriting its folder and extension,
   never by listing build output (design ENT-3).
 - **MAP-4** A target that maps to nothing leads to no file, and RES-4 decides between ignored and
-  unresolved. That is normal for a file a generator writes.
+  unresolved. That is normal for a file a generator writes. It is also where a mapping that
+  should have found a source and did not ends up, as ignored, since build folders are ignored; so
+  an ignored import records the target it came from, and LIVE-2 judges every one.
 
 ### The hand-off file
 
@@ -462,16 +474,19 @@ Terms:
 
 ### The output
 
-- **OUT-1** `graph` prints one JSON document on standard output and exits 0. It holds: the root;
-  whether a hand-off file was used; the packages, each with its folder, its name, whether it is a
+- **OUT-1** `graph` prints one JSON document on standard output and exits 0. It holds no absolute
+  path, the root's included (RUN-8). It holds: whether a hand-off file was used; the packages, each with its folder, its name, whether it is a
   workspace package (PACK-3) and PACK-4's mark; the files, each with its path, its kind, whether
   it is tracked, its package, and whether it is data, generated or a type declaration file; for
   each file that was read, its imports, each with the specifier, the form, the line, the mark of
   IMP-4, the outcome, and with the outcome the paths of the files it leads to, or what it is
   outside of (a package's name with RES-8's mark, a built-in module, or a path above the root),
-  and which step of RES-2 decided; the count of IMP-2; and the notices.
+  or the ignored path and the target it came from (MAP-4), and which step of RES-2 decided; the
+  count of IMP-2; and the notices.
 - **OUT-2** The output is the builder's and the tests' view of what was read. It is not part of
-  the interface version, and a later item may change it freely.
+  the interface version, and a later item may change its form. The facts the fixtures hold, each
+  file and each import's outcome, are what this spec fixes: an item that changes the form
+  rewrites the fixtures' written-down output in the same change and changes none of those facts.
 
 ### The fixtures
 
@@ -510,8 +525,9 @@ Terms:
   name two different sources, and conditions whose first target has no source; a folder outside
   the workspace whose `package.json` carries the name of an installed dependency, and a package
   outside the workspace listed with `file:`; two workspace packages with one name; an import
-  whose letter case differs from the file's; a symbolic link; and a source file that is not
-  UTF-8.
+  whose letter case differs from the file's; a symbolic link; a source file that is not UTF-8;
+  a package target in an ignored build folder that maps to no source (MAP-4); and an import with
+  no extension of a file git ignores by its ending (RES-4).
 - **FIX-5** Every line of RUN-4 and every case of KEY-2 has a fixture that checks the exact line
   and the exit code (design PROOF-1, pattern 26, as far as this item fails).
 
@@ -523,8 +539,12 @@ Terms:
   repository's data and generated files. A repository with a web app in a sub-folder is also run
   from that sub-folder.
 - **LIVE-2** For each run the session checks that it finishes, that the file list is git's own,
-  and records the time it took. It judges, by reading the code, every import that is unresolved,
-  and every import that is outside and not listed as a dependency (RES-8): true, or false. An
+  and records the time it took. The time is set beside what the design spec measured for the
+  same work with a throwaway script, about 1.8 seconds on one thread on the two largest of these
+  repositories, and beside its bar of 3 seconds for an audit after an edit; a run slower than
+  that bar is reported to the owner and not fixed in this item. It judges, by reading the code,
+  every import that is unresolved, every import that is ignored (MAP-4), and every import that
+  is outside and not listed as a dependency (RES-8): true, or false. An
   import that led to the wrong file shows in neither list, so it also checks against the code one
   import of each kind that could: one for each workspace package imported by name, one for each
   `paths` pattern and each `imports` key that led to files, and every import that led to more
@@ -542,8 +562,13 @@ Terms:
 
 - **DEP-1** Every crate this item adds is pinned to one exact version, and the plan lists each
   with the reason it is needed, as the skeleton spec's GATE-1 and GATE-4 ask. The released binary
-  still asks no more of a system than the skeleton spec's PKG-2a allows, which CI already checks
-  on every target.
+  still asks no more of a system's libraries than the skeleton spec's PKG-2a allows, which CI
+  already checks on every target.
+- **DEP-2** `git` on the `PATH` is a new need of the binary at run time, for `graph` and for
+  every later command that reads a project. The plan names the oldest git version the commands it
+  uses work with, the README states it, and a git older than that stops the run with a line
+  (RUN-4). The images CI builds and tests the Linux targets in must hold a git at least that
+  new, since the fixtures run there (FIX-1).
 - **DOC-1** `CONTRIBUTING.md` gains how a fixture is written and run, and the two new commands. The
   README's status says what the analyzer reads and that it reports no findings yet.
 
