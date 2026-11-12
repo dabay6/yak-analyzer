@@ -1,7 +1,7 @@
 //! `yak-analyzer`: a static analyzer for TypeScript and JavaScript, built for yakshaver.
 //!
 //! It answers its version and its interface version, and reads a project: so far its hand-off file, its
-//! files and its packages. It reports no findings yet.
+//! files, its packages and its scripts' imports. It reports no findings yet.
 
 mod cli;
 mod declarations;
@@ -10,9 +10,11 @@ mod git;
 mod glob;
 mod graph;
 mod hand_off;
+mod imports;
 mod marks;
 mod notice;
 mod packages;
+mod scripts;
 mod stop;
 
 use std::env;

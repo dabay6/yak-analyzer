@@ -1,7 +1,8 @@
 //! The `graph` command: reads a project and prints what it read as one JSON document (spec OUT-1).
 //!
-//! So far it reads the hand-off file, the file list, the `data` and `generated` declarations and the
-//! packages. Imports come with the parts that read them.
+//! So far it reads the hand-off file, the file list, the `data` and `generated` declarations, the
+//! packages, and the imports of every script. Where each import leads comes with the part that resolves
+//! them.
 
 use std::env;
 use std::path::Path;
@@ -11,9 +12,11 @@ use serde_json::{Value, json};
 use crate::declarations;
 use crate::files::{self, File};
 use crate::hand_off;
+use crate::imports::Import;
 use crate::marks::{self, Marks};
 use crate::notice::{self, Notice};
 use crate::packages::{self, Package, Packages};
+use crate::scripts::{self, Scripts};
 use crate::stop::Stop;
 
 /// Reads the project, with the hand-off file at the path given or with none, and returns the document
@@ -70,8 +73,13 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
         handed.as_ref().map(|handed| handed.folders.as_slice()),
         &mut notices,
     )?;
+    let scripts = scripts::read(&root, &files, &marks.data, &mut notices)?;
     let document = json!({
-        "files": files.iter().map(|each| file(each, &marks, &packages)).collect::<Vec<Value>>(),
+        "files": files
+            .iter()
+            .filter(|each| !scripts.gone.contains(&each.path))
+            .map(|each| file(each, &marks, &packages, &scripts))
+            .collect::<Vec<Value>>(),
         "handOff": handed.is_some(),
         "notices": notice::printed(notices),
         "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
@@ -80,15 +88,34 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
     Ok(format!("{document:#}"))
 }
 
-/// One file as it is printed.
-fn file(file: &File, marks: &Marks, packages: &Packages) -> Value {
-    json!({
+/// One file as it is printed. A file that was read has its imports and the count of those that cannot
+/// be followed.
+fn file(file: &File, marks: &Marks, packages: &Packages, scripts: &Scripts) -> Value {
+    let mut printed = json!({
         "data": marks.data.contains(&file.path),
         "generated": marks.generated.contains(&file.path),
         "kind": file.kind.name(),
         "package": packages.of_file.get(&file.path),
         "path": file.path,
         "tracked": file.tracked,
+    });
+
+    if let Some(read) = scripts.read.get(&file.path) {
+        printed["computedImports"] = json!(read.computed);
+        printed["imports"] = read.imports.iter().map(import).collect();
+    }
+
+    printed
+}
+
+/// One import as it is printed (spec OUT-1).
+fn import(import: &Import) -> Value {
+    json!({
+        "form": import.form.name(),
+        "line": import.line,
+        "query": import.has_query(),
+        "specifier": import.specifier,
+        "typeOnly": import.type_only,
     })
 }
 

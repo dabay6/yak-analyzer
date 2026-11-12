@@ -39,7 +39,17 @@ path = "tests/file-list.test.rs"
 name = "packages"
 path = "tests/packages.test.rs"
 
+[[test]]
+name = "imports"
+path = "tests/imports.test.rs"
+
 [dependencies]
+# Parse scripts into syntax trees and walk them; released together, so pinned together (spec AN-2, DEP-3).
+oxc_allocator = "=0.156.0"
+oxc_ast = "=0.156.0"
+oxc_ast_visit = "=0.156.0"
+oxc_parser = "=0.156.0"
+oxc_span = "=0.156.0"
 # Reads the hand-off file and writes what `graph` prints.
 serde_json = "=1.0.154"
 # Matches the globs of declarations and of the workspace's list (spec KEY-5).
