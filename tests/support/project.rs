@@ -72,6 +72,9 @@ impl Project {
             "user.email=test@example.invalid",
         ])
         .args(["-c", "protocol.file.allow=always"])
+        // A commit may start git's maintenance in the background, which takes and drops a lock file
+        // under `.git` while a test reads the folder.
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
         .args(args)
         .current_dir(&self.root);
 

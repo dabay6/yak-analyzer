@@ -61,7 +61,10 @@ fn snapshot(folder: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
             if path.is_dir() {
                 waiting.push(path);
             } else {
-                found.insert(path.clone(), fs::read(&path).expect("a file can be read"));
+                let content = fs::read(&path)
+                    .unwrap_or_else(|error| panic!("{} can be read: {error}", path.display()));
+
+                found.insert(path, content);
             }
         }
     }
