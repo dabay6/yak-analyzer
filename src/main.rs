@@ -3,7 +3,9 @@
 //! It answers its version and its interface version, and reads a project. It reports no findings yet.
 
 mod cli;
+mod declarations;
 mod graph;
+mod hand_off;
 mod stop;
 
 use std::env;
@@ -51,11 +53,18 @@ fn run() -> ExitCode {
 
             ExitCode::SUCCESS
         }
-        Ok(Command::Graph) => {
-            println!("{}", graph::read());
+        Ok(Command::Graph { hand_off }) => match graph::read(hand_off.as_deref()) {
+            Ok(document) => {
+                println!("{document}");
 
-            ExitCode::SUCCESS
-        }
+                ExitCode::SUCCESS
+            }
+            Err(stopped) => {
+                eprintln!("{}", stopped.line());
+
+                ExitCode::from(stop::STOPPED)
+            }
+        },
         Err(refusal) => {
             eprintln!("{}", stop::line(&refusal));
 

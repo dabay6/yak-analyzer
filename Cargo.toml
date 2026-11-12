@@ -19,6 +19,14 @@ path = "src/main.rs"
 name = "cli"
 path = "tests/cli.test.rs"
 
+[[test]]
+name = "hand-off"
+path = "tests/hand-off.test.rs"
+
+[[test]]
+name = "declarations"
+path = "tests/declarations.test.rs"
+
 [dependencies]
 # Reads the hand-off file and writes what `graph` prints.
 serde_json = "=1.0.154"
