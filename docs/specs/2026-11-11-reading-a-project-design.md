@@ -1048,18 +1048,37 @@ RUN-6a stands; this amendment settles the duplicate.
   that holds two paths differing only in letter case: both are listed on either volume, but where
   case is ignored they are one file, so what is read from them can differ. FIX-7 holds both outputs
   of the first two.
+- **LIST-11** When the root is a sub-folder of the work tree, git takes the root's path as the disk
+  spells it. A trial of 2026-11-12, on Windows, showed what follows when git holds the files under
+  the root by another spelling of one of its folders, `Apps/web/` where the disk says `apps/web/`:
+  git, started in the root, lists every file there as untracked and none as tracked, so LIST-10
+  finds no twin, and a tracked file that does not parse would be skipped instead of stopping the run
+  (design AN-7). So this stops the run, with a line that names both spellings and says how to make
+  them agree: rename the folder on disk to git's spelling, or record the disk's with `git mv`. It
+  is RUN-4's stop 7a, checked after stop 7. How it is found:
+  - When the root holds a `.git` of its own, it is the top of its work tree and there is nothing to
+    find; nothing more is asked, so the common case costs no start of git.
+  - Otherwise git is asked for the root's path from the top of the work tree, and then for the
+    tracked paths under that path compared without letter case. When one of them begins with a
+    spelling of the root's path that differs from the disk's in letter case alone, and the folder
+    that spelling names is the same folder on disk as the root, by the identity LIST-10 compares,
+    the run stops. Where the two spellings are two real folders, on a volume that keeps case apart,
+    nothing stops: the root is one of them, and is read as it is.
+  These two starts of git are made only for a root that is a sub-folder.
 - **FIX-7** Fixtures hold the cases of LIST-10: a tracked file and an untracked path under another
   spelling, where the list holds the tracked path alone and the notice names the pair; the same for
   a folder whose name differs in case; an index that spells one folder two ways; a tracked file
   renamed in letter case alone; and a new untracked file in a folder whose name differs in case,
   which is listed under the disk's spelling and is not named by any notice, though the tracked files
-  in the renamed folder are. Whether a file system ignores letter case belongs to the volume the
-  test's folder lies on, not to the target, so each test finds out by writing a file under one
-  spelling and asking whether the other spelling exists. Its written-down output is then one of
-  two, both in the test: on a volume that ignores case a pair is one file on disk, and a renamed
-  file is listed under git's spelling; on a volume that keeps case apart the two spellings are two
-  files, both listed, and a renamed file is listed under its new name. This is the one place a
-  fixture has two expected outputs, which FIX-1 otherwise does not allow.
+  in the renamed folder are. A further fixture holds LIST-11: a root that is a sub-folder whose name
+  on disk differs from git's in letter case, which stops the run where case is ignored and is read
+  as a folder of its own where it is kept apart. Whether a file system ignores letter case belongs
+  to the volume the test's folder lies on, not to the target, so each test finds out by writing a
+  file under one spelling and asking whether the other spelling exists. Its written-down output is
+  then one of two, both in the test: on a volume that ignores case a pair is one file on disk, and a
+  renamed file is listed under git's spelling; on a volume that keeps case apart the two spellings
+  are two files, both listed, and a renamed file is listed under its new name. This is the one place
+  a fixture has two expected outputs, which FIX-1 otherwise does not allow.
 - **LIVE-6** LIVE-2's check that the file list is git's own asks git with RUN-6a's settings, the
   case setting included. From git's answer the session takes the candidate pairs, untracked and
   tracked paths that differ in letter case alone, and checks each against the disk with the
@@ -1068,6 +1087,6 @@ RUN-6a stands; this amendment settles the duplicate.
   notice, or be zero when there is no such notice, so that a fault in LIST-10 shows; and the report
   says what it was in each named repository.
 - **DEP-4** The crate `same-file` is added, pinned as DEP-1 says, for LIST-10's comparison of two
-  files' identities. Rust's own library gives a file's identity on Linux and macOS but not, in a
-  stable form, on Windows. It takes an identity by opening a file, so LIST-10 looks at both paths
-  without following a link before it calls it.
+  files' identities and LIST-11's of two folders'. Rust's own library gives an identity on Linux and
+  macOS but not, in a stable form, on Windows. It takes an identity by opening a file, so LIST-10
+  looks at both paths without following a link before it calls it.
