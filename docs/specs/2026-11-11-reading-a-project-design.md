@@ -16,8 +16,9 @@ design spec** below. That repository is not public yet, so this spec says in its
 everything a builder needs from it. From it, this item builds AN-3 to AN-7 (what is read, from
 where, and what stops a run), the parts of ENT-2 and ENT-3 that resolving an import needs, FIND-10
 as far as it changes what is read, the analyzer's side of HAND-2 and HAND-6 (reading the hand-off
-file), IF-3 (how a run fails), IF-5 (a run with no hand-off file), IF-6 and IF-6a (the interface
-version and the check of a hand-off file), and the first draft of ENT-4's keys.
+file), IF-3 (how a run fails), IF-5 (a run with no hand-off file), IF-6 (the interface version)
+with the part of IF-6a that refuses declarations written for another version, and the first draft
+of ENT-4's keys.
 
 How to read the marks: "(design AN-4)" after a sentence names the design spec's requirement that
 sentence follows from. Everything else is the session's call: the session that wrote this spec
@@ -79,7 +80,7 @@ Terms:
 - It reads every kind of file the design spec names as an importer: scripts, Vue components, MDX
   documents and HTML pages.
 - It reads the hand-off file yak will write, refuses one it cannot use with a line that says what
-  to change, and applies the two declarations that change what is read.
+  to change, and applies the one declaration that changes what is read: which files are data.
 - One command prints all of it, so a wrong reading can be seen and tested before any finding is
   built on it.
 - On the named repositories, every import the analyzer cannot resolve has been judged, and none is
@@ -94,8 +95,11 @@ Terms:
   import that passes through a package's `exports`, and stops there.
 - Whether a name is used: bindings, references, a file's exports, the names a Vue template or an
   MDX document's text mentions. `oxc_semantic` is not used until an item counts uses.
-- The value shapes of the two declarations that describe what a tool does (KEY-1). The item that
-  reads entry points fixes them.
+- The value shapes of the two declarations that describe what a tool does (KEY-1), and how two
+  stacks' numbers are combined. The items that first read them fix them.
+- The command that checks a hand-off file without analyzing anything (design IF-6a). Its first
+  caller is the pack's own checks, in the design spec's stage 3. Until then `graph` refuses a file
+  it cannot use, with the same lines.
 - A cache (design CACHE-1), the MCP server, and new against inherited.
 - A release. Nothing installs the analyzer from npm until the design spec's swap, and the
   comparison runs a built binary. release-please will open a release pull request for this item's
@@ -113,18 +117,18 @@ Terms:
   worktree and an installed, built checkout.
 - A file in `node_modules` or in build output that git ignores changing any result.
 - The analyzer running a project's code, writing inside the root, or using the network.
-- A tool's name in the analyzer's code.
+- A tool's convention written into the analyzer's code where a declaration could state it. The
+  formats the analyzer does read itself are the project's own standard files, which the design
+  spec names: `package.json`, tsconfig files, and a workspace's list of packages.
 - A real project's code or a private repository's name committed here.
 
 ## Requirements
 
 ### Commands, and how a run fails
 
-- **RUN-1** The binary has four commands. The version option stays as it is. The three new ones:
+- **RUN-1** The binary has three commands. The version option stays as it is. The two new ones:
   - `interface` prints one line of JSON holding the interface version (RUN-7) and the list of
     hand-off formats the analyzer reads, which is `[1]` (design IF-1).
-  - `check --hand-off <file>` reads a hand-off file and says whether the analyzer can use every
-    declaration in it, without reading the project (HO-6).
   - `graph` reads the project and prints what it read (OUT-1). It takes `--hand-off <file>`, and
     runs without one (HO-5).
 - **RUN-2** Given a command or an option it does not have, or a command without an argument it
@@ -133,8 +137,7 @@ Terms:
 - **RUN-3** A run that cannot go on exits 1, prints nothing on standard output, and writes exactly
   one line on standard error: what failed, and what fixes it (design IF-3). yak relays the first
   line of standard error as the reason an audit could not run, so nothing else is ever written
-  there. The `check` command is the one exception: it writes one line for each problem it finds
-  (HO-6).
+  there.
 - **RUN-4** These stop a run, each with its own line:
   - the root is not inside a git work tree, or git cannot be started or fails: the root, and git's
     own first line where it gave one;
@@ -156,9 +159,10 @@ Terms:
 - **RUN-7** The interface version is the whole number 1. The design spec makes it cover the
   commands and options, the declaration keys and their shapes, the rule names, the fingerprints
   and the MCP tools, and raises it when a release breaks one of them (design IF-6). Until the end
-  of the design spec's stage 2 the keys of KEY-1 and the commands of RUN-1 are drafts: changing a
-  draft does not raise the number. Nothing but hand-written files states an interface version
-  before then.
+  of the design spec's stage 2 the keys of KEY-1 and the `interface` command are drafts: changing
+  a draft does not raise the number. Nothing but hand-written files states an interface version
+  before then. `graph`, as a command and in what it prints, is never under the interface version
+  (OUT-2).
 - **RUN-8** For the same project and the same hand-off file, the output is the same bytes on every
   platform. Every path in it is relative to the root and written with forward slashes, and every
   list is sorted.
@@ -190,6 +194,11 @@ Terms:
   (`package.json`); a tsconfig (`tsconfig.json`, any `tsconfig.*.json`, `jsconfig.json`); or
   other. A file of the kind "other", such as CSS or JSON, is never read (design AN-3).
 - **LIST-7** A path that is not valid UTF-8 is left out of the list, with a notice.
+- **LIST-8** Nothing above the root is part of the project, also when the root is a sub-folder of
+  a work tree. Every search that goes upward from a file, for its package, its tsconfig or a
+  `package.json` that lists a dependency, ends at the root. An import that leads above the root
+  is outside (RES-1). The one thing read above the root is a tsconfig that a tsconfig under the
+  root extends (CFG-3).
 
 ### Packages
 
@@ -199,16 +208,22 @@ Terms:
   which is normal for a repository whose root has none.
 - **PACK-2** A `package.json` that makes a package and cannot be read as a JSON object stops the
   run (RUN-4, design AN-7).
-- **PACK-3** The analyzer knows the folders in which the design spec reports the three kinds of
-  finding that depend on entry points (design AN-4a). With a hand-off file they are the folders it
-  lists under `detection`. Without one they are the root and the folders its workspace names: the
+- **PACK-3** A **workspace package** is a package in a folder the project's workspace names: the
   root `package.json`'s `workspaces`, as a list or as an object with `packages`, and the
-  `packages` list of a `pnpm-workspace.yaml` at the root, with their globs and their exclusions.
-  The output marks each package that lies in one of those folders. This item reports nothing by
-  it; the item that reads entry points does.
-- **PACK-4** A package is known by the `name` in its `package.json`. When two packages under the
-  root have one name, an import by that name resolves to the one PACK-3 marks; when that does not
-  settle it, to the first by path. A notice names both.
+  `packages` list of a `pnpm-workspace.yaml` at the root, with their globs and their exclusions;
+  and, with a hand-off file, any folder it lists under `detection` that holds a `package.json`.
+  The analyzer always reads the workspace's own list, with or without a hand-off file, because
+  resolving needs it: only a workspace package can be imported by its name (RES-6). A
+  `package.json` in any other folder, such as an example project, makes a package for the files
+  under it and is never the target of an import by name. Without that rule, a stray folder whose
+  `package.json` carries the name of an installed dependency would take every import of it.
+- **PACK-4** The analyzer also knows the folders in which the design spec reports the three kinds
+  of finding that depend on entry points (design AN-4a). With a hand-off file they are the folders
+  it lists under `detection`, which is the list yak's detection made; without one they are the
+  root and the workspace's folders of PACK-3. The output marks each package that lies in one of
+  them. This item reports nothing by the mark; the item that reads entry points does.
+- **PACK-5** A package is known by the `name` in its `package.json`. When two workspace packages
+  have one name, an import by that name resolves to the first by path, and a notice names both.
 
 ### Parsing
 
@@ -255,8 +270,10 @@ Terms:
 ### Resolving an import
 
 - **RES-1** Every import gets exactly one outcome:
-  - **a file**: a file in the list, by its path;
-  - **outside**: a package that is not in the project, or a module built into Node;
+  - **files**: one file in the list, by its path, or several, where a package offers different
+    files for different conditions (RES-5);
+  - **outside**: a package that is not in the project, a module built into Node, or a path that
+    leads above the root (LIST-8). The analyzer does not look there;
   - **ignored**: a path git ignores, such as a generated file. It adds nothing to the graph and is
     never a fault, whether or not the file is on disk (design AN-5);
   - **unresolved**: nothing.
@@ -267,38 +284,45 @@ Terms:
      package (RES-5);
   4. where the governing tsconfig states a `baseUrl`, a path from that folder, when it leads to a
      file;
-  5. the name of a package under the root, the importing file's own package included, alone or
-     followed by a subpath (RES-6);
+  5. the name of a workspace package (PACK-3), the importing file's own package included, alone
+     or followed by a subpath (RES-6). A package that is not a workspace package is imported by
+     name only where the importing file's package lists it as a dependency whose version begins
+     with `workspace:`, `file:` or `link:`;
   6. anything else is outside. So is a module built into Node, with or without the `node:` prefix
      (design FIND-6).
-- **RES-3** A path leads to a file when one of these is in the file list, tried in this order: the
-  path itself; the path with a script extension written as its output form replaced by the source
-  form (`.js` by `.ts`, `.tsx` or `.d.ts`; `.jsx` by `.tsx`; `.mjs` by `.mts` or `.d.mts`; `.cjs`
-  by `.cts` or `.d.cts`); the path with each script extension added, TypeScript before JavaScript,
-  then `.d.ts`; the path as a folder with an `index` file found the same way. A folder that is a
-  package resolves through its `package.json` as RES-6 does. A path that leads to a file of the
-  kind "other", or to a data file, resolves to that file, and nothing is followed from it (design
-  AN-3, FIND-10).
-- **RES-4** When a relative specifier, a `#` specifier or a subpath of a package under the root
-  leads to no file, the import is ignored if git ignores the path it names, and unresolved if not
+- **RES-3** A path leads to a file as TypeScript finds one, with the file list in place of the
+  file system. That is, when one of these is in the list, tried in this order: the path itself;
+  the path with a script extension written as its output form replaced by the source form (`.js`
+  by `.ts`, `.tsx` or `.d.ts`; `.jsx` by `.tsx`; `.mjs` by `.mts` or `.d.mts`; `.cjs` by `.cts`
+  or `.d.cts`); the path with each script extension added, TypeScript before JavaScript, then
+  `.d.ts`; the path as a folder with an `index` file found the same way. A folder that holds a
+  `package.json` is tried through its `types`, `module` and `main` first, as RES-6 does. A path
+  that leads to a file of the kind "other", or to a data file, resolves to that file, and nothing
+  is followed from it (design AN-3, FIND-10).
+- **RES-4** When a relative specifier, a `#` specifier or a subpath of a workspace package leads
+  to no file, the import is ignored if git ignores the path it names, and unresolved if not
   (design FIND-6). When a `paths` pattern matches and none of its targets leads to a file, the
   import is unresolved or ignored in the same way, with two exceptions that send the specifier on
   down RES-2's order: the pattern is the bare `*`, which matches everything; or the specifier
-  names a package under the root or a package that a `package.json` at or above the importing
-  file lists as a dependency of any kind. Without the exceptions, a project that aliases some
+  names a workspace package or a package that a `package.json` at or above the importing file
+  lists as a dependency of any kind. Without the exceptions, a project that aliases some
   names of a scope and installs others would have every installed one reported.
 - **RES-5** A `#` specifier is matched against the keys of the `imports` map in the importing
-  file's package, a key with `*` included. Where the matched value is a set of conditions, every
-  condition's target is tried in the order written, and the first that leads to a file, directly
-  or through MAP-1, decides. No condition is preferred by name: each names build output of the
-  same source. A `#` specifier that matches no key is unresolved.
-- **RES-6** An import of a package under the root by its name resolves through that package's
+  file's package, a key with `*` included, as Node matches them. Where the matched value is a set
+  of conditions, every condition's target is followed, each through MAP-1, and the import leads
+  to every file found. The analyzer cannot know which condition a program will run under, so no
+  condition is preferred: often they all name build output of one source, and the import then
+  leads to that one file; where they name different sources, such as one file for a browser and
+  one for Node, each of them is used by the import. A `#` specifier that matches no key is
+  unresolved, and so is one whose conditions lead to no file at all, unless RES-4 makes it
+  ignored.
+- **RES-6** An import of a package by its name (RES-2, step 5) resolves through that package's
   `package.json`. With an `exports` field, the subpath, or `.` for the bare name, is matched
   against its keys, patterns included, where a `*` may be written more than once in a target;
-  conditions are tried as in RES-5. Without one, the bare name resolves through `module`, then
-  `main`, then an `index` file in the package's folder, and a subpath is a path inside the
-  package's folder (RES-3). Each target passes through MAP-1. A subpath that `exports` does not
-  offer is unresolved.
+  conditions are followed as in RES-5. Without one, the bare name leads to every file that
+  `types`, `module` and `main` lead to, or, where none of them is stated, to an `index` file in
+  the package's folder; and a subpath is a path inside the package's folder (RES-3). Each target
+  passes through MAP-1. A subpath that `exports` does not offer is unresolved.
 - **RES-7** A script `src` in an HTML page is tried from the page's folder, then from the folder
   of the page's package, then from the root; one that begins with `/` skips the first. One that
   names another host, or leads to no file, is outside: a page may load a script from a server
@@ -307,10 +331,22 @@ Terms:
   or above the importing file lists that package as a dependency of any kind. An import that is
   outside and not listed is the one way a wrong resolution can hide, so the output lets them be
   counted (LIVE-2).
-- **RES-9** `oxc_resolver` is used where it gives these rules (design AN-2). The plan begins with
-  a trial that shows which rules it covers under LIST-4, and which the analyzer adds around it. If
-  it cannot be kept from asking the file system, the design spec's AN-2 is amended before code is
-  written.
+- **RES-9** What is built is `oxc_resolver` with a file system of the analyzer's own, and the
+  analyzer's own code around it (design AN-2). The library takes its file system as a part the
+  caller supplies (its `FileSystem` trait, read in its documentation at version 11.24.3 on
+  2026-11-11), so the analyzer gives it one that answers from the file list, which is how LIST-4
+  and RES-10 hold inside the library. The split:
+  - the library finds a file for a path (RES-3), and reads tsconfig files with their `extends`,
+    `references`, `paths` and `baseUrl` (CFG-1 to CFG-3);
+  - the analyzer's own code does what differs from Node's and TypeScript's rules or is not
+    resolution at all: the order and the outcomes (RES-1, RES-2, RES-4), workspace packages by
+    name with no `node_modules` (RES-6), following every condition (RES-5), build output back to
+    source (MAP-1), HTML pages (RES-7), and the mark of RES-8.
+
+  The plan's first task tries the library's half against this spec's fixtures on the version it
+  pins. A rule the library does not give as written here moves to the analyzer's own code, and
+  the plan says so; the rule and its fixture do not change. Only if the library cannot be used
+  at all is the design spec's AN-2 amended, before any other code is written.
 - **RES-10** Matching a path against the file list is exact on letter case on every platform. An
   import whose case differs from the file's name is unresolved everywhere, as it is on a
   case-sensitive file system.
@@ -327,18 +363,22 @@ Terms:
   its folder. When it does not cover the file and has `references`, the first referenced config
   that covers the file governs. When none does, the search goes on upward. A file with no
   governing tsconfig has no `paths` and no `baseUrl`.
-- **CFG-3** `extends` is followed. A relative target, and a target inside a package under the
-  root, is read, and its `paths` and `baseUrl` mean what they mean in the file that states them.
-  A target in a package outside the project is not read: the config is used without it, with a
-  notice, so that the result is the same with no `node_modules` (design AN-5). A relative target
-  that git ignores is treated the same way.
+- **CFG-3** `extends` is followed. A relative target, and a target inside a workspace package, is
+  read, and its `paths` and `baseUrl` mean what they mean in the file that states them. A
+  relative target above the root is read too, when it is a file of the same work tree that git
+  does not ignore: a web app in a sub-folder often extends a config at the repository's root. A
+  `paths` target that leads above the root makes the import outside (LIST-8). A target in a
+  package outside the project is not read: the config is used without it, with a notice, so that
+  the result is the same with no `node_modules` (design AN-5). A relative target that git ignores
+  is treated the same way.
 - **CFG-4** A tsconfig that governs at least one file the analyzer reads, or that such a config
   extends from inside the project, and that cannot be read, stops the run (RUN-4, design AN-7).
   One that governs nothing is skipped with a notice.
 
 ### From build output back to source
 
-- **MAP-1** A target in `exports`, `main`, `module` or `imports` often names build output, which
+- **MAP-1** A target in `exports`, `types`, `module`, `main` or `imports` often names build
+  output, which
   a worktree does not have. When a target is not in the file list, the analyzer looks for the
   source it is built from, in this order (design ENT-3):
   1. for each tsconfig in the package's folder that states an `outDir` the target lies in, the
@@ -358,16 +398,20 @@ Terms:
 ### The hand-off file
 
 - **HO-1** The analyzer reads hand-off format 1. Its schema is a JSON Schema in the yakshaver
-  repository, `packages/core/src/stacks/hand-off/hand-off-1.schema.json`, on a branch that is not
-  merged yet. This repository holds a copy among its tests, with the yakshaver commit it was
-  copied from written beside it. Every hand-off file among the fixtures is checked against the
-  copy by a test, except those made wrong on purpose (design HAND-6a).
+  repository, `packages/core/src/stacks/hand-off/hand-off-1.schema.json`, on the branch of that
+  repository's pull request #213, which is not merged yet. This repository holds a copy among its
+  tests. Beside it are written the path, the pull request, the commit it was copied from, and a
+  digest of the file's content, so the copy can be checked against the original even after that
+  branch is rewritten. Every hand-off file among the fixtures is checked against the copy by a
+  test, except those made wrong on purpose (design HAND-6a). The check needs a JSON Schema
+  validator, which is a dependency of the tests alone and never part of the binary (DEP-1).
 - **HO-2** From the file the analyzer takes: the format version; `root`, an absolute path, which
   is the root (LIST-1); under `detection`, the folders and whether yak's limit cut the list
   short, which gives a notice; and `stacks`, in order, each with its name, the interface version
   its declarations were written for, the pack's declarations and the project's, kept apart. It
   reads `base` and `siblings` and checks their shape; this item uses neither. It ignores a
-  top-level field it does not know (design HAND-2, HAND-6).
+  top-level field it does not know (design HAND-2, HAND-6). Inside `detection` and inside a
+  stack the schema allows no other field, and the analyzer refuses one there (RUN-4).
 - **HO-3** A format version other than 1 stops the run. The line names the format the file
   states, the formats the analyzer reads, and which side to update: yak, when the file's format
   is older than any the analyzer reads, and the analyzer's version pinned in the pack, when it is
@@ -378,15 +422,13 @@ Terms:
   stack that states none must hold no declarations (design IF-6a).
 - **HO-5** Without a hand-off file the analyzer reads the project from what its own standard files
   state, with no declarations, and says so in a notice (design IF-5).
-- **HO-6** `check --hand-off <file>` applies HO-1 to HO-4 and KEY-1 to KEY-3 and reads nothing
-  else. It exits 0 and prints nothing when the analyzer can use the whole file. Otherwise it
-  exits 1 and writes one line for each problem, so that a pack's own checks show all of them at
-  once (design IF-6a).
 
 ### The declaration keys
 
 - **KEY-1** These are the keys the analyzer knows, as drafts (RUN-7). The design spec lists what
-  each states (design ENT-4); this item gives them names:
+  each states (design ENT-4); this item gives them names. It names all nine, though it uses one,
+  because the analyzer refuses a key it does not know: a hand-off file written by hand for the
+  comparison holds keys that later items read, and must not be refused meanwhile:
 
   | Key | Value | States |
   |---|---|---|
@@ -407,28 +449,27 @@ Terms:
   pack may. The line names the stack, the key, and whether the pack or the project states it
   (design FAIL-1). The value of an opaque key is accepted whatever it holds, until the item that
   reads entry points fixes its shape.
-- **KEY-3** The analyzer combines what the file keeps apart (design ENT-4). The lists of one key
-  are joined across the stacks, the pack's and the project's. A pack's glob or path is relative
-  to each folder PACK-3 names, so it applies in each of them. A project's is relative to the
-  root. For a number the project's value wins; where the project states none, the value of the
-  stack that comes later in the file wins.
-- **KEY-4** This item uses two keys, because they change what is read (design FIND-10):
-  - A file a `data` glob matches is data. It is never parsed, a `package.json` among data makes no
-    package, and a tsconfig among data is never read, so data cannot stop a run by being broken.
-    An import that leads to a data file resolves to it, and nothing is followed from it.
-  - A file a `generated` glob matches is read like any other, and marked.
-
+- **KEY-3** The analyzer combines the lists the file keeps apart (design ENT-4). The lists of one
+  key are joined across the stacks, the pack's and the project's. A pack's glob or path is
+  relative to each folder PACK-4 names, so it applies in each of them. A project's is relative to
+  the root.
+- **KEY-4** This item uses `data`, because it changes what is read (design FIND-10). A file a
+  `data` glob matches is data. It is never parsed, a `package.json` among data makes no package,
+  and a tsconfig among data is never read, so data cannot stop a run by being broken. An import
+  that leads to a data file resolves to it, and nothing is followed from it. A file a `generated`
+  glob matches is read like any other; the output marks it, for the item that reports findings.
   The other keys are read, checked by KEY-2, and used by later items.
 
 ### The output
 
 - **OUT-1** `graph` prints one JSON document on standard output and exits 0. It holds: the root;
-  whether a hand-off file was used; the packages, each with its folder, its name and PACK-3's
-  mark; the files, each with its path, its kind, whether it is tracked, its package, and whether
-  it is data, generated or a type declaration file; for each file that was read, its imports,
-  each with the specifier, the form, the line, the mark of IMP-4, the outcome, and with the
-  outcome the target's path or the outside package's name and RES-8's mark; the count of IMP-2;
-  and the notices.
+  whether a hand-off file was used; the packages, each with its folder, its name, whether it is a
+  workspace package (PACK-3) and PACK-4's mark; the files, each with its path, its kind, whether
+  it is tracked, its package, and whether it is data, generated or a type declaration file; for
+  each file that was read, its imports, each with the specifier, the form, the line, the mark of
+  IMP-4, the outcome, and with the outcome the paths of the files it leads to, or what it is
+  outside of (a package's name with RES-8's mark, a built-in module, or a path above the root),
+  and which step of RES-2 decided; the count of IMP-2; and the notices.
 - **OUT-2** The output is the builder's and the tests' view of what was read. It is not part of
   the interface version, and a later item may change it freely.
 
@@ -450,7 +491,9 @@ Terms:
   - 13: a module imported with `?raw`;
   - 14: an HTML page that is not `index.html`, loading one script by a path relative to the page
     and one by a path from the server's root;
-  - 15: a web app in a sub-folder of a repository whose root has no `package.json`;
+  - 15: a web app in a sub-folder of a repository whose root has no `package.json`, run from the
+    repository's root and with the sub-folder as the root, where one import and one tsconfig's
+    `extends` lead above the sub-folder (LIST-8, CFG-3);
   - 16: Vue components with `<script setup>` and with a plain script, and a file only an MDX
     document imports;
   - 19: a computed `import()`;
@@ -463,11 +506,14 @@ Terms:
   output on disk, and must give the same output (design AN-5).
 - **FIX-4** Further fixtures cover what this spec adds: a tsconfig whose `references` govern a
   file (CFG-2); a `paths` pattern that misses, in each of RES-4's cases; an `exports` pattern
-  whose `*` is written twice in its target; conditions whose first target has no source; two
-  packages with one name; an import whose letter case differs from the file's; a symbolic link;
-  and a source file that is not UTF-8.
-- **FIX-5** Every line of RUN-4 and every problem of KEY-2 has a fixture that checks the exact
-  line and the exit code (design PROOF-1, pattern 26, as far as this item fails).
+  whose `*` is written twice in its target; conditions that name one source, conditions that
+  name two different sources, and conditions whose first target has no source; a folder outside
+  the workspace whose `package.json` carries the name of an installed dependency, and a package
+  outside the workspace listed with `file:`; two workspace packages with one name; an import
+  whose letter case differs from the file's; a symbolic link; and a source file that is not
+  UTF-8.
+- **FIX-5** Every line of RUN-4 and every case of KEY-2 has a fixture that checks the exact line
+  and the exit code (design PROOF-1, pattern 26, as far as this item fails).
 
 ### The check on real repositories
 
@@ -478,7 +524,11 @@ Terms:
   from that sub-folder.
 - **LIVE-2** For each run the session checks that it finishes, that the file list is git's own,
   and records the time it took. It judges, by reading the code, every import that is unresolved,
-  and every import that is outside and not listed as a dependency (RES-8): true, or false.
+  and every import that is outside and not listed as a dependency (RES-8): true, or false. An
+  import that led to the wrong file shows in neither list, so it also checks against the code one
+  import of each kind that could: one for each workspace package imported by name, one for each
+  `paths` pattern and each `imports` key that led to files, and every import that led to more
+  than one file.
 - **LIVE-3** Each false one becomes a made-up fixture of its shape first, and is then fixed
   (design PROOF-5). One that cannot be fixed without something a later item builds is written
   down with the item it waits for.
@@ -494,7 +544,7 @@ Terms:
   with the reason it is needed, as the skeleton spec's GATE-1 and GATE-4 ask. The released binary
   still asks no more of a system than the skeleton spec's PKG-2a allows, which CI already checks
   on every target.
-- **DOC-1** `CONTRIBUTING.md` gains how a fixture is written and run, and the three commands. The
+- **DOC-1** `CONTRIBUTING.md` gains how a fixture is written and run, and the two new commands. The
   README's status says what the analyzer reads and that it reports no findings yet.
 
 ## Alternatives considered
@@ -509,6 +559,14 @@ Terms:
   ignores case resolves what a case-sensitive one refuses.
 - **Reading `node_modules` when it is there, for a better answer.** Rejected by the design spec's
   AN-5: yak's worktrees never have it, so a better answer on one checkout is a different answer.
+- **Writing all of the resolution in the analyzer's own code.** One set of rules in one place,
+  with no library to bend. Rejected because how TypeScript finds a file for a path, and how
+  tsconfig files extend and refer to each other, are intricate and already written and tested in
+  `oxc_resolver`; a second writing of them is where silent mistakes would come from. The
+  analyzer's own code is kept to what differs from those rules (RES-9).
+- **Preferring a condition by name, or taking the first that leads to a file.** One import then
+  leads to one file. Rejected because where conditions name different sources, the file not
+  chosen loses an importer and would later be reported as unused, with nothing to show why.
 - **Going on past a syntax error.** The parser can hand back a partial tree. Rejected by the
   design spec's AN-7: an import list read from half a file is a guess.
 - **A separate item for Vue, MDX and HTML.** It would make this item smaller. Rejected because the
@@ -525,9 +583,18 @@ Terms:
 
 ## Risks
 
-- **`oxc_resolver` cannot work from a file list.** The trial of RES-9 finds out before code is
-  written. If it cannot, the analyzer carries its own resolution for these rules and the design
-  spec is amended.
+- **`oxc_resolver` does less of RES-9's half than its documentation suggests.** Its file system
+  is a part the caller supplies, which was read and not yet tried. The plan's first task tries
+  it. A rule it does not give moves to the analyzer's own code with its fixture unchanged, which
+  costs code and not correctness; if it cannot be used at all, the design spec is amended first.
+- **An import that follows every condition leads to more files than any one program loads.** A
+  file that only a never-used condition names then stays alive, and a later item will not report
+  it as unused. That is the safe direction: the other choice reports live files.
+- **A workspace the analyzer does not see.** A project whose packages are linked by something
+  other than `workspaces`, `pnpm-workspace.yaml` or a `workspace:`, `file:` or `link:`
+  dependency has its imports by name counted as outside. They show among the imports LIVE-2
+  judges, when no `package.json` lists the name; where one does, the hand-off file's folders
+  make the package a workspace package (PACK-3).
 - **The parser refuses code a project's own tools accept.** A tracked file then stops the run.
   LIVE-1 shows whether any file of the named repositories does; a file can be declared as data;
   and the parser's version is pinned, so the answer changes only in a pull request that the
@@ -545,8 +612,9 @@ Terms:
 - **git is slow, missing, or refuses.** One run starts git a small, fixed number of times, never
   once per file, and LIVE-2 records the time. A missing git, or one that refuses a folder it does
   not trust, stops the run with git's own line (RUN-4).
-- **The schema changes in yakshaver before its branch merges.** The copy records the commit it
-  came from, and a changed schema is copied again with the fixtures that depend on it.
+- **The schema changes in yakshaver before its branch merges.** The copy records where it came
+  from and a digest of its content (HO-1), and a changed schema is copied again with the fixtures
+  that depend on it.
 - **The draft keys change.** Only hand-written files hold them until stage 2 ends.
 - **The hand-rolled reading of Vue blocks and MDX statements misses a form.** An import is then
   not read and a file may look unused later. The fixtures cover the forms the design spec names,
@@ -560,8 +628,9 @@ Terms:
 
 ## Left to the builder
 
-- The crate layout, and which crates read JSON, JSON with comments, YAML and globs, parse the
-  command line, and run work in parallel, each with its reason (DEP-1).
+- The crate layout, and which crates read JSON, JSON with comments, YAML and globs, and parse the
+  command line, each with its reason (DEP-1). Nothing in this spec asks for work in parallel; if
+  the times of LIVE-2 call for it, RUN-8 still holds.
 - How git is asked for the file list and for what it ignores, within LIST-2 to LIST-5 and a
   small, fixed number of starts.
 - The field names of the output, the names of the notice kinds, and the wording of each line.
