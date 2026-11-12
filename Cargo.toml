@@ -31,9 +31,15 @@ path = "tests/declarations.test.rs"
 name = "hand-off-schema"
 path = "tests/hand-off-schema.test.rs"
 
+[[test]]
+name = "file-list"
+path = "tests/file-list.test.rs"
+
 [dependencies]
 # Reads the hand-off file and writes what `graph` prints.
 serde_json = "=1.0.154"
+# Tells whether two paths are one file on disk, which Rust gives on Windows only in an unstable form.
+same-file = "=1.0.6"
 
 [dev-dependencies]
 # Checks the tests' hand-off files against the copy of yakshaver's schema. Never part of the binary.

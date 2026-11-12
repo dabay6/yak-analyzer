@@ -5,7 +5,7 @@
 //! (spec RUN-4).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
@@ -22,6 +22,8 @@ const COMMIT_NAME_LENGTHS: [usize; 2] = [40, 64];
 /// the file is read; a field is kept here once a part of the analyzer uses it.
 #[derive(Debug)]
 pub struct HandOff {
+    /// The checkout's root, which is the folder to read whatever folder the analyzer was started in.
+    pub root: PathBuf,
     /// Whether yak's detection stopped at its limit, so the folders it lists are not the whole workspace.
     pub truncated: bool,
     /// The stacks that carry declarations, in the order yak applies them.
@@ -76,7 +78,8 @@ pub fn read(path: &Path) -> Result<HandOff, Stop> {
     })?;
 
     // The fields are checked in the order the format's table lists them (spec HO-2).
-    absolute_path(fields, "root").map_err(shape)?;
+    let root = absolute_path(fields, "root").map_err(shape)?;
+
     folders(fields).map_err(shape)?;
 
     let truncated = truncated(fields).map_err(shape)?;
@@ -85,7 +88,11 @@ pub fn read(path: &Path) -> Result<HandOff, Stop> {
     absolute_path(fields, "siblings").map_err(shape)?;
     base(fields).map_err(shape)?;
 
-    let handed = HandOff { truncated, stacks };
+    let handed = HandOff {
+        root,
+        truncated,
+        stacks,
+    };
 
     for stack in &handed.stacks {
         interface_version(stack, &shown.to_string())?;
@@ -131,8 +138,8 @@ fn format_version(fields: &Map<String, Value>, shown: &str) -> Result<(), Fault>
     Ok(())
 }
 
-/// Checks a field that must be text holding an absolute path.
-fn absolute_path(fields: &Map<String, Value>, name: &str) -> Result<(), String> {
+/// A field that must be text holding an absolute path.
+fn absolute_path(fields: &Map<String, Value>, name: &str) -> Result<PathBuf, String> {
     let text = fields
         .get(name)
         .ok_or_else(|| format!("`{name}` is missing"))?
@@ -140,8 +147,10 @@ fn absolute_path(fields: &Map<String, Value>, name: &str) -> Result<(), String> 
         .filter(|text| !text.is_empty())
         .ok_or_else(|| format!("`{name}` must be text that is not empty"))?;
 
-    if Path::new(text).is_absolute() {
-        Ok(())
+    let path = PathBuf::from(text);
+
+    if path.is_absolute() {
+        Ok(path)
     } else {
         Err(format!("`{name}` must be an absolute path"))
     }

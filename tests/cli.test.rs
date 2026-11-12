@@ -1,5 +1,7 @@
 //! Starts the built binary and checks its commands and how it refuses (spec RUN-1, RUN-2, RUN-3, RUN-7).
 
+use std::fs;
+use std::path::Path;
 use std::process::{Command, Output};
 
 use serde_json::{Value, json};
@@ -38,7 +40,25 @@ fn prints_its_interface_version_and_the_hand_off_formats_it_reads_as_one_line_of
 
 #[test]
 fn graph_without_a_hand_off_file_prints_one_document_and_says_so_in_a_notice() {
-    let output = run(&["graph"]);
+    // Without a hand-off file the root is the folder the binary is started in: an empty repository here.
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-graph");
+    let _ = fs::remove_dir_all(&root);
+
+    fs::create_dir_all(&root).expect("the test's folder can be made");
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&root)
+            .status()
+            .expect("git starts")
+            .success()
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yak-analyzer"))
+        .arg("graph")
+        .current_dir(&root)
+        .output()
+        .expect("the binary starts");
     let document: Value = serde_json::from_slice(&output.stdout).expect("graph prints JSON");
 
     assert!(output.status.success());
