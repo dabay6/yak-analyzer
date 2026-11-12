@@ -959,15 +959,36 @@ file that nothing ignores. LIST-2 would then put one file into the file list und
 only on the machines whose disk holds the other spelling, which is the difference between machines
 that RUN-8 forbids.
 
-- **LIST-10** An untracked name that differs from a tracked name only in letter case is left out of
-  the file list, with a notice that names both. The tracked name stands for the file. This narrows
-  LIST-2, which otherwise holds. It applies on every platform: on a file system that keeps letter
-  case apart, a tracked file and an untracked file can differ only in letter case and both be real,
-  and the untracked one is left out there too, so that the same repository gives the same list
-  everywhere. The cost is that such a file is not read there until it is tracked or renamed; the
-  notice is how a person learns of it.
-- **FIX-7** A fixture holds a tracked file and an untracked name that differs from it only in letter
-  case, and checks that the list holds the tracked name alone and that the notice names both. On a
-  target whose file system ignores letter case the two names are one file on disk, made by renaming
-  it; on a target that keeps case apart they are two files. The test makes whichever its target
-  allows, and says which.
+- **LIST-10** An untracked path is left out of the file list when it differs only in letter case
+  from the path of a tracked file that is itself in the list. The tracked path stands for the file.
+  This narrows LIST-2, which otherwise holds. Three things make the rule exact:
+  - A path here is the whole path from the root, folders included, so a folder whose name differs
+    in case between git and the disk is covered: each file under it is one such pair.
+  - Two paths differ only in letter case when they are equal once every letter of both is put in
+    lower case by Unicode's own mapping. Nothing else is folded: not accents, and not the different
+    ways Unicode can write one character. The rule is the analyzer's own and is the same on every
+    file system.
+  - The tracked file must be in the list. A tracked file that is missing from the working tree is
+    not in it (LIST-3), and then the untracked path is kept. That is the case of a file renamed in
+    letter case alone on a file system that keeps case apart: git calls the old name missing and
+    the new one untracked, and the file is read under its new name.
+
+  One notice says how many paths were left out and names the first pair, so a renamed folder of
+  many files gives one notice and not hundreds.
+
+  The rule applies on every platform. On a file system that keeps case apart, a tracked file and an
+  untracked file can differ only in letter case and both be real; the untracked one is left out
+  there too, and is not read until it is tracked or renamed, which the notice is there to say. What
+  the rule does not make the same on every platform is a working tree whose disk holds another
+  spelling than git: where the file system ignores case the file is listed under git's spelling,
+  and where it keeps case apart, under the disk's. The two working trees differ, so RUN-8, which
+  speaks of the same project, is not broken by it.
+- **FIX-7** Fixtures hold the cases of LIST-10: a tracked file and an untracked path that differs
+  from it only in letter case, where the list holds the tracked path alone and the notice names
+  the pair; the same for a folder whose name differs in case; and a tracked file renamed in letter
+  case alone. On a target whose file system ignores letter case a pair is one file on disk, made by
+  renaming it, and the renamed file is listed under git's spelling; on a target that keeps case
+  apart a pair is two files, and the renamed file is listed under its new name. Each test makes
+  what its target allows and says which.
+- **LIVE-6** LIVE-2's check that the file list is git's own takes out the paths LIST-10 leaves out,
+  as it takes out the links, and the report says how many there were in each named repository.
