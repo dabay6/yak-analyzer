@@ -1,39 +1,65 @@
 //! `yak-analyzer`: a static analyzer for TypeScript and JavaScript, built for yakshaver.
 //!
-//! This is the walking skeleton. It answers its version and analyzes nothing yet.
+//! It answers its version and its interface version, and reads a project. It reports no findings yet.
+
+mod cli;
+mod graph;
+mod stop;
 
 use std::env;
+use std::ffi::OsString;
+use std::panic;
 use std::process::ExitCode;
 
-/// The option that prints the version. yak runs it after an install to read the installed version.
-const VERSION_OPTION: &str = "--version";
+use cli::Command;
 
-/// The exit code for a command the binary does not have.
-const REFUSED: u8 = 2;
+/// The interface version: what yak and the analyzer must agree on (spec RUN-7).
+const INTERFACE_VERSION: u64 = 1;
+
+/// The hand-off formats the analyzer reads, oldest first (spec RUN-1).
+const HAND_OFF_FORMATS: [u32; 1] = [1];
 
 fn main() -> ExitCode {
-    let args: Vec<String> = env::args_os()
-        .skip(1)
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect();
+    // A fault in the analyzer itself gets one line and its own exit code, never a stack trace (spec RUN-3).
+    panic::set_hook(Box::new(|fault| {
+        eprintln!(
+            "{}",
+            stop::line(&format!(
+                "a fault in the analyzer itself, not in the project: {fault}"
+            ))
+        );
+    }));
 
-    match args.as_slice() {
-        [only] if only == VERSION_OPTION => {
+    panic::catch_unwind(run).unwrap_or_else(|_| ExitCode::from(stop::FAULT))
+}
+
+/// Does what the command line asks.
+fn run() -> ExitCode {
+    let args: Vec<OsString> = env::args_os().skip(1).collect();
+
+    match cli::parse(&args) {
+        Ok(Command::Version) => {
             println!("yak-analyzer {}", env!("CARGO_PKG_VERSION"));
 
             ExitCode::SUCCESS
         }
-        [] => {
-            eprintln!("yak-analyzer: nothing to do; it answers only {VERSION_OPTION}");
+        Ok(Command::Interface) => {
+            println!(
+                "{}",
+                serde_json::json!({ "handOffFormats": HAND_OFF_FORMATS, "interfaceVersion": INTERFACE_VERSION })
+            );
 
-            ExitCode::from(REFUSED)
+            ExitCode::SUCCESS
         }
-        _ => {
-            let given = args.join(" ");
+        Ok(Command::Graph) => {
+            println!("{}", graph::read());
 
-            eprintln!("yak-analyzer: cannot do `{given}`; it answers only {VERSION_OPTION}");
+            ExitCode::SUCCESS
+        }
+        Err(refusal) => {
+            eprintln!("{}", stop::line(&refusal));
 
-            ExitCode::from(REFUSED)
+            ExitCode::from(stop::REFUSED)
         }
     }
 }
