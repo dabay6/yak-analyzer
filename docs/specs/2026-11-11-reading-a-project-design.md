@@ -963,11 +963,22 @@ that RUN-8 forbids.
   from the path of a tracked file that is itself in the list. The tracked path stands for the file.
   This narrows LIST-2, which otherwise holds. Three things make the rule exact:
   - A path here is the whole path from the root, folders included, so a folder whose name differs
-    in case between git and the disk is covered: each file under it is one such pair.
+    in case between git and the disk is covered for the files git tracks in it: each is one such
+    pair. A new file in such a folder that git does not track yet has no tracked path to pair with,
+    and is listed under the disk's spelling of the folder; its package, tsconfig and relative
+    imports are then read from that spelling, and on a file system that ignores case they find
+    the same files. Once it is tracked, git holds it under its own spelling.
   - Two paths differ only in letter case when they are equal once every letter of both is put in
     lower case by Unicode's own mapping. Nothing else is folded: not accents, and not the different
     ways Unicode can write one character. The rule is the analyzer's own and is the same on every
-    file system.
+    file system. A file system that folds some letter differently from Unicode's mapping lets the
+    duplicate through for a path that holds that letter, on that file system alone; for the
+    letters of the English alphabet every common file system and Unicode agree.
+  - Two tracked paths that differ only in letter case are both kept: git holds both, and on a file
+    system that keeps case apart they are two files. On a file system that ignores case they are
+    one file on disk, read under both paths. That is a fault of the repository on that system,
+    which git itself warns of when it checks such a repository out, and the analyzer does not
+    repair it.
   - The tracked file must be in the list. A tracked file that is missing from the working tree is
     not in it (LIST-3), and then the untracked path is kept. That is the case of a file renamed in
     letter case alone on a file system that keeps case apart: git calls the old name missing and
