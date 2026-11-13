@@ -1,9 +1,9 @@
 //! The `graph` command: reads a project and prints what it read as one JSON document (spec OUT-1).
 //!
 //! So far it reads the hand-off file, the file list, the `data` and `generated` declarations, the
-//! packages, and the imports of every script. Where each import leads comes with the part that resolves
-//! them.
+//! packages, the imports of every script, and where each import leads.
 
+use std::collections::BTreeMap;
 use std::env;
 use std::path::Path;
 
@@ -16,6 +16,7 @@ use crate::imports::Import;
 use crate::marks::{self, Marks};
 use crate::notice::{self, Notice};
 use crate::packages::{self, Package, Packages};
+use crate::resolve::{Outcome, Place, Resolution, Resolver};
 use crate::scripts::{self, Scripts};
 use crate::stop::Stop;
 
@@ -64,21 +65,23 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
             ))
         })?,
     };
-    let files = files::list(&root, &mut notices)?;
-    let marks = marks::apply(&files, handed.as_ref(), &mut notices)?;
+    let listing = files::list(&root, &mut notices)?;
+    let files = listing.files.as_slice();
+    let marks = marks::apply(files, handed.as_ref(), &mut notices)?;
     let packages = packages::read(
         &root,
-        &files,
+        files,
         &marks.data,
         handed.as_ref().map(|handed| handed.folders.as_slice()),
         &mut notices,
     )?;
-    let scripts = scripts::read(&root, &files, &marks.data, &mut notices)?;
+    let scripts = scripts::read(&root, files, &marks.data, &mut notices)?;
+    let resolved = Resolver::new(&listing, &packages).resolve(&root, &scripts)?;
     let document = json!({
         "files": files
             .iter()
             .filter(|each| !scripts.gone.contains(&each.path))
-            .map(|each| file(each, &marks, &packages, &scripts))
+            .map(|each| file(each, &marks, &packages, &scripts, &resolved))
             .collect::<Vec<Value>>(),
         "handOff": handed.is_some(),
         "notices": notice::printed(notices),
@@ -88,9 +91,15 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
     Ok(format!("{document:#}"))
 }
 
-/// One file as it is printed. A file that was read has its imports and the count of those that cannot
-/// be followed.
-fn file(file: &File, marks: &Marks, packages: &Packages, scripts: &Scripts) -> Value {
+/// One file as it is printed. A file that was read has its imports, each with where it leads, and the
+/// count of those that cannot be followed.
+fn file(
+    file: &File,
+    marks: &Marks,
+    packages: &Packages,
+    scripts: &Scripts,
+    resolved: &BTreeMap<String, Vec<Resolution>>,
+) -> Value {
     let mut printed = json!({
         "data": marks.data.contains(&file.path),
         "generated": marks.generated.contains(&file.path),
@@ -100,23 +109,54 @@ fn file(file: &File, marks: &Marks, packages: &Packages, scripts: &Scripts) -> V
         "tracked": file.tracked,
     });
 
-    if let Some(read) = scripts.read.get(&file.path) {
+    if let (Some(read), Some(resolutions)) =
+        (scripts.read.get(&file.path), resolved.get(&file.path))
+    {
         printed["computedImports"] = json!(read.computed);
-        printed["imports"] = read.imports.iter().map(import).collect();
+        printed["imports"] = read
+            .imports
+            .iter()
+            .zip(resolutions)
+            .map(|(each, resolution)| import(each, resolution))
+            .collect();
     }
 
     printed
 }
 
-/// One import as it is printed (spec OUT-1).
-fn import(import: &Import) -> Value {
-    json!({
+/// One import as it is printed, with where it leads and the rule that decided it (spec OUT-1).
+fn import(import: &Import, resolution: &Resolution) -> Value {
+    let mut printed = json!({
         "form": import.form.name(),
         "line": import.line,
         "query": import.has_query(),
+        "rule": resolution.rule.name(),
         "specifier": import.specifier,
         "typeOnly": import.type_only,
-    })
+    });
+
+    match &resolution.outcome {
+        Outcome::Files(files) => {
+            printed["outcome"] = json!("files");
+            printed["files"] = json!(files);
+        }
+        Outcome::Outside(place) => {
+            printed["outcome"] = json!("outside");
+            printed["outside"] = json!(place.name());
+
+            if let Place::Package { name, listed } = place {
+                printed["package"] = json!(name);
+                printed["listed"] = json!(listed);
+            }
+        }
+        Outcome::Ignored(path) => {
+            printed["outcome"] = json!("ignored");
+            printed["ignored"] = json!(path);
+        }
+        Outcome::Unresolved => printed["outcome"] = json!("unresolved"),
+    }
+
+    printed
 }
 
 /// One package as it is printed.

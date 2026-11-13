@@ -4,8 +4,10 @@
 //! every start gets the settings below and loses the variables by which a caller's environment could
 //! point git at another repository.
 
+use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::thread;
 
 use crate::stop::Stop;
 
@@ -56,6 +58,49 @@ pub struct Answer {
 
 /// Runs one git command in the root and returns what it printed.
 pub fn read(root: &Path, command: &[&str]) -> Result<Answer, Stop> {
+    run(root, command, None)
+}
+
+/// Asks git which of the paths given, relative to the root, it ignores (spec LIST-5). It answers from
+/// its patterns, whether or not a path is on disk. A path inside a submodule must not be given: git
+/// stops on one.
+pub fn ignored(root: &Path, paths: &[&str]) -> Result<Vec<String>, Stop> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let input: Vec<u8> = paths
+        .iter()
+        .flat_map(|path| path.bytes().chain([0]))
+        .collect();
+    let answer = run(
+        root,
+        &[
+            "check-ignore",
+            "-z",
+            "--stdin",
+            "--verbose",
+            "--non-matching",
+        ],
+        Some(&input),
+    )?;
+    let fields: Vec<&[u8]> = answer.output.split(|byte| *byte == 0).collect();
+
+    // Each path comes back as four fields: the file of the pattern that decided, its line, the pattern,
+    // and the path. A path no pattern matched has the first three empty; a pattern that begins with `!`
+    // says the path is not ignored.
+    Ok(fields
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|answer| !answer[0].is_empty() && !answer[2].starts_with(b"!"))
+        .map(|answer| String::from_utf8_lossy(answer[3]).into_owned())
+        .collect())
+}
+
+/// Runs one git command in the root, with what it reads on standard input where there is any. With
+/// input, exit code 1 is an answer too: `check-ignore` gives it when no path is ignored.
+fn run(root: &Path, command: &[&str], input: Option<&[u8]>) -> Result<Answer, Stop> {
     let shown = root.display();
 
     if !root.is_dir() {
@@ -70,23 +115,49 @@ pub fn read(root: &Path, command: &[&str]) -> Result<Answer, Stop> {
     git.args(SETTINGS)
         .args(command)
         .current_dir(root)
-        .stdin(Stdio::null());
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     for variable in REPOSITORY_VARIABLES {
         git.env_remove(variable);
     }
 
     let (oldest_major, oldest_minor) = OLDEST;
-    let ran = git.output().map_err(|error| {
+    let started = |error: std::io::Error| {
         Stop::new(format!(
             "git cannot be started ({error}); the analyzer reads a project through git {oldest_major}.\
              {oldest_minor} or newer, which must be on the PATH"
         ))
-    })?;
+    };
+    let mut child = git.spawn().map_err(started)?;
+
+    // The input is written from a thread of its own, so that git never waits on a full output pipe
+    // while the analyzer waits to finish writing.
+    let writer = match (input, child.stdin.take()) {
+        (Some(input), Some(mut stdin)) => {
+            let input = input.to_vec();
+
+            Some(thread::spawn(move || stdin.write_all(&input)))
+        }
+        _ => None,
+    };
+    let ran = child.wait_with_output().map_err(started)?;
+
+    // git stops reading when it fails, which breaks the pipe; its exit code says what happened.
+    if let Some(writer) = writer {
+        let _ = writer.join();
+    }
+
+    let answered = ran.status.success() || (input.is_some() && ran.status.code() == Some(1));
     let said = String::from_utf8_lossy(&ran.stderr);
     let first = said.lines().find(|line| !line.trim().is_empty());
 
-    if ran.status.success() {
+    if answered {
         return Ok(Answer {
             output: ran.stdout,
             warning: first.map(str::to_owned),

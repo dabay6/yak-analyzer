@@ -43,6 +43,10 @@ path = "tests/packages.test.rs"
 name = "imports"
 path = "tests/imports.test.rs"
 
+[[test]]
+name = "resolve"
+path = "tests/resolve.test.rs"
+
 [dependencies]
 # Parse scripts into syntax trees and walk them; released together, so pinned together (spec AN-2, DEP-3).
 oxc_allocator = "=0.156.0"

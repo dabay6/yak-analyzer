@@ -27,6 +27,8 @@ pub struct Package {
     pub workspace: bool,
     /// Whether its folder is one the design spec reports the entry-point kinds in (spec PACK-4).
     pub detected: bool,
+    /// The packages its four lists of dependencies name, each with the version it asks for.
+    pub dependencies: BTreeMap<String, String>,
 }
 
 /// The packages of a project, and which package each file belongs to.
@@ -66,10 +68,12 @@ pub fn read(
     } else {
         None
     };
-    let mut names: BTreeMap<&str, Option<String>> = BTreeMap::new();
+    let mut names: BTreeMap<&str, (Option<String>, BTreeMap<String, String>)> = BTreeMap::new();
 
     for (folder, fields) in &read {
-        names.insert(folder, name(fields, &manifest_path(folder))?);
+        let file = manifest_path(folder);
+
+        names.insert(folder, (name(fields, &file)?, dependencies(fields, &file)?));
     }
 
     let mut patterns = Vec::new();
@@ -87,7 +91,7 @@ pub fn read(
         detection.map(|folders| folders.iter().map(String::as_str).collect());
     let mut list: Vec<Package> = names
         .into_iter()
-        .map(|(folder, name)| {
+        .map(|(folder, (name, dependencies))| {
             let listed = folder != "."
                 && included.iter().any(|glob| glob.matches(folder))
                 && !excluded.iter().any(|glob| glob.matches(folder));
@@ -106,6 +110,7 @@ pub fn read(
                 name,
                 workspace,
                 detected,
+                dependencies,
             }
         })
         .collect();
@@ -196,6 +201,37 @@ fn name(fields: &Map<String, Value>, file: &str) -> Result<Option<String>, Stop>
         Some(Value::String(name)) => Ok(Some(name.clone())),
         Some(_) => Err(misshapen("name", file, "text")),
     }
+}
+
+/// The packages a `package.json`'s four lists of dependencies name, each with the version it asks for.
+fn dependencies(fields: &Map<String, Value>, file: &str) -> Result<BTreeMap<String, String>, Stop> {
+    let mut named = BTreeMap::new();
+
+    for list in [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ] {
+        let form = "an object that maps each package's name to the version it asks for";
+        let entries = match fields.get(list) {
+            None => continue,
+            Some(Value::Object(entries)) => entries,
+            Some(_) => return Err(misshapen(list, file, form)),
+        };
+
+        for (package, version) in entries {
+            let version = version
+                .as_str()
+                .ok_or_else(|| misshapen(list, file, form))?;
+
+            named
+                .entry(package.clone())
+                .or_insert_with(|| version.to_owned());
+        }
+    }
+
+    Ok(named)
 }
 
 /// The globs of the root `package.json`'s `workspaces`: a list, or an object with `packages`.
