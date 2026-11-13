@@ -1,71 +1,103 @@
 //! The `graph` command: reads a project and prints what it read as one JSON document (spec OUT-1).
 //!
-//! So far it reads the hand-off file and nothing of the project: the lists of packages and files are
-//! empty until the parts that fill them are built.
+//! So far it reads the hand-off file, the file list, the `data` and `generated` declarations and the
+//! packages. Imports come with the parts that read them.
 
+use std::env;
 use std::path::Path;
 
 use serde_json::{Value, json};
 
 use crate::declarations;
+use crate::files::{self, File};
 use crate::hand_off;
+use crate::marks::{self, Marks};
+use crate::notice::{self, Notice};
+use crate::packages::{self, Package, Packages};
 use crate::stop::Stop;
-
-/// Something a person should know about a run that went on (spec RUN-5).
-struct Notice {
-    /// The kind of notice, a fixed name.
-    kind: &'static str,
-    /// The file it is about, relative to the root, where there is one.
-    file: Option<String>,
-    /// What happened, as a sentence.
-    sentence: String,
-}
 
 /// Reads the project, with the hand-off file at the path given or with none, and returns the document
 /// to print.
 pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
     let mut notices = Vec::new();
-
-    match hand_off_path {
+    let handed = match hand_off_path {
         Some(path) => {
             let handed = hand_off::read(path)?;
 
             declarations::check(&handed.stacks)?;
 
             if handed.truncated {
-                notices.push(Notice {
-                    kind: "detection-cut-short",
-                    file: None,
-                    sentence: "yak's detection stopped at its limit of folders, so the folders the hand-off \
-                               file lists are not the whole workspace."
+                notices.push(Notice::new(
+                    "detection-cut-short",
+                    None,
+                    "yak's detection stopped at its limit of folders, so the folders the hand-off file lists \
+                     are not the whole workspace."
                         .to_owned(),
-                });
+                ));
             }
+
+            Some(handed)
         }
-        None => notices.push(Notice {
-            kind: "no-hand-off-file",
-            file: None,
-            sentence:
-                "No hand-off file was given, so the project is read from its own standard files, \
-                       with no declarations."
+        None => {
+            notices.push(Notice::new(
+                "no-hand-off-file",
+                None,
+                "No hand-off file was given, so the project is read from its own standard files, with no \
+                 declarations."
                     .to_owned(),
-        }),
-    }
+            ));
 
-    // Notices about no file come first, then by file, by kind and by sentence (spec RUN-8).
-    notices.sort_by(|a, b| (&a.file, a.kind, &a.sentence).cmp(&(&b.file, b.kind, &b.sentence)));
+            None
+        }
+    };
 
+    // The root is the folder the hand-off file names, whatever folder the analyzer was started in, and
+    // without a hand-off file the folder it was started in (spec LIST-1).
+    let root = match &handed {
+        Some(handed) => handed.root.clone(),
+        None => env::current_dir().map_err(|error| {
+            Stop::new(format!(
+                "the folder the analyzer was started in cannot be read ({error}); start it in a checkout"
+            ))
+        })?,
+    };
+    let files = files::list(&root, &mut notices)?;
+    let marks = marks::apply(&files, handed.as_ref(), &mut notices)?;
+    let packages = packages::read(
+        &root,
+        &files,
+        &marks.data,
+        handed.as_ref().map(|handed| handed.folders.as_slice()),
+        &mut notices,
+    )?;
     let document = json!({
-        "files": [],
-        "handOff": hand_off_path.is_some(),
-        "notices": notices.iter().map(notice).collect::<Vec<Value>>(),
-        "packages": [],
+        "files": files.iter().map(|each| file(each, &marks, &packages)).collect::<Vec<Value>>(),
+        "handOff": handed.is_some(),
+        "notices": notice::printed(notices),
+        "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
     });
 
     Ok(format!("{document:#}"))
 }
 
-/// One notice as it is printed.
-fn notice(notice: &Notice) -> Value {
-    json!({ "file": notice.file, "kind": notice.kind, "sentence": notice.sentence })
+/// One file as it is printed.
+fn file(file: &File, marks: &Marks, packages: &Packages) -> Value {
+    json!({
+        "data": marks.data.contains(&file.path),
+        "generated": marks.generated.contains(&file.path),
+        "kind": file.kind.name(),
+        "package": packages.of_file.get(&file.path),
+        "path": file.path,
+        "tracked": file.tracked,
+    })
+}
+
+/// One package as it is printed.
+fn package(package: &Package) -> Value {
+    json!({
+        "detected": package.detected,
+        "folder": package.folder,
+        "name": package.name,
+        "workspace": package.workspace,
+    })
 }

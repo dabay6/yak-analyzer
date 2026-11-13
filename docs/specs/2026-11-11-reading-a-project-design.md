@@ -940,3 +940,153 @@ Terms:
   and ignored files.
 - How the work is split into plans and pull requests, and the order in which the readers are
   built.
+
+## Amendments
+
+### 2026-11-12: An untracked name that differs from a tracked name only in letter case
+
+The first plan's trial of git was carried out on 2026-11-12; its report, `trial-git.md`, is in the
+work item's report folder. It confirmed RUN-6a and found one thing this spec did not foresee.
+
+RUN-6a has letter case count in an ignore pattern on every platform. The trial did that with one of
+git's settings, `core.ignorecase`, set to false for each start of git. That setting does more than
+RUN-6a's words say. It also decides how git compares a name it finds on disk with a name it holds:
+with it false, the comparison is by exact letter case. git's own documentation describes the
+setting so, says that `git init` and `git clone` set it to true on a file system that ignores
+letter case, as on Windows and on macOS by default, and warns that changing it may give
+unexpected results. The trial ran on Windows; what follows for macOS rests on that documentation.
+
+On a file system that ignores letter case, one file can be known to git under one spelling and lie
+on disk under another. It happens in two ways. A file renamed on such a system without telling
+git: git holds `docs/Guide.md`, and the disk holds `docs/guide.md`. And an index that spells one
+folder two ways, such as `Dir/a.ts` and `dir/b.ts`, which a fresh checkout writes into a single
+folder on such a system, so that the disk holds `Dir/b.ts` where git holds `dir/b.ts`. With the
+repository's own setting, git lists such a file once, under the name it holds. With the setting
+false, git lists it twice: the tracked name, and the name on disk as an untracked file that
+nothing ignores. LIST-2 would then put one file into the file list under two names, and it would
+be read twice, as two files. The tracked files git lists are the same under either setting, so
+RUN-6a stands; this amendment settles the duplicate.
+
+- **LIST-10** An untracked path is left out of the file list when it is the same file on disk as a
+  tracked file that is in the list. The tracked path stands for the file. This narrows LIST-2, which
+  otherwise holds, and widens LIST-4 by one question: LIST-10 asks the file system about the
+  identity of paths git has listed, and never whether an unlisted path exists. LIST-3 is applied
+  first, so an untracked symbolic link is left out as a link and is never compared. How it is
+  decided:
+  - **Which paths are compared.** An untracked path is compared only with the tracked files in the
+    list whose paths differ from it in letter case alone: those equal to it once each character of
+    both is put in lower case by itself, with Rust's `char::to_lowercase`, Unicode's full
+    lower-case mapping. Taking each character by itself keeps a letter's mapping from depending on
+    its neighbours, as the Greek capital sigma's would in a whole-text mapping. A path here is the
+    whole path from the root, folders included.
+  - **Whether they are one file.** The operating system says. The two paths are first looked at
+    without following a link, and are compared only when both are ordinary files, so no link is
+    followed and no special file is opened. Both are then opened and their identities compared,
+    the device and the file number on Linux and macOS, the volume and the file index on Windows.
+    The lower-case comparison only finds the candidates; this decides. So on a file system that
+    keeps letter case apart, where `Guide.md` and `guide.md` are two real files, both are kept and
+    read. And where a file system and Unicode's mapping disagree about a letter, such as the Kelvin
+    sign and `k`, two real files are never taken for one.
+  - **When the answer cannot be had.** When either path cannot be looked at or opened, because it is
+    gone, cannot be read, or is held by another program, the two are not taken for one file and the
+    untracked path is kept. Nothing about the comparison stops a run.
+  - **Which tracked path is named.** When one untracked path is the same file as more than one
+    tracked path, the first of those by path, byte by byte, stands for it.
+  - **Two tracked paths.** Two tracked paths that differ only in letter case are both kept: git
+    holds both. On a file system that ignores letter case they are one file on disk, read under
+    both paths. That is a fault of the repository on that system, which git itself warns of when
+    it checks such a repository out, and the analyzer does not repair it.
+
+  A tracked file that is missing from the working tree (LIST-3) has no file to compare, so an
+  untracked path beside it is kept. That is the case of a file renamed in letter case alone on a
+  file system that keeps case apart: git calls the old name missing and the new one untracked, and
+  the file is read under its new name. A tracked symbolic link is not in the list and is not
+  compared, so where a system checks links out as ordinary files, as Windows does by default, a
+  link renamed in letter case alone has its twin listed and read as an ordinary file; a link's
+  content is a path, which seldom has a script's ending, so this costs little.
+
+  When at least one path is left out, one notice says how many and names the first pair, the pairs
+  taken in the order of their untracked paths, byte by byte; the notice is about the tracked path of
+  that pair, which is its file for RUN-5 and RUN-8. It says that git holds the file under another
+  spelling than the disk, and what makes them agree: a rename git was not told of is undone by
+  renaming the file or folder on disk to git's spelling, or recorded with `git mv`; an index that
+  spells one folder two ways is made to spell it one way with `git mv`. A renamed folder of many
+  files so gives one notice and not hundreds. When none is left out there is no such notice.
+
+  An import that names a left-out path names a path that is not in the list, so it is unresolved
+  (RES-10): `./guide.md` beside the tracked `docs/Guide.md`. That is true of the import on a file
+  system that keeps case apart, where it fails; the notice tells a person reading the output why.
+
+  The rule has a gap it does not close. In a folder whose name differs in case between git and the
+  disk, a path that has no tracked twin is listed under the disk's spelling of the folder: a new
+  file, `assets/new.ts` beside the tracked `Assets/logo.txt`, and a file an ignore pattern spelled
+  git's way, `Assets/cache/`, no longer ignores once the disk spells it `assets/cache/`. Lookups are
+  by exact case (LIST-4, RES-10), so from such a file the folder's `package.json`, its tsconfig and
+  the files its relative imports name, which the list holds under git's spelling, are not found: it
+  may belong to no package, and its imports may show as unresolved. No notice names these files, but
+  the notice about the folder's tracked files is there, and the output shows the rest plainly. It
+  lasts until the spellings agree again.
+
+  Three other designs were weighed. Comparing the lower-case forms alone, with no look at the disk,
+  was this amendment's first draft: it drops real files on a file system that keeps case apart, and
+  takes two files for one wherever the file system and Unicode's mapping disagree. Applying the rule
+  only on a volume that ignores letter case needs the analyzer to know the volume's behaviour, which
+  on Windows can differ from one folder to the next; asking about the pair itself needs no such
+  knowledge. And leaving `core.ignorecase` at the repository's own setting would make ignore
+  patterns match differently on Windows and macOS than on Linux, which RUN-6a exists to prevent.
+  The rule's cost is one more crate, which opens files to compare their identities, and it is paid
+  only for the rare untracked path that has a candidate.
+- **RUN-8a** RUN-8's "the same project" means the same working tree, the same names on disk and the
+  same index, on a volume that treats letter case the same way. Across a volume that ignores letter
+  case and one that keeps it apart, the output is the same too, except where the two volumes see
+  different files. That happens in three ways. A working tree whose names on disk differ from git's
+  in letter case alone: where case is ignored, git finds its tracked name on disk and the file is
+  listed under git's spelling; where it is kept apart, git finds the tracked name missing and the
+  disk's name untracked, and the file is listed under the disk's. An index that spells one folder
+  two ways: the file list is the same on either volume, and only the notice of LIST-10 differs,
+  since where case is ignored the checkout writes the two spellings into one folder. And an index
+  that holds two paths differing only in letter case: both are listed on either volume, but where
+  case is ignored they are one file, so what is read from them can differ. FIX-7 holds both outputs
+  of the first two.
+- **LIST-11** When the root is a sub-folder of the work tree, git takes the root's path as the disk
+  spells it. A trial of 2026-11-12, on Windows, showed what follows when git holds the files under
+  the root by another spelling of one of its folders, `Apps/web/` where the disk says `apps/web/`:
+  git, started in the root, lists every file there as untracked and none as tracked, so LIST-10
+  finds no twin, and a tracked file that does not parse would be skipped instead of stopping the run
+  (design AN-7). So this stops the run, with a line that names both spellings and says how to make
+  them agree: rename the folder on disk to git's spelling, or record the disk's with `git mv`. It
+  is RUN-4's stop 7a, checked after stop 7. How it is found:
+  - When the root holds a `.git` of its own, it is the top of its work tree and there is nothing to
+    find; nothing more is asked, so the common case costs no start of git.
+  - Otherwise git is asked for the root's path from the top of the work tree, and then for the
+    tracked paths under that path compared without letter case. When one of them begins with a
+    spelling of the root's path that differs from the disk's in letter case alone, and the folder
+    that spelling names is the same folder on disk as the root, by the identity LIST-10 compares,
+    the run stops. Where the two spellings are two real folders, on a volume that keeps case apart,
+    nothing stops: the root is one of them, and is read as it is.
+  These two starts of git are made only for a root that is a sub-folder.
+- **FIX-7** Fixtures hold the cases of LIST-10: a tracked file and an untracked path under another
+  spelling, where the list holds the tracked path alone and the notice names the pair; the same for
+  a folder whose name differs in case; an index that spells one folder two ways; a tracked file
+  renamed in letter case alone; and a new untracked file in a folder whose name differs in case,
+  which is listed under the disk's spelling and is not named by any notice, though the tracked files
+  in the renamed folder are. A further fixture holds LIST-11: a root that is a sub-folder whose name
+  on disk differs from git's in letter case, which stops the run where case is ignored and is read
+  as a folder of its own where it is kept apart. Whether a file system ignores letter case belongs
+  to the volume the test's folder lies on, not to the target, so each test finds out by writing a
+  file under one spelling and asking whether the other spelling exists. Its written-down output is
+  then one of two, both in the test: on a volume that ignores case a pair is one file on disk, and a
+  renamed file is listed under git's spelling; on a volume that keeps case apart the two spellings
+  are two files, both listed, and a renamed file is listed under its new name. This is the one place
+  a fixture has two expected outputs, which FIX-1 otherwise does not allow.
+- **LIVE-6** LIVE-2's check that the file list is git's own asks git with RUN-6a's settings, the
+  case setting included. From git's answer the session takes the candidate pairs, untracked and
+  tracked paths that differ in letter case alone, and checks each against the disk with the
+  system's own listing of the folder, without the analyzer's code: where the listing shows one file,
+  the untracked path comes out, as the links do. The count taken out must equal the count in the
+  notice, or be zero when there is no such notice, so that a fault in LIST-10 shows; and the report
+  says what it was in each named repository.
+- **DEP-4** The crate `same-file` is added, pinned as DEP-1 says, for LIST-10's comparison of two
+  files' identities and LIST-11's of two folders'. Rust's own library gives an identity on Linux and
+  macOS but not, in a stable form, on Windows. It takes an identity by opening a file, so LIST-10
+  looks at both paths without following a link before it calls it.

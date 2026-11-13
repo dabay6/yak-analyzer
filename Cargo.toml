@@ -31,9 +31,23 @@ path = "tests/declarations.test.rs"
 name = "hand-off-schema"
 path = "tests/hand-off-schema.test.rs"
 
+[[test]]
+name = "file-list"
+path = "tests/file-list.test.rs"
+
+[[test]]
+name = "packages"
+path = "tests/packages.test.rs"
+
 [dependencies]
 # Reads the hand-off file and writes what `graph` prints.
 serde_json = "=1.0.154"
+# Matches the globs of declarations and of the workspace's list (spec KEY-5).
+regex = "=1.13.1"
+# Tells whether two paths are one file on disk, which Rust gives on Windows only in an unstable form.
+same-file = "=1.0.6"
+# Reads the workspace's list that pnpm keeps, which is YAML (spec PACK-3).
+yaml-rust2 = { version = "=0.13.0", default-features = false }
 
 [dev-dependencies]
 # Checks the tests' hand-off files against the copy of yakshaver's schema. Never part of the binary.

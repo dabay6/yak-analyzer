@@ -31,9 +31,28 @@ fn reads_a_hand_off_file_it_can_use() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
+    // The checkout is empty, so the two globs the hand-off file declares match nothing (spec KEY-5).
+    let nothing = |key: &str, glob: &str, source: &str| {
+        json!({
+            "file": null,
+            "kind": "glob-matches-nothing",
+            "sentence": format!(
+                "The `{key}` glob `{glob}` that the {source} states for the stack `typescript` matches no file."
+            ),
+        })
+    };
+
     assert_eq!(
         printed,
-        json!({ "files": [], "handOff": true, "notices": [], "packages": [] })
+        json!({
+            "files": [],
+            "handOff": true,
+            "notices": [
+                nothing("data", "**/fixtures/**", "pack"),
+                nothing("generated", "src/generated/**", "project"),
+            ],
+            "packages": [],
+        })
     );
 }
 
@@ -64,8 +83,13 @@ fn says_in_a_notice_that_the_detection_list_was_cut_short() {
     let printed: Value = serde_json::from_slice(&output.stdout).expect("graph prints JSON");
 
     assert!(output.status.success());
-    assert_eq!(printed["notices"].as_array().map(Vec::len), Some(1));
-    assert_eq!(printed["notices"][0]["kind"], json!("detection-cut-short"));
+    assert!(
+        printed["notices"]
+            .as_array()
+            .expect("a list of notices")
+            .iter()
+            .any(|notice| notice["kind"] == json!("detection-cut-short"))
+    );
 }
 
 #[test]

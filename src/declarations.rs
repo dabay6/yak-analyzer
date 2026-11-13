@@ -6,6 +6,7 @@
 
 use serde_json::Value;
 
+use crate::glob::Glob;
 use crate::hand_off::{Stack, leaves_its_folder};
 use crate::stop::Stop;
 
@@ -144,35 +145,5 @@ fn glob_problem(glob: &str) -> Option<String> {
         ));
     }
 
-    let mut braces = 0_usize;
-    let mut in_set = false;
-    let mut escaped = false;
-
-    for character in glob.chars() {
-        if escaped {
-            escaped = false;
-        } else if character == '\\' {
-            escaped = true;
-        } else if in_set {
-            in_set = character != ']';
-        } else if character == '[' {
-            in_set = true;
-        } else if character == '{' {
-            braces += 1;
-        } else if character == '}' {
-            braces = braces.saturating_sub(1);
-        }
-    }
-
-    if in_set {
-        Some(format!("the glob `{glob}` has a bracket left open"))
-    } else if braces > 0 {
-        Some(format!("the glob `{glob}` has a brace left open"))
-    } else if escaped {
-        Some(format!(
-            "the glob `{glob}` ends in a backslash that escapes nothing"
-        ))
-    } else {
-        None
-    }
+    Glob::new(glob).err()
 }
