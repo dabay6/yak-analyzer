@@ -99,15 +99,23 @@ fn lists_tracked_files_and_untracked_files_that_nothing_ignores_each_with_its_ki
         .write(".git/info/exclude", "local/\n");
 
     let document = project.graph();
+    // A script is read, so it has its imports, which in these empty files are none.
     let file = |path: &str, kind: &str, tracked: bool| {
-        json!({
+        let mut expected = json!({
             "data": false,
             "generated": false,
             "kind": kind,
             "package": ".",
             "path": path,
             "tracked": tracked,
-        })
+        });
+
+        if kind == "script" || kind == "declaration" {
+            expected["computedImports"] = json!(0);
+            expected["imports"] = json!([]);
+        }
+
+        expected
     };
 
     // By path, byte by byte: a dot and capital letters come before small letters (spec RUN-8).
