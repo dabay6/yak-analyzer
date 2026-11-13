@@ -1,4 +1,4 @@
-//! Where each import leads (spec RES-1 to RES-6, RES-8, RES-10, MAP-1 to MAP-4, CFG-2, CFG-3, LIST-5).
+//! Where each import leads (spec RES-1 to RES-10, MAP-1 to MAP-4, CFG-2, CFG-3, LIST-5).
 //!
 //! A path is looked for in the file list, never on disk, with exact letter case. What leads to no file
 //! is asked about once, with one start of git for all of them, to tell an ignored path from a missing
@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 
 use crate::files::Listing;
 use crate::git;
-use crate::imports::Import;
+use crate::imports::{Form, Import};
 use crate::packages::{Package, Packages};
 use crate::scripts::Scripts;
 use crate::stop::Stop;
@@ -164,6 +164,8 @@ pub enum Rule {
     Package,
     /// Step 6: anything else.
     Outside,
+    /// RES-7: the `src` of an HTML page's script element.
+    Page,
 }
 
 impl Rule {
@@ -176,6 +178,7 @@ impl Rule {
             Self::BaseUrl => "base-url",
             Self::Package => "package",
             Self::Outside => "outside",
+            Self::Page => "page",
         }
     }
 }
@@ -301,6 +304,10 @@ impl<'p> Resolver<'p> {
     fn one(&self, importing: &str, import: &Import) -> Result<(Found, Rule), Stop> {
         let specifier = written_path(&import.specifier);
 
+        if import.form == Form::Src && importing.ends_with(".html") {
+            return Ok((self.page(importing, specifier), Rule::Page));
+        }
+
         if is_relative(specifier) {
             let folder = importing.rsplit_once('/').map_or("", |(folder, _)| folder);
 
@@ -352,6 +359,42 @@ impl<'p> Resolver<'p> {
         }
 
         Ok(self.bare(importing, specifier))
+    }
+
+    /// The `src` of an HTML page's script element: a path tried from the page's folder, then from the
+    /// folder of the page's package, then from the root, one that begins with `/` skipping the first,
+    /// each as RES-3 finds a file. One that names another host, or leads to no file, is outside, as
+    /// loaded from elsewhere (spec RES-7).
+    fn page(&self, importing: &str, specifier: &str) -> Found {
+        let elsewhere = Found::Done(Outcome::Outside(Place::Elsewhere));
+
+        if specifier.starts_with("//") || is_url(specifier) {
+            return elsewhere;
+        }
+
+        let page = importing.rsplit_once('/').map_or("", |(folder, _)| folder);
+        let package = self
+            .own_package(importing)
+            .map_or("", |package| folder_path(&package.folder));
+        let (path, places) = match specifier.strip_prefix('/') {
+            Some(path) => (path, vec![package, ""]),
+            None => (specifier, vec![page, package, ""]),
+        };
+        let mut tried = BTreeSet::new();
+
+        for folder in places {
+            if !tried.insert(folder) {
+                continue;
+            }
+
+            if let Some(found) = joined(folder, path).map(|joined| self.locate(&joined, true))
+                && !matches!(found, Found::Missing(_))
+            {
+                return found;
+            }
+        }
+
+        elsewhere
     }
 
     /// The targets of a `paths` pattern, tried in order: the first that leads to a file, or outside,
