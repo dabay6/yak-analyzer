@@ -1,7 +1,7 @@
 //! The `graph` command: reads a project and prints what it read as one JSON document (spec OUT-1).
 //!
 //! So far it reads the hand-off file, the file list, the `data` and `generated` declarations, the
-//! packages, the imports of every script, and where each import leads.
+//! packages, the tsconfig files, the imports of every script, and where each import leads.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -19,6 +19,7 @@ use crate::packages::{self, Package, Packages};
 use crate::resolve::{Outcome, Place, Resolution, Resolver};
 use crate::scripts::{self, Scripts};
 use crate::stop::Stop;
+use crate::tsconfig;
 
 /// Reads the project, with the hand-off file at the path given or with none, and returns the document
 /// to print.
@@ -68,16 +69,29 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
     let listing = files::list(&root, &mut notices)?;
     let files = listing.files.as_slice();
     let marks = marks::apply(files, handed.as_ref(), &mut notices)?;
-    let packages = packages::read(
+    // The `package.json` files are read before the tsconfig files, and the fields of both are checked
+    // after, so that two faults always give the same line (spec RUN-4).
+    let packages = packages::load(&root, files, &marks.data)?.checked(
+        files,
+        handed.as_ref().map(|handed| handed.folders.as_slice()),
+        &mut notices,
+    );
+    let configs = tsconfig::load(
         &root,
         files,
         &marks.data,
-        handed.as_ref().map(|handed| handed.folders.as_slice()),
+        packages.as_ref().ok(),
         &mut notices,
-    )?;
+    )?
+    .checked();
+    let (packages, configs) = match (packages, configs) {
+        (Ok(packages), Ok(configs)) => (packages, configs),
+        (Err(fault), Ok(_)) | (Ok(_), Err(fault)) => return Err(fault.stop()),
+        (Err(first), Err(second)) => return Err(first.earlier(second).stop()),
+    };
     let scripts = scripts::read(&root, files, &marks.data, &mut notices)?;
-    let resolved = Resolver::new(&listing, &packages).resolve(&root, &scripts)?;
-    let document = json!({
+    let resolved = Resolver::new(&listing, &packages, &configs).resolve(&root, &scripts)?;
+    let mut document = json!({
         "files": files
             .iter()
             .filter(|each| !scripts.gone.contains(&each.path))
@@ -87,6 +101,9 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
         "notices": notice::printed(notices),
         "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
     });
+
+    // An object's keys in order, whatever order they were added in.
+    document.sort_all_objects();
 
     Ok(format!("{document:#}"))
 }

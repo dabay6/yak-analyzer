@@ -1,4 +1,4 @@
-//! Where each import leads (spec RES-1 to RES-6, RES-8, RES-10, MAP-1 to MAP-4, LIST-5).
+//! Where each import leads (spec RES-1 to RES-6, RES-8, RES-10, MAP-1 to MAP-4, CFG-2, CFG-3, LIST-5).
 //!
 //! A path is looked for in the file list, never on disk, with exact letter case. What leads to no file
 //! is asked about once, with one start of git for all of them, to tell an ignored path from a missing
@@ -15,6 +15,7 @@ use crate::imports::Import;
 use crate::packages::{Package, Packages};
 use crate::scripts::Scripts;
 use crate::stop::Stop;
+use crate::tsconfig::Configs;
 
 /// The modules built into Node, as `require('module').builtinModules` lists them in Node 22.19.0, those
 /// whose names begin with `_` left out. Any specifier that begins with `node:` is built in too.
@@ -153,8 +154,12 @@ pub enum Outcome {
 pub enum Rule {
     /// Step 1: a relative specifier.
     Relative,
+    /// Step 2: a pattern in the `paths` of the tsconfig that governs the importing file.
+    Paths,
     /// Step 3: a name in the package's `imports`.
     Imports,
+    /// Step 4: a path from the `baseUrl` of the tsconfig that governs the importing file.
+    BaseUrl,
     /// Step 5: the name of a package in the project.
     Package,
     /// Step 6: anything else.
@@ -166,7 +171,9 @@ impl Rule {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Relative => "relative",
+            Self::Paths => "paths",
             Self::Imports => "imports",
+            Self::BaseUrl => "base-url",
             Self::Package => "package",
             Self::Outside => "outside",
         }
@@ -208,11 +215,13 @@ pub struct Resolver<'p> {
     packages: &'p Packages,
     /// The packages by folder, the root's as the empty path.
     by_folder: BTreeMap<&'p str, &'p Package>,
+    /// The tsconfig files.
+    configs: &'p Configs,
 }
 
 impl<'p> Resolver<'p> {
-    /// A resolver over the file list and the packages.
-    pub fn new(listing: &'p Listing, packages: &'p Packages) -> Self {
+    /// A resolver over the file list, the packages and the tsconfig files.
+    pub fn new(listing: &'p Listing, packages: &'p Packages, configs: &'p Configs) -> Self {
         Self {
             files: listing
                 .files
@@ -226,6 +235,7 @@ impl<'p> Resolver<'p> {
                 .iter()
                 .map(|package| (folder_path(&package.folder), package))
                 .collect(),
+            configs,
         }
     }
 
@@ -243,7 +253,7 @@ impl<'p> Resolver<'p> {
                 read.imports
                     .iter()
                     .map(|import| self.one(path, import))
-                    .collect(),
+                    .collect::<Result<_, Stop>>()?,
             ));
         }
 
@@ -288,26 +298,181 @@ impl<'p> Resolver<'p> {
     }
 
     /// Where one import leads, before git is asked about what led to no file (spec RES-2).
-    fn one(&self, importing: &str, import: &Import) -> (Found, Rule) {
+    fn one(&self, importing: &str, import: &Import) -> Result<(Found, Rule), Stop> {
         let specifier = written_path(&import.specifier);
 
         if is_relative(specifier) {
             let folder = importing.rsplit_once('/').map_or("", |(folder, _)| folder);
 
-            return match joined(folder, specifier) {
-                Some(path) => (self.locate(&path, true), Rule::Relative),
+            return Ok(match joined(folder, specifier) {
+                Some(path) => (self.relative(&path), Rule::Relative),
                 None => (
                     Found::Done(Outcome::Outside(Place::AboveRoot)),
                     Rule::Relative,
                 ),
-            };
+            });
+        }
+
+        // An absolute path is no name a tsconfig maps.
+        let governing = if is_absolute(specifier) {
+            None
+        } else {
+            self.configs.governing(importing)?
+        };
+
+        if let Some(mapped) = governing
+            .as_ref()
+            .and_then(|config| self.configs.paths(config, specifier))
+        {
+            let found = self.mapped(&mapped.targets);
+            // A pattern that leads to no file sends on what it cannot settle (spec RES-4).
+            let goes_on = matches!(found, Found::Missing(_))
+                && (mapped.everything || self.names_package(importing, specifier));
+
+            if !goes_on {
+                return Ok((found, Rule::Paths));
+            }
         }
 
         if specifier.starts_with('#') {
-            return (self.hash(importing, specifier), Rule::Imports);
+            return Ok((self.hash(importing, specifier), Rule::Imports));
         }
 
-        self.bare(importing, specifier)
+        if let Some(path) = governing
+            .as_ref()
+            .and_then(|config| self.configs.base_url(config))
+            .filter(|folder| !is_above(folder))
+            .and_then(|folder| joined(&folder, specifier))
+        {
+            let found = self.relative(&path);
+
+            if matches!(found, Found::Done(Outcome::Files(_))) {
+                return Ok((found, Rule::BaseUrl));
+            }
+        }
+
+        Ok(self.bare(importing, specifier))
+    }
+
+    /// The targets of a `paths` pattern, tried in order: the first that leads to a file, or outside,
+    /// decides; one that leads above the root is outside (spec RES-2, step 2, CFG-3).
+    fn mapped(&self, targets: &[String]) -> Found {
+        let mut asked = Vec::new();
+
+        for target in targets {
+            if is_above(target) {
+                return Found::Done(Outcome::Outside(Place::AboveRoot));
+            }
+
+            match self.relative(target) {
+                Found::Missing(missing) => asked.extend(missing),
+                found => return found,
+            }
+        }
+
+        if asked.is_empty() {
+            Found::Done(Outcome::Unresolved)
+        } else {
+            Found::Missing(asked)
+        }
+    }
+
+    /// Whether a specifier names a workspace package, or a package that a `package.json` at or above the
+    /// importing file lists as a dependency of any kind (spec RES-4).
+    fn names_package(&self, importing: &str, specifier: &str) -> bool {
+        let name = package_name(specifier);
+
+        self.packages
+            .list
+            .iter()
+            .any(|package| package.workspace && package.name.as_deref() == Some(name.as_str()))
+            || self.listing_of(importing, &name).is_some()
+    }
+
+    /// A path an import names from a folder, a relative specifier's or a tsconfig's: the file it names
+    /// as RES-3 finds one, or else the source it is built from, where a tsconfig's `outDir` holds it
+    /// (spec MAP-1, step 1).
+    fn relative(&self, path: &str) -> Found {
+        let mut asked = match self.locate(path, true) {
+            Found::Missing(asked) => asked,
+            found => return found,
+        };
+
+        for candidate in self.sources(self.package_folder(path), path, false) {
+            if self.files.contains(candidate.as_str()) {
+                return Found::Done(Outcome::Files(self.with_twin(&candidate)));
+            }
+
+            if is_source(&candidate) {
+                asked.push(Asked {
+                    path: candidate,
+                    from: None,
+                });
+            }
+        }
+
+        Found::Missing(asked)
+    }
+
+    /// The folder of the package a path lies in, or the root's, the empty path, where it lies in none.
+    fn package_folder<'a>(&self, path: &'a str) -> &'a str {
+        let mut folder = path;
+
+        while let Some((above, _)) = folder.rsplit_once('/') {
+            if self.by_folder.contains_key(above) {
+                return above;
+            }
+
+            folder = above;
+        }
+
+        ""
+    }
+
+    /// The places MAP-1 looks for the source of build output at a path, with the folder of the package it
+    /// lies in, in order (spec MAP-1). First, for each tsconfig that lies directly in that folder and
+    /// states an `outDir` the path lies in, the same path under its sources. Then, where `moved` allows,
+    /// the path with its first folder under the package replaced by `src`. In each place an output ending
+    /// is replaced by each source extension in turn.
+    fn sources(&self, folder: &str, path: &str, moved: bool) -> Vec<String> {
+        let mut places = Vec::new();
+
+        for build in self.configs.builds(folder) {
+            let inside = path
+                .strip_prefix(build.out_dir.as_str())
+                .and_then(|rest| rest.strip_prefix('/'));
+
+            if let Some(inside) = inside {
+                places.extend(build.sources.iter().map(|source| within(source, inside)));
+            }
+        }
+
+        let inside = if folder.is_empty() {
+            Some(path)
+        } else {
+            path.strip_prefix(folder)
+                .and_then(|rest| rest.strip_prefix('/'))
+        };
+
+        if moved && let Some((_, below)) = inside.and_then(|inside| inside.split_once('/')) {
+            places.push(within(&within(folder, "src"), below));
+        }
+
+        places
+            .into_iter()
+            .flat_map(|place| {
+                match OUTPUT_ENDINGS
+                    .iter()
+                    .find_map(|ending| place.strip_suffix(ending))
+                {
+                    Some(stem) => SOURCE_ENDINGS
+                        .iter()
+                        .map(|ending| format!("{stem}{ending}"))
+                        .collect(),
+                    None => vec![place],
+                }
+            })
+            .collect()
     }
 
     /// A specifier that is neither relative nor a `#` name: a package of the project by its name, or
@@ -519,7 +684,7 @@ impl<'p> Resolver<'p> {
             Found::Missing(asked) => asked,
         };
 
-        for candidate in sources(folder, path) {
+        for candidate in self.sources(folder, path, true) {
             if self.files.contains(candidate.as_str()) {
                 return Found::Done(Outcome::Files(self.with_twin(&candidate)));
             }
@@ -730,38 +895,6 @@ fn matched<'v, 'w>(
     best.map(|(_, value, star)| (value, Some(star)))
 }
 
-/// The places MAP-1 looks for the source of build output at a path inside a package's folder, in order:
-/// the path with its first folder under the package replaced by `src`, with each source extension in
-/// place of its output ending.
-fn sources(folder: &str, path: &str) -> Vec<String> {
-    let inside = if folder.is_empty() {
-        path
-    } else {
-        path.strip_prefix(folder)
-            .and_then(|rest| rest.strip_prefix('/'))
-            .unwrap_or(path)
-    };
-    let Some((_, below)) = inside.split_once('/') else {
-        return Vec::new();
-    };
-    let moved = if folder.is_empty() {
-        format!("src/{below}")
-    } else {
-        format!("{folder}/src/{below}")
-    };
-
-    match OUTPUT_ENDINGS
-        .iter()
-        .find_map(|ending| moved.strip_suffix(ending))
-    {
-        Some(stem) => SOURCE_ENDINGS
-            .iter()
-            .map(|ending| format!("{stem}{ending}"))
-            .collect(),
-        None => vec![moved],
-    }
-}
-
 /// The `index` files of a folder, in the order they are tried, each with whether git is asked about it.
 fn index_candidates(folder: &str) -> Vec<(String, bool)> {
     let index = if folder.is_empty() {
@@ -782,6 +915,20 @@ fn is_source(path: &str) -> bool {
     [".ts", ".tsx", ".mts", ".cts"]
         .iter()
         .any(|ending| path.ends_with(ending))
+}
+
+/// A name in a folder, the root's as the empty path.
+fn within(folder: &str, name: &str) -> String {
+    if folder.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{folder}/{name}")
+    }
+}
+
+/// Whether a path from the root leads above it.
+fn is_above(path: &str) -> bool {
+    path == ".." || path.starts_with("../")
 }
 
 /// A package's folder as a path from the root: the root's own is the empty path.

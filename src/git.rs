@@ -98,6 +98,60 @@ pub fn ignored(root: &Path, paths: &[&str]) -> Result<Vec<String>, Stop> {
         .collect())
 }
 
+/// What git says of a path above the root, given from the root with `..` (spec LIST-4, CFG-3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Above {
+    /// A file of the work tree that git does not ignore: tracked, or untracked and not ignored.
+    File,
+    /// A path git ignores.
+    Ignored,
+    /// A path of the work tree that is neither: nothing is there.
+    Missing,
+    /// A path above the top of the work tree.
+    OutsideWorkTree,
+}
+
+/// Asks git about one path above the root, as the file list asks about every path under it (spec
+/// LIST-4).
+pub fn above(root: &Path, path: &str) -> Result<Above, Stop> {
+    let prefix = read(root, &["rev-parse", "--show-prefix"])?;
+    let depth = String::from_utf8_lossy(&prefix.output)
+        .trim()
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .count();
+    let up = path
+        .split('/')
+        .take_while(|segment| *segment == "..")
+        .count();
+
+    if up > depth {
+        return Ok(Above::OutsideWorkTree);
+    }
+
+    let pathspec = format!(":(literal){path}");
+    let listed = read(
+        root,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            &pathspec,
+        ],
+    )?;
+
+    if !listed.output.is_empty() {
+        Ok(Above::File)
+    } else if ignored(root, &[path])?.is_empty() {
+        Ok(Above::Missing)
+    } else {
+        Ok(Above::Ignored)
+    }
+}
+
 /// Runs one git command in the root, with what it reads on standard input where there is any. With
 /// input, exit code 1 is an answer too: `check-ignore` gives it when no path is ignored.
 fn run(root: &Path, command: &[&str], input: Option<&[u8]>) -> Result<Answer, Stop> {

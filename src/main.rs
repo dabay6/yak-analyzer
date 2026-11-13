@@ -17,6 +17,7 @@ mod packages;
 mod resolve;
 mod scripts;
 mod stop;
+mod tsconfig;
 
 use std::env;
 use std::ffi::OsString;
