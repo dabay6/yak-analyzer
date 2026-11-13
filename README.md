@@ -6,9 +6,14 @@ third-party analyzer yakshaver wraps today, so that yakshaver depends on an inte
 
 ## Status
 
-The first release is out. It is a walking skeleton: a binary that
-answers its version and analyzes nothing yet, built and tested on five targets and published to
-npm with provenance.
+The first release, 0.1.0, is a walking skeleton: a binary that answers its version, built and
+tested on five targets and published to npm with provenance.
+
+The code since then reads a project. It lists the files git lists, reads the packages and the
+tsconfig files, finds every import of the scripts, Vue components, MDX documents and HTML pages,
+and works out where each import leads, with build output mapped back to its source. It reports
+no findings yet: `yak-analyzer graph` prints what it read, as JSON, and `yak-analyzer interface`
+prints the interface version and the hand-off formats it reads.
 
 ## Install
 
@@ -22,6 +27,9 @@ npx yak-analyzer --version
 
 It needs Node 22.18 or later, and there is a binary for Windows on x64, macOS on arm64 and x64,
 and Linux with glibc on x64 and arm64. No package runs a script when it is installed.
+
+To read a project it needs `git` 2.15 or later on the `PATH`: it asks git for the files and for
+what git ignores, and stops with one line naming both versions when the git it finds is older.
 
 If your own npm settings map the `@dabay6` scope to another registry, npm looks for the package
 there and does not find it. Remove that setting first:

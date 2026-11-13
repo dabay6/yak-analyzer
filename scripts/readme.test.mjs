@@ -14,9 +14,14 @@ test('the README says how to install and run the released binary (spec DOC-1)', 
   assert.ok(readme.includes('npx yak-analyzer --version\n'));
 });
 
-test('its status says what the release is: a binary that answers its version and analyzes nothing yet', () => {
-  assert.ok(readme.includes('answers its version and analyzes nothing yet'));
-  assert.ok(!readme.includes('there is no\nrelease'));
+test('its status says what the analyzer reads, and that it reports no findings yet (spec DOC-1)', () => {
+  assert.ok(readme.includes('reports\nno findings yet'));
+  assert.ok(readme.includes('`yak-analyzer graph` prints what it read'));
+  assert.ok(!readme.includes('analyzes nothing yet'));
+});
+
+test('it names the oldest git the analyzer reads a project with (spec DEP-2)', () => {
+  assert.ok(readme.includes('`git` 2.15 or later on the `PATH`'));
 });
 
 test('it says what to remove on a machine that maps the scope to another registry (spec NAME-2a)', () => {
