@@ -61,6 +61,37 @@ node scripts/check-floor.mjs
 `check-floor.mjs` fails when the binary asks for a newer system than the Node yak needs: glibc
 2.28 on Linux, macOS 11.0, and no separately installed C runtime on Windows.
 
+## The commands
+
+- `yak-analyzer --version` prints the version.
+- `yak-analyzer interface` prints one line of JSON: the interface version, and the hand-off
+  formats the analyzer reads.
+- `yak-analyzer graph` reads the project in the folder it is started in and prints what it read,
+  as one JSON document: the packages, the files, each file's imports and where each leads, and the
+  notices. `yak-analyzer graph --hand-off <file>` reads the project the hand-off file names, with
+  its declarations. A run that cannot go on prints one line on standard error and exits 1.
+
+What `graph` prints is the builder's and the tests' view of a reading, not part of the interface
+version; its form may change. When it does, the fixtures' written-down output changes in the same
+change, and none of the facts they hold: each file, and each import's outcome.
+
+## Fixtures
+
+The tests in `tests/` run the built binary on made-up projects, one small project for each
+pattern a real repository wires imports with. A test writes its project into a temporary folder,
+makes it a git repository of its own there, with the tracked, untracked and ignored files it
+needs, runs `graph` on it, and compares what is printed with what it expects, written in the
+test. `tests/support/project.rs` holds the helpers: `Project::new`, `write`, `commit`, `git`,
+`hand_off`, `graph` and `run`. Git and the binary run with the machine's and the user's own git
+settings shut out, so a result does not depend on the machine.
+
+Each test file is named in `Cargo.toml` with a `[[test]]` entry; a new file gets one. One file's
+tests run with its name:
+
+```bash
+cargo test --release --locked --test resolve
+```
+
 ## Releasing
 
 A release is two acts of the owner's: merging the release pull request, and approving the
