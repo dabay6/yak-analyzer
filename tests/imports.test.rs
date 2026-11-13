@@ -227,13 +227,13 @@ fn reads_a_script_that_parses_only_as_a_script() {
 }
 
 #[test]
-fn reads_no_file_that_is_not_a_script() {
+fn reads_no_file_of_a_kind_that_holds_no_imports() {
     let project = Project::new("imports-not-scripts");
 
+    // Vue components, MDX documents and HTML pages are the pages tests' to check.
     project
-        .write("src/App.vue", "<script>import a from './a';</script>\n")
-        .write("docs/intro.mdx", "import b from './b';\n")
-        .write("public/index.html", "<script src=\"./c.js\"></script>\n")
+        .write("README.md", "import a from './a';\n")
+        .write("src/styles.css", "@import './b.css';\n")
         .write("data.json", "{}")
         .commit();
 

@@ -25,6 +25,7 @@ use crate::files::{File, Kind};
 use crate::git::{self, Above};
 use crate::notice::Notice;
 use crate::packages::{Packages, misshapen};
+use crate::scripts;
 use crate::stop::{Fault, Stop};
 
 /// The names of the configs that govern the files of their folder (spec CFG-2).
@@ -621,9 +622,10 @@ fn depended_on(
 ) -> BTreeSet<String> {
     let mut folders: BTreeSet<&str> = BTreeSet::new();
 
-    for file in files.iter().filter(|file| {
-        matches!(file.kind, Kind::Script | Kind::Declaration) && !data.contains(&file.path)
-    }) {
+    for file in files
+        .iter()
+        .filter(|file| scripts::reads(file.kind) && !data.contains(&file.path))
+    {
         let mut folder = file.path.as_str();
 
         loop {

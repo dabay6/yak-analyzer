@@ -51,6 +51,10 @@ path = "tests/resolve.test.rs"
 name = "tsconfig"
 path = "tests/tsconfig.test.rs"
 
+[[test]]
+name = "pages"
+path = "tests/pages.test.rs"
+
 [dependencies]
 # Parse scripts into syntax trees and walk them; released together, so pinned together (spec AN-2, DEP-3).
 oxc_allocator = "=0.156.0"

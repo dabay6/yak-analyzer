@@ -14,6 +14,7 @@ mod imports;
 mod marks;
 mod notice;
 mod packages;
+mod pages;
 mod resolve;
 mod scripts;
 mod stop;

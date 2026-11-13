@@ -1,5 +1,5 @@
-//! What an import is: parsing a script and finding every import in it (spec PARSE-1, PARSE-2, IMP-1 to
-//! IMP-5).
+//! What an import is: parsing a script and finding every import in it (spec PARSE-1 to PARSE-4, IMP-1
+//! to IMP-5).
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
@@ -28,6 +28,8 @@ pub enum Form {
     Require,
     /// `import('…')` written where a type is expected.
     TypeImport,
+    /// The `src` of a Vue component's script block, or of an HTML page's script element.
+    Src,
 }
 
 impl Form {
@@ -41,6 +43,7 @@ impl Form {
             Self::Dynamic => "dynamic",
             Self::Require => "require",
             Self::TypeImport => "type-import",
+            Self::Src => "src",
         }
     }
 }
@@ -91,7 +94,36 @@ pub struct Broken {
 
 /// Parses a script, as a module first and then as a script, and finds its imports (spec PARSE-1).
 pub fn read(path: &str, text: &str) -> Result<Read, Broken> {
-    let module = source_type(path).with_module(true);
+    read_as(text, source_type(path))
+}
+
+/// Parses a Vue component's script block in the language its `lang` names: `ts`, `tsx`, `js` or
+/// `jsx`, and JavaScript when it names none; nothing for a block in any other language (spec PARSE-3).
+pub fn read_block(text: &str, lang: Option<&str>) -> Option<Result<Read, Broken>> {
+    let source_type = match lang {
+        None | Some("js" | "jsx") => SourceType::jsx(),
+        Some("ts") => SourceType::ts(),
+        Some("tsx") => SourceType::tsx(),
+        Some(_) => return None,
+    };
+
+    Some(read_as(text, source_type))
+}
+
+/// Parses statements of an MDX document as a JavaScript module and keeps the `import` and `export …
+/// from` statements among them, and nothing else (spec PARSE-4).
+pub fn read_statements(text: &str) -> Result<Vec<Import>, Broken> {
+    parse(text, SourceType::jsx().with_module(true)).map(|read| {
+        read.imports
+            .into_iter()
+            .filter(|import| matches!(import.form, Form::Import | Form::Export | Form::ExportAll))
+            .collect()
+    })
+}
+
+/// Parses as a module first and then as a script.
+fn read_as(text: &str, source_type: SourceType) -> Result<Read, Broken> {
+    let module = source_type.with_module(true);
 
     match parse(text, module) {
         Ok(read) => Ok(read),
