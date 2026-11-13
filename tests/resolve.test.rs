@@ -1,5 +1,6 @@
-//! Runs the built binary on made-up projects and checks where relative imports lead, and every kind of
-//! outside (spec RES-1 to RES-4, RES-8, RES-10, LIST-5, LIST-8, PACK-6, FIX-2, FIX-3, FIX-4).
+//! Runs the built binary on made-up projects and checks where imports lead: relative ones, packages of
+//! the project by name, `#` names, and every kind of outside (spec RES-1 to RES-6, RES-8, RES-10, MAP-1
+//! to MAP-4, LIST-5, LIST-8, PACK-3, PACK-5, PACK-6, FIX-2, FIX-3, FIX-4).
 
 #[path = "support/project.rs"]
 mod project;
@@ -31,7 +32,7 @@ fn led(document: &Value, path: &str, specifier: &str) -> Value {
     let import = import(document, path, specifier);
     let mut led = json!({ "outcome": import["outcome"], "rule": import["rule"] });
 
-    for key in ["files", "outside", "package", "listed", "ignored"] {
+    for key in ["files", "outside", "package", "listed", "ignored", "from"] {
         if let Some(value) = import.get(key) {
             led[key] = value.clone();
         }
@@ -295,4 +296,379 @@ fn stops_on_a_dependency_list_of_a_form_it_does_not_have() {
         "yak-analyzer: the field `devDependencies` in package.json holds a value of a form it does not have; \
          it must be an object that maps each package's name to the version it asks for; fix it"
     );
+}
+
+/// An import that leads to the files given, by the name of a package of the project.
+fn by_name(found: &[&str]) -> Value {
+    json!({ "outcome": "files", "rule": "package", "files": found })
+}
+
+/// A workspace whose one package offers its build output through `exports`, which the worktree does
+/// not have, and an app that imports it by name (spec FIX-2, pattern 10).
+fn workspace_with_build_output(name: &str) -> Project {
+    let project = Project::new(name);
+
+    project
+        .write(".gitignore", "node_modules/\ndist/\n")
+        .write(
+            "package.json",
+            r#"{ "name": "root", "workspaces": ["packages/*", "apps/*"] }"#,
+        )
+        .write(
+            "packages/lib/package.json",
+            r#"{
+                "name": "@demo/lib",
+                "exports": {
+                    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+                    "./util": "./dist/util.js",
+                    "./icons/*": "./dist/icons/*/*.js",
+                    "./list": ["./dist/list.js", "./dist/fallback.js"],
+                    "./platform": { "browser": "./dist/browser.js", "node": "./dist/node.js" },
+                    "./typed": { "types": "./dist/typed.d.ts", "default": "./dist/main.js" },
+                    "./generated": "./dist/generated.js",
+                    "./hidden": null
+                }
+            }"#,
+        )
+        .write("packages/lib/src/index.ts", "")
+        .write("packages/lib/src/util.ts", "")
+        .write("packages/lib/src/icons/star/star.ts", "")
+        .write("packages/lib/src/list.ts", "")
+        .write("packages/lib/src/browser.ts", "")
+        .write("packages/lib/src/node.ts", "")
+        .write("packages/lib/src/main.ts", "")
+        .write(
+            "apps/web/package.json",
+            r#"{ "name": "web", "dependencies": { "@demo/lib": "workspace:*" } }"#,
+        )
+        .write(
+            "apps/web/src/main.ts",
+            "import '@demo/lib';\nimport '@demo/lib/util';\nimport '@demo/lib/icons/star';\n\
+             import '@demo/lib/list';\nimport '@demo/lib/platform';\nimport '@demo/lib/typed';\n\
+             import '@demo/lib/generated';\nimport '@demo/lib/hidden';\nimport '@demo/lib/missing';\n",
+        )
+        .commit();
+
+    project
+}
+
+#[test]
+fn leads_an_import_by_a_workspace_packages_name_through_its_exports_to_source() {
+    let project = workspace_with_build_output("resolve-exports");
+
+    let run = |label: &str| {
+        let document = project.graph();
+        let web = |specifier: &str| led(&document, "apps/web/src/main.ts", specifier);
+
+        // Two conditions that name build output of one source lead to that one file (spec RES-5).
+        assert_eq!(
+            web("@demo/lib"),
+            by_name(&["packages/lib/src/index.ts"]),
+            "{label}"
+        );
+        assert_eq!(
+            web("@demo/lib/util"),
+            by_name(&["packages/lib/src/util.ts"]),
+            "{label}"
+        );
+        // A `*` written twice in a target is filled in at both places (spec RES-6).
+        assert_eq!(
+            web("@demo/lib/icons/star"),
+            by_name(&["packages/lib/src/icons/star/star.ts"]),
+            "{label}"
+        );
+        // A list is followed entry by entry; the entry with no source adds nothing (spec PACK-6).
+        assert_eq!(
+            web("@demo/lib/list"),
+            by_name(&["packages/lib/src/list.ts"]),
+            "{label}"
+        );
+        // Conditions that name two different sources lead to both.
+        assert_eq!(
+            web("@demo/lib/platform"),
+            by_name(&["packages/lib/src/browser.ts", "packages/lib/src/node.ts"]),
+            "{label}"
+        );
+        // Conditions whose first target has no source lead to what the others find.
+        assert_eq!(
+            web("@demo/lib/typed"),
+            by_name(&["packages/lib/src/main.ts"]),
+            "{label}"
+        );
+        // A target in an ignored build folder that maps to no source is ignored, with the target it
+        // came from (spec MAP-4).
+        assert_eq!(
+            web("@demo/lib/generated"),
+            json!({
+                "outcome": "ignored",
+                "rule": "package",
+                "ignored": "packages/lib/dist/generated.js",
+                "from": "packages/lib/dist/generated.js",
+            }),
+            "{label}"
+        );
+        // A subpath `exports` holds back, or does not offer, leads nowhere (spec RES-6).
+        assert_eq!(
+            web("@demo/lib/hidden"),
+            json!({ "outcome": "unresolved", "rule": "package" }),
+            "{label}"
+        );
+        assert_eq!(
+            web("@demo/lib/missing"),
+            json!({ "outcome": "unresolved", "rule": "package" }),
+            "{label}"
+        );
+    };
+
+    // The same with and without `node_modules` and the build output on disk (spec AN-5, FIX-3).
+    run("without node_modules and build output");
+    project
+        .write(
+            "node_modules/@demo/lib/package.json",
+            r#"{ "name": "@demo/lib", "main": "./elsewhere.js" }"#,
+        )
+        .write("node_modules/@demo/lib/elsewhere.js", "")
+        .write("packages/lib/dist/index.js", "")
+        .write("packages/lib/dist/index.d.ts", "")
+        .write("packages/lib/dist/generated.js", "");
+    run("with node_modules and build output");
+}
+
+#[test]
+fn looks_up_a_hash_name_in_the_imports_of_the_files_package() {
+    let project = Project::new("resolve-hash");
+
+    project
+        .write(".gitignore", "dist/\nsrc/generated/\n")
+        .write(
+            "package.json",
+            r##"{
+                "name": "app",
+                "dependencies": { "react": "^19.0.0" },
+                "imports": {
+                    "#lib/*": { "types": "./dist/lib/*.d.ts", "default": "./dist/lib/*.js" },
+                    "#lib/special": "./dist/special.js",
+                    "#config": "./config.js",
+                    "#react": "react",
+                    "#generated": "./src/generated/api.ts"
+                }
+            }"##,
+        )
+        .write("config.js", "")
+        .write("src/lib/a.ts", "")
+        .write("src/special.ts", "")
+        .write(
+            "src/main.ts",
+            "import '#lib/a';\nimport '#lib/special';\nimport '#config';\nimport '#react';\n\
+             import '#generated';\nimport '#missing';\n",
+        )
+        .write("tools/package.json", r#"{ "name": "tools" }"#)
+        .write("tools/run.ts", "import '#config';\n")
+        .commit();
+
+    let document = project.graph();
+    let main = |specifier: &str| led(&document, "src/main.ts", specifier);
+    let imports = |found: &[&str]| json!({ "outcome": "files", "rule": "imports", "files": found });
+
+    assert_eq!(main("#lib/a"), imports(&["src/lib/a.ts"]));
+    // A key with no `*` wins over a pattern that also matches (spec RES-5).
+    assert_eq!(main("#lib/special"), imports(&["src/special.ts"]));
+    // A committed JavaScript file is its own source (spec MAP-2).
+    assert_eq!(main("#config"), imports(&["config.js"]));
+    // A target that is a package's name leads where an import of that name does.
+    assert_eq!(
+        main("#react"),
+        json!({ "outcome": "outside", "rule": "imports", "outside": "package", "package": "react", "listed": true })
+    );
+    assert_eq!(
+        main("#generated"),
+        json!({
+            "outcome": "ignored",
+            "rule": "imports",
+            "ignored": "src/generated/api.ts",
+            "from": "src/generated/api.ts",
+        })
+    );
+    assert_eq!(
+        main("#missing"),
+        json!({ "outcome": "unresolved", "rule": "imports" })
+    );
+    // A `#` name is looked up in the importing file's own package only.
+    assert_eq!(
+        led(&document, "tools/run.ts", "#config"),
+        json!({ "outcome": "unresolved", "rule": "imports" })
+    );
+}
+
+#[test]
+fn leads_a_package_with_no_exports_through_its_entries_its_index_or_a_path_inside_it() {
+    let project = Project::new("resolve-entries");
+
+    project
+        .write(".gitignore", "dist/\n")
+        .write(
+            "package.json",
+            r#"{ "name": "root", "workspaces": ["packages/*"] }"#,
+        )
+        .write(
+            "packages/typed/package.json",
+            r#"{ "name": "typed", "typings": "./dist/index.d.ts", "main": "dist/index.cjs" }"#,
+        )
+        .write("packages/typed/src/index.ts", "")
+        .write("packages/typed/src/helper.ts", "")
+        .write("packages/plain/package.json", r#"{ "name": "plain" }"#)
+        .write("packages/plain/index.js", "")
+        .write(
+            "packages/both/package.json",
+            r#"{ "name": "both", "module": "./esm/index.js", "main": "./cjs/index.js" }"#,
+        )
+        .write("packages/both/esm/index.js", "")
+        .write("packages/both/cjs/index.js", "")
+        .write(
+            "src/main.ts",
+            "import 'typed';\nimport 'typed/src/helper';\nimport 'typed/dist/helper.js';\nimport 'plain';\n\
+             import 'both';\nimport '../packages/typed';\n",
+        )
+        .commit();
+
+    let document = project.graph();
+    let main = |specifier: &str| led(&document, "src/main.ts", specifier);
+
+    // `typings` is the older name of `types`; both entries map to one source (spec PACK-6, MAP-1).
+    assert_eq!(main("typed"), by_name(&["packages/typed/src/index.ts"]));
+    assert_eq!(
+        main("typed/src/helper"),
+        by_name(&["packages/typed/src/helper.ts"])
+    );
+    // A subpath into build output maps to its source (spec MAP-1).
+    assert_eq!(
+        main("typed/dist/helper.js"),
+        by_name(&["packages/typed/src/helper.ts"])
+    );
+    // With no entries, the bare name leads to the index file of the package's folder.
+    assert_eq!(main("plain"), by_name(&["packages/plain/index.js"]));
+    // Every file the entries lead to.
+    assert_eq!(
+        main("both"),
+        by_name(&["packages/both/cjs/index.js", "packages/both/esm/index.js"])
+    );
+    // A folder that holds a `package.json` is tried through its entries (spec RES-3).
+    assert_eq!(
+        main("../packages/typed"),
+        files(&["packages/typed/src/index.ts"])
+    );
+}
+
+#[test]
+fn leads_a_name_to_a_package_outside_the_workspace_only_by_itself_or_a_local_protocol() {
+    let project = Project::new("resolve-stray");
+
+    project
+        .write(
+            "package.json",
+            r#"{
+                "name": "root",
+                "workspaces": ["packages/*"],
+                "dependencies": { "react": "^19.0.0", "local-tool": "file:./tools/local" },
+                "devDependencies": { "shared": "workspace:^" }
+            }"#,
+        )
+        .write("examples/react/package.json", r#"{ "name": "react" }"#)
+        .write("examples/react/index.ts", "import 'react';\n")
+        .write(
+            "tools/local/package.json",
+            r#"{ "name": "local-tool", "main": "run.js" }"#,
+        )
+        .write("tools/local/run.js", "")
+        .write("vendor/shared/package.json", r#"{ "name": "shared" }"#)
+        .write("vendor/shared/index.ts", "")
+        .write(
+            "src/main.ts",
+            "import 'react';\nimport 'local-tool';\nimport 'shared';\n",
+        )
+        .commit();
+
+    let document = project.graph();
+    let main = |specifier: &str| led(&document, "src/main.ts", specifier);
+
+    // A stray folder with an installed dependency's name does not take its imports (spec PACK-3).
+    assert_eq!(
+        main("react"),
+        json!({ "outcome": "outside", "rule": "outside", "outside": "package", "package": "react", "listed": true })
+    );
+    // A package may import itself by its own name (spec RES-2, step 5).
+    assert_eq!(
+        led(&document, "examples/react/index.ts", "react"),
+        by_name(&["examples/react/index.ts"])
+    );
+    assert_eq!(main("local-tool"), by_name(&["tools/local/run.js"]));
+    assert_eq!(main("shared"), by_name(&["vendor/shared/index.ts"]));
+}
+
+#[test]
+fn leads_a_name_two_workspace_packages_share_to_the_first_by_path() {
+    let project = Project::new("resolve-repeated");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "root", "workspaces": ["packages/*"] }"#,
+        )
+        .write("packages/a/package.json", r#"{ "name": "same" }"#)
+        .write("packages/a/index.ts", "")
+        .write("packages/b/package.json", r#"{ "name": "same" }"#)
+        .write("packages/b/index.ts", "")
+        .write("src/main.ts", "import 'same';\n")
+        .commit();
+
+    let document = project.graph();
+
+    assert_eq!(
+        led(&document, "src/main.ts", "same"),
+        by_name(&["packages/a/index.ts"])
+    );
+    assert_eq!(
+        notices(&document),
+        ["no-hand-off-file", "package-name-repeated"]
+    );
+}
+
+#[test]
+fn stops_on_a_package_field_of_a_form_it_does_not_have() {
+    let cases = [
+        (
+            "exports",
+            r#"{ "exports": { ".": "./a.js", "import": "./b.js" } }"#,
+            "a path, a list, or an object whose keys are all subpaths beginning with `.` or all conditions",
+        ),
+        (
+            "exports",
+            r#"{ "exports": 1 }"#,
+            "a path, a list, or an object whose keys are all subpaths beginning with `.` or all conditions",
+        ),
+        (
+            "imports",
+            r#"{ "imports": { "lib": "./lib.js" } }"#,
+            "an object whose keys begin with `#` and whose values are paths, lists or conditions",
+        ),
+        ("types", r#"{ "types": ["./a.d.ts"] }"#, "a path"),
+        ("typings", r#"{ "typings": true }"#, "a path"),
+        ("module", r#"{ "module": {} }"#, "a path"),
+        ("main", r#"{ "main": null }"#, "a path"),
+    ];
+
+    for (field, manifest, form) in cases {
+        let project = Project::new("resolve-fields-form");
+
+        project.write("package.json", manifest).commit();
+
+        assert_eq!(
+            stopped(&project.run(|_| {})),
+            format!(
+                "yak-analyzer: the field `{field}` in package.json holds a value of a form it does not have; \
+                 it must be {form}; fix it"
+            ),
+            "{manifest}"
+        );
+    }
 }

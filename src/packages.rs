@@ -29,6 +29,21 @@ pub struct Package {
     pub detected: bool,
     /// The packages its four lists of dependencies name, each with the version it asks for.
     pub dependencies: BTreeMap<String, String>,
+    /// Its `exports`, which say what an import of the package by name may reach (spec RES-6).
+    pub exports: Option<Value>,
+    /// Its `imports`, the names that begin with `#` (spec RES-5).
+    pub imports: Option<Value>,
+    /// The targets of its `types` (or `typings`), `module` and `main`, in that order, those it states.
+    pub entries: Vec<String>,
+}
+
+/// What a `package.json` states that a package keeps.
+struct Fields {
+    name: Option<String>,
+    dependencies: BTreeMap<String, String>,
+    exports: Option<Value>,
+    imports: Option<Value>,
+    entries: Vec<String>,
 }
 
 /// The packages of a project, and which package each file belongs to.
@@ -68,12 +83,21 @@ pub fn read(
     } else {
         None
     };
-    let mut names: BTreeMap<&str, (Option<String>, BTreeMap<String, String>)> = BTreeMap::new();
+    let mut names: BTreeMap<&str, Fields> = BTreeMap::new();
 
     for (folder, fields) in &read {
         let file = manifest_path(folder);
 
-        names.insert(folder, (name(fields, &file)?, dependencies(fields, &file)?));
+        names.insert(
+            folder,
+            Fields {
+                name: name(fields, &file)?,
+                dependencies: dependencies(fields, &file)?,
+                exports: targets(fields, "exports", &file)?,
+                imports: imports(fields, &file)?,
+                entries: entries(fields, &file)?,
+            },
+        );
     }
 
     let mut patterns = Vec::new();
@@ -91,7 +115,7 @@ pub fn read(
         detection.map(|folders| folders.iter().map(String::as_str).collect());
     let mut list: Vec<Package> = names
         .into_iter()
-        .map(|(folder, (name, dependencies))| {
+        .map(|(folder, fields)| {
             let listed = folder != "."
                 && included.iter().any(|glob| glob.matches(folder))
                 && !excluded.iter().any(|glob| glob.matches(folder));
@@ -107,10 +131,13 @@ pub fn read(
 
             Package {
                 folder: folder.to_owned(),
-                name,
+                name: fields.name,
                 workspace,
                 detected,
-                dependencies,
+                dependencies: fields.dependencies,
+                exports: fields.exports,
+                imports: fields.imports,
+                entries: fields.entries,
             }
         })
         .collect();
@@ -201,6 +228,77 @@ fn name(fields: &Map<String, Value>, file: &str) -> Result<Option<String>, Stop>
         Some(Value::String(name)) => Ok(Some(name.clone())),
         Some(_) => Err(misshapen("name", file, "text")),
     }
+}
+
+/// The form a target of `exports` or `imports` may take: a path, null, a list of targets, or an object
+/// of conditions whose values are targets.
+fn is_target(value: &Value) -> bool {
+    match value {
+        Value::String(_) | Value::Null => true,
+        Value::Array(targets) => targets.iter().all(is_target),
+        Value::Object(conditions) => conditions.values().all(is_target),
+        _ => false,
+    }
+}
+
+/// A `package.json`'s `exports`: one target, or an object whose keys are all subpaths, which begin with
+/// `.`, or all conditions, none of which does.
+fn targets(fields: &Map<String, Value>, field: &str, file: &str) -> Result<Option<Value>, Stop> {
+    let form = "a path, a list, or an object whose keys are all subpaths beginning with `.` or all \
+                conditions";
+    let Some(value) = fields.get(field) else {
+        return Ok(None);
+    };
+    let keys_agree = value.as_object().is_none_or(|keys| {
+        let subpaths = keys.keys().filter(|key| key.starts_with('.')).count();
+
+        subpaths == 0 || subpaths == keys.len()
+    });
+
+    if is_target(value) && keys_agree {
+        Ok(Some(value.clone()))
+    } else {
+        Err(misshapen(field, file, form))
+    }
+}
+
+/// A `package.json`'s `imports`: an object whose keys begin with `#` and whose values are targets.
+fn imports(fields: &Map<String, Value>, file: &str) -> Result<Option<Value>, Stop> {
+    let form =
+        "an object whose keys begin with `#` and whose values are paths, lists or conditions";
+
+    match fields.get("imports") {
+        None => Ok(None),
+        Some(Value::Object(map))
+            if map
+                .iter()
+                .all(|(key, value)| key.starts_with('#') && is_target(value)) =>
+        {
+            Ok(fields.get("imports").cloned())
+        }
+        Some(_) => Err(misshapen("imports", file, form)),
+    }
+}
+
+/// The targets of a `package.json`'s `types` (or its older name `typings`), `module` and `main`, in
+/// that order, those it states.
+fn entries(fields: &Map<String, Value>, file: &str) -> Result<Vec<String>, Stop> {
+    let types = if fields.contains_key("types") {
+        "types"
+    } else {
+        "typings"
+    };
+    let mut entries = Vec::new();
+
+    for field in [types, "module", "main"] {
+        match fields.get(field) {
+            None => {}
+            Some(Value::String(target)) => entries.push(target.clone()),
+            Some(_) => return Err(misshapen(field, file, "a path")),
+        }
+    }
+
+    Ok(entries)
 }
 
 /// The packages a `package.json`'s four lists of dependencies name, each with the version it asks for.

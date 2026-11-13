@@ -149,9 +149,13 @@ fn import(import: &Import, resolution: &Resolution) -> Value {
                 printed["listed"] = json!(listed);
             }
         }
-        Outcome::Ignored(path) => {
+        Outcome::Ignored { path, from } => {
             printed["outcome"] = json!("ignored");
             printed["ignored"] = json!(path);
+
+            if let Some(from) = from {
+                printed["from"] = json!(from);
+            }
         }
         Outcome::Unresolved => printed["outcome"] = json!("unresolved"),
     }
