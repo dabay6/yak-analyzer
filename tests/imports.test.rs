@@ -18,6 +18,25 @@ fn file<'a>(document: &'a Value, path: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("{path} is listed"))
 }
 
+/// The imports of a file as `graph` prints them, with only each import's own fields: where an import
+/// leads is the resolve tests' to check.
+fn own(imports: &Value) -> Value {
+    imports
+        .as_array()
+        .expect("a list of imports")
+        .iter()
+        .map(|import| {
+            json!({
+                "form": import["form"],
+                "line": import["line"],
+                "query": import["query"],
+                "specifier": import["specifier"],
+                "typeOnly": import["typeOnly"],
+            })
+        })
+        .collect()
+}
+
 /// One import as `graph` prints it, with no query and not for types alone.
 fn plain(specifier: &str, form: &str, line: usize) -> Value {
     json!({ "form": form, "line": line, "query": false, "specifier": specifier, "typeOnly": false })
@@ -59,7 +78,7 @@ fn finds_every_form_of_import_with_its_line() {
     let main = file(&document, "src/main.ts");
 
     assert_eq!(
-        main["imports"],
+        own(&main["imports"]),
         json!([
             plain("./a", "import", 1),
             types("./b", "import", 2),
@@ -202,7 +221,7 @@ fn reads_a_script_that_parses_only_as_a_script() {
     let document = project.graph();
 
     assert_eq!(
-        file(&document, "legacy/old.js")["imports"],
+        own(&file(&document, "legacy/old.js")["imports"]),
         json!([plain("./helper", "require", 2)])
     );
 }

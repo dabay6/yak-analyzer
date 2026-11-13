@@ -189,9 +189,20 @@ enum Entry {
     Submodule,
 }
 
-/// Asks git for the file list of the root. The files come back sorted by path, byte by byte; what was
-/// left out on the way is added to the notices.
-pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Vec<File>, Stop> {
+/// The file list, and the paths it leaves out that an import can still lead into.
+#[derive(Debug, Default)]
+pub struct Listing {
+    /// The files, sorted by path, byte by byte.
+    pub files: Vec<File>,
+    /// The folders of nested repositories, other worktrees and submodules, which are never entered
+    /// (spec LIST-3).
+    pub elsewhere: BTreeSet<String>,
+    /// The paths of symbolic links, which are never followed (spec LIST-3).
+    pub links: BTreeSet<String>,
+}
+
+/// Asks git for the file list of the root. What was left out on the way is added to the notices.
+pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Listing, Stop> {
     root_spelling(root)?;
 
     let answer = git::read(root, &LIST)?;
@@ -209,7 +220,8 @@ pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Vec<File>, Stop> {
     let mut tracked: BTreeMap<String, Entry> = BTreeMap::new();
     let mut untracked: BTreeSet<String> = BTreeSet::new();
     let mut missing: BTreeSet<String> = BTreeSet::new();
-    let mut links = 0_usize;
+    let mut elsewhere: BTreeSet<String> = BTreeSet::new();
+    let mut link_paths: BTreeSet<String> = BTreeSet::new();
     let mut unreadable_names = 0_usize;
 
     for record in answer
@@ -225,8 +237,13 @@ pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Vec<File>, Stop> {
 
         if let Some(name) = record.strip_prefix("? ") {
             // A name that ends in a slash is a nested repository, which is never entered (spec LIST-3).
-            if !name.ends_with('/') {
-                untracked.insert(name.to_owned());
+            match name.strip_suffix('/') {
+                Some(folder) => {
+                    elsewhere.insert(folder.to_owned());
+                }
+                None => {
+                    untracked.insert(name.to_owned());
+                }
             }
 
             continue;
@@ -250,9 +267,13 @@ pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Vec<File>, Stop> {
         }
 
         if mode == LINK_MODE {
-            links += usize::from(tracked.get(name) != Some(&Entry::Link));
+            link_paths.insert(name.to_owned());
             tracked.insert(name.to_owned(), Entry::Link);
         } else {
+            if mode == SUBMODULE_MODE {
+                elsewhere.insert(name.to_owned());
+            }
+
             tracked
                 .entry(name.to_owned())
                 .or_insert(if mode == SUBMODULE_MODE {
@@ -268,7 +289,9 @@ pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Vec<File>, Stop> {
         let link =
             fs::symlink_metadata(root.join(name)).is_ok_and(|facts| facts.file_type().is_symlink());
 
-        links += usize::from(link);
+        if link {
+            link_paths.insert(name.clone());
+        }
 
         !link
     });
@@ -317,7 +340,9 @@ pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Vec<File>, Stop> {
         ));
     }
 
-    if links > 0 {
+    if !link_paths.is_empty() {
+        let links = link_paths.len();
+
         notices.push(Notice::new(
             "links-left-out",
             None,
@@ -347,5 +372,9 @@ pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Vec<File>, Stop> {
 
     files.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
 
-    Ok(files)
+    Ok(Listing {
+        files,
+        elsewhere,
+        links: link_paths,
+    })
 }

@@ -7,11 +7,13 @@ updates:
     schedule:
       interval: weekly
     # The oxc crates are released together, and one moved without the others does not build (spec
-    # DEP-3).
+    # DEP-3). oxc_resolver is released on its own and depends on none of them, so it moves alone.
     groups:
       oxc:
         patterns:
           - "oxc_*"
+        exclude-patterns:
+          - "oxc_resolver"
   - package-ecosystem: github-actions
     directory: /
     schedule:

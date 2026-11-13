@@ -49,3 +49,38 @@ pub fn line(text: &str) -> String {
 
     escaped
 }
+
+/// A stop of RUN-4's eleventh step, a field of a form it does not have, with the file it is about: where
+/// several files fail that step, the first by path is the one reported (spec RUN-4).
+#[derive(Debug)]
+pub struct Fault {
+    /// The file, by its path from the root.
+    file: String,
+    /// The stop.
+    stop: Stop,
+}
+
+impl Fault {
+    /// A fault about the file given.
+    pub fn new(file: impl Into<String>, stop: Stop) -> Self {
+        Self {
+            file: file.into(),
+            stop,
+        }
+    }
+
+    /// The first of the faults by path, compared byte by byte; of one file's, the first found.
+    pub fn first(faults: impl IntoIterator<Item = Self>) -> Option<Self> {
+        faults.into_iter().reduce(Self::earlier)
+    }
+
+    /// The earlier of two faults by path; the first given when both are about one file.
+    pub fn earlier(self, other: Self) -> Self {
+        if other.file < self.file { other } else { self }
+    }
+
+    /// The stop.
+    pub fn stop(self) -> Stop {
+        self.stop
+    }
+}

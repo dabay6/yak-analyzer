@@ -11,7 +11,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 use crate::files::{File, Kind};
 use crate::glob::Glob;
 use crate::notice::Notice;
-use crate::stop::Stop;
+use crate::stop::{Fault, Stop};
 
 /// The workspace's list that pnpm reads, at the root.
 const PNPM_LIST: &str = "pnpm-workspace.yaml";
@@ -27,6 +27,23 @@ pub struct Package {
     pub workspace: bool,
     /// Whether its folder is one the design spec reports the entry-point kinds in (spec PACK-4).
     pub detected: bool,
+    /// The packages its four lists of dependencies name, each with the version it asks for.
+    pub dependencies: BTreeMap<String, String>,
+    /// Its `exports`, which say what an import of the package by name may reach (spec RES-6).
+    pub exports: Option<Value>,
+    /// Its `imports`, the names that begin with `#` (spec RES-5).
+    pub imports: Option<Value>,
+    /// The targets of its `types` (or `typings`), `module` and `main`, in that order, those it states.
+    pub entries: Vec<String>,
+}
+
+/// What a `package.json` states that a package keeps.
+struct Fields {
+    name: Option<String>,
+    dependencies: BTreeMap<String, String>,
+    exports: Option<Value>,
+    imports: Option<Value>,
+    entries: Vec<String>,
 }
 
 /// The packages of a project, and which package each file belongs to.
@@ -39,22 +56,25 @@ pub struct Packages {
     pub of_file: BTreeMap<String, String>,
 }
 
-/// Reads the packages of the root. `data` is the files declared as data, whose `package.json` makes
-/// no package (spec KEY-4); `detection` is the folders yak's detection looked in, with a hand-off file.
-pub fn read(
-    root: &Path,
-    files: &[File],
-    data: &BTreeSet<String>,
-    detection: Option<&[String]>,
-    notices: &mut Vec<Notice>,
-) -> Result<Packages, Stop> {
+/// The `package.json` files that make packages and the workspace's list, read but not yet checked field
+/// by field, which RUN-4 asks for later, after the tsconfig files are read (spec RUN-4, steps 8 to 11).
+pub struct Loaded {
+    /// Each `package.json` by the folder it lies in, in the order of the list.
+    read: Vec<(String, Map<String, Value>)>,
+    /// The workspace's list that pnpm reads, where the list holds one.
+    pnpm: Option<Yaml>,
+}
+
+/// Reads every `package.json` that makes a package, then the workspace's list. `data` is the files
+/// declared as data, whose `package.json` makes no package (spec KEY-4).
+pub fn load(root: &Path, files: &[File], data: &BTreeSet<String>) -> Result<Loaded, Stop> {
     let manifests: Vec<&File> = files
         .iter()
         .filter(|file| file.kind == Kind::Manifest && !data.contains(&file.path))
         .collect();
 
-    // Each `package.json` is read first, then the workspace's list, then the fields, so that two faults
-    // always give the same line (spec RUN-4).
+    // Each `package.json` is read first, then the workspace's list, so that two faults always give the
+    // same line (spec RUN-4).
     let mut read: Vec<(String, Map<String, Value>)> = Vec::with_capacity(manifests.len());
 
     for manifest in &manifests {
@@ -66,60 +86,123 @@ pub fn read(
     } else {
         None
     };
-    let mut names: BTreeMap<&str, Option<String>> = BTreeMap::new();
 
-    for (folder, fields) in &read {
-        names.insert(folder, name(fields, &manifest_path(folder))?);
-    }
+    Ok(Loaded { read, pnpm })
+}
 
-    let mut patterns = Vec::new();
+impl Loaded {
+    /// Checks the fields the analyzer reads and makes the packages. `detection` is the folders yak's
+    /// detection looked in, with a hand-off file. A field of a form it does not have is a fault of the
+    /// file that holds it (spec PACK-6).
+    pub fn checked(
+        self,
+        files: &[File],
+        detection: Option<&[String]>,
+        notices: &mut Vec<Notice>,
+    ) -> Result<Packages, Fault> {
+        let mut faults = Vec::new();
+        let mut names: BTreeMap<&str, Fields> = BTreeMap::new();
 
-    if let Some((_, fields)) = read.iter().find(|(folder, _)| folder == ".") {
-        patterns.extend(workspaces(fields)?);
-    }
+        for (folder, fields) in &self.read {
+            let file = manifest_path(folder);
 
-    if let Some(pnpm) = &pnpm {
-        patterns.extend(pnpm_packages(pnpm)?);
-    }
-
-    let (included, excluded) = compile(&patterns)?;
-    let detection: Option<BTreeSet<&str>> =
-        detection.map(|folders| folders.iter().map(String::as_str).collect());
-    let mut list: Vec<Package> = names
-        .into_iter()
-        .map(|(folder, name)| {
-            let listed = folder != "."
-                && included.iter().any(|glob| glob.matches(folder))
-                && !excluded.iter().any(|glob| glob.matches(folder));
-            let workspace = folder == "."
-                || listed
-                || detection
-                    .as_ref()
-                    .is_some_and(|found| found.contains(folder));
-            let detected = match &detection {
-                Some(found) => found.contains(folder),
-                None => folder == "." || listed,
-            };
-
-            Package {
-                folder: folder.to_owned(),
-                name,
-                workspace,
-                detected,
+            match self::fields(fields, &file) {
+                Ok(read) => {
+                    names.insert(folder, read);
+                }
+                Err(stop) => faults.push(Fault::new(file, stop)),
             }
-        })
-        .collect();
+        }
 
-    list.sort_by(|a, b| a.folder.as_bytes().cmp(b.folder.as_bytes()));
-    repeated_names(&list, notices);
+        // Each source of the workspace's globs, with the file that states them.
+        let mut sources = Vec::new();
 
-    let folders: BTreeSet<&str> = list.iter().map(|package| package.folder.as_str()).collect();
-    let of_file = files
-        .iter()
-        .filter_map(|file| nearest(&file.path, &folders).map(|folder| (file.path.clone(), folder)))
-        .collect();
+        if let Some((_, fields)) = self.read.iter().find(|(folder, _)| folder == ".") {
+            match workspaces(fields) {
+                Ok(patterns) => sources.push(("package.json", patterns)),
+                Err(stop) => faults.push(Fault::new("package.json", stop)),
+            }
+        }
 
-    Ok(Packages { list, of_file })
+        if let Some(pnpm) = &self.pnpm {
+            match pnpm_packages(pnpm) {
+                Ok(patterns) => sources.push((PNPM_LIST, patterns)),
+                Err(stop) => faults.push(Fault::new(PNPM_LIST, stop)),
+            }
+        }
+
+        let mut included = Vec::new();
+        let mut excluded = Vec::new();
+
+        for (file, patterns) in &sources {
+            match compile(patterns) {
+                Ok((include, exclude)) => {
+                    included.extend(include);
+                    excluded.extend(exclude);
+                }
+                Err(stop) => faults.push(Fault::new(*file, stop)),
+            }
+        }
+
+        if let Some(fault) = Fault::first(faults) {
+            return Err(fault);
+        }
+
+        let detection: Option<BTreeSet<&str>> =
+            detection.map(|folders| folders.iter().map(String::as_str).collect());
+        let mut list: Vec<Package> = names
+            .into_iter()
+            .map(|(folder, fields)| {
+                let listed = folder != "."
+                    && included.iter().any(|glob| glob.matches(folder))
+                    && !excluded.iter().any(|glob| glob.matches(folder));
+                let workspace = folder == "."
+                    || listed
+                    || detection
+                        .as_ref()
+                        .is_some_and(|found| found.contains(folder));
+                let detected = match &detection {
+                    Some(found) => found.contains(folder),
+                    None => folder == "." || listed,
+                };
+
+                Package {
+                    folder: folder.to_owned(),
+                    name: fields.name,
+                    workspace,
+                    detected,
+                    dependencies: fields.dependencies,
+                    exports: fields.exports,
+                    imports: fields.imports,
+                    entries: fields.entries,
+                }
+            })
+            .collect();
+
+        list.sort_by(|a, b| a.folder.as_bytes().cmp(b.folder.as_bytes()));
+        repeated_names(&list, notices);
+
+        let folders: BTreeSet<&str> = list.iter().map(|package| package.folder.as_str()).collect();
+        let of_file = files
+            .iter()
+            .filter_map(|file| {
+                nearest(&file.path, &folders).map(|folder| (file.path.clone(), folder))
+            })
+            .collect();
+
+        Ok(Packages { list, of_file })
+    }
+}
+
+/// The fields of one `package.json` that a package keeps, each checked for its form (spec PACK-6).
+fn fields(fields: &Map<String, Value>, file: &str) -> Result<Fields, Stop> {
+    Ok(Fields {
+        name: name(fields, file)?,
+        dependencies: dependencies(fields, file)?,
+        exports: targets(fields, "exports", file)?,
+        imports: imports(fields, file)?,
+        entries: entries(fields, file)?,
+    })
 }
 
 /// The folder a `package.json` lies in, `.` for the root.
@@ -183,7 +266,7 @@ fn yaml(root: &Path) -> Result<Yaml, Stop> {
 }
 
 /// The stop for a field that holds a value of a form it does not have (spec PACK-6).
-fn misshapen(field: &str, file: &str, form: &str) -> Stop {
+pub fn misshapen(field: &str, file: &str, form: &str) -> Stop {
     Stop::new(format!(
         "the field `{field}` in {file} holds a value of a form it does not have; it must be {form}; fix it"
     ))
@@ -196,6 +279,108 @@ fn name(fields: &Map<String, Value>, file: &str) -> Result<Option<String>, Stop>
         Some(Value::String(name)) => Ok(Some(name.clone())),
         Some(_) => Err(misshapen("name", file, "text")),
     }
+}
+
+/// The form a target of `exports` or `imports` may take: a path, null, a list of targets, or an object
+/// of conditions whose values are targets.
+fn is_target(value: &Value) -> bool {
+    match value {
+        Value::String(_) | Value::Null => true,
+        Value::Array(targets) => targets.iter().all(is_target),
+        Value::Object(conditions) => conditions.values().all(is_target),
+        _ => false,
+    }
+}
+
+/// A `package.json`'s `exports`: one target, or an object whose keys are all subpaths, which begin with
+/// `.`, or all conditions, none of which does.
+fn targets(fields: &Map<String, Value>, field: &str, file: &str) -> Result<Option<Value>, Stop> {
+    let form = "a path, a list, or an object whose keys are all subpaths beginning with `.` or all \
+                conditions";
+    let Some(value) = fields.get(field) else {
+        return Ok(None);
+    };
+    let keys_agree = value.as_object().is_none_or(|keys| {
+        let subpaths = keys.keys().filter(|key| key.starts_with('.')).count();
+
+        subpaths == 0 || subpaths == keys.len()
+    });
+
+    if is_target(value) && keys_agree {
+        Ok(Some(value.clone()))
+    } else {
+        Err(misshapen(field, file, form))
+    }
+}
+
+/// A `package.json`'s `imports`: an object whose keys begin with `#` and whose values are targets.
+fn imports(fields: &Map<String, Value>, file: &str) -> Result<Option<Value>, Stop> {
+    let form =
+        "an object whose keys begin with `#` and whose values are paths, lists or conditions";
+
+    match fields.get("imports") {
+        None => Ok(None),
+        Some(Value::Object(map))
+            if map
+                .iter()
+                .all(|(key, value)| key.starts_with('#') && is_target(value)) =>
+        {
+            Ok(fields.get("imports").cloned())
+        }
+        Some(_) => Err(misshapen("imports", file, form)),
+    }
+}
+
+/// The targets of a `package.json`'s `types` (or its older name `typings`), `module` and `main`, in
+/// that order, those it states.
+fn entries(fields: &Map<String, Value>, file: &str) -> Result<Vec<String>, Stop> {
+    let types = if fields.contains_key("types") {
+        "types"
+    } else {
+        "typings"
+    };
+    let mut entries = Vec::new();
+
+    for field in [types, "module", "main"] {
+        match fields.get(field) {
+            None => {}
+            Some(Value::String(target)) => entries.push(target.clone()),
+            Some(_) => return Err(misshapen(field, file, "a path")),
+        }
+    }
+
+    Ok(entries)
+}
+
+/// The packages a `package.json`'s four lists of dependencies name, each with the version it asks for.
+fn dependencies(fields: &Map<String, Value>, file: &str) -> Result<BTreeMap<String, String>, Stop> {
+    let mut named = BTreeMap::new();
+
+    for list in [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ] {
+        let form = "an object that maps each package's name to the version it asks for";
+        let entries = match fields.get(list) {
+            None => continue,
+            Some(Value::Object(entries)) => entries,
+            Some(_) => return Err(misshapen(list, file, form)),
+        };
+
+        for (package, version) in entries {
+            let version = version
+                .as_str()
+                .ok_or_else(|| misshapen(list, file, form))?;
+
+            named
+                .entry(package.clone())
+                .or_insert_with(|| version.to_owned());
+        }
+    }
+
+    Ok(named)
 }
 
 /// The globs of the root `package.json`'s `workspaces`: a list, or an object with `packages`.
