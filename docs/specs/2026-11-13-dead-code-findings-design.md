@@ -162,9 +162,11 @@ launcher, the five targets and the report folder. Added here:
   An MDX document is not an entry point by itself: which documents a documentation tool loads is
   that tool's convention, stated by an `entries` declaration in the tool's stack (design ENT-5).
   Where one is declared, the files it imports are reachable through it (design AN-3).
-- **ENTRY-2** An `exports` or `bin` pattern with a `*` is mapped as a pattern (reading MAP-3): its
-  folder and extension are rewritten to the source's, and every listed file the rewritten pattern
-  matches is an entry point. A `*` written twice stands for the same text both times. A target that
+- **ENTRY-2** An `exports` target with a `*` is mapped as a pattern (reading MAP-3): its folder and
+  extension are rewritten to the source's, and every listed file the rewritten pattern matches is an
+  entry point. The `*` has Node's meaning, not a glob's: it stands for any text, `/` included, and a
+  `*` written twice stands for the same text both times. (`bin` has no patterns; a `*` in it is a
+  character of the path.) A target that
   maps to no source adds no entry point, and the package is marked as having one (ENTRY-8).
 - **ENTRY-3** An `entries` glob may name build output (design ENT-3). A glob that matches no listed
   file is mapped back, and the files the mapped glob matches are entry points. Mapping rewrites two
@@ -196,10 +198,16 @@ launcher, the five targets and the report folder. Added here:
   - `value`: `"globs"` when the value is a list of globs or one glob, or `"folder"` when it is a
     folder to which `pattern` is joined;
   - `pattern`: with `"folder"`, the glob joined to the folder; absent otherwise;
-  - `relativeTo`: `"config"` or `"package"`: the value is relative to the configuration file's own
+  - `relativeTo`: `"config"` or `"detection"`: the value is relative to the configuration file's own
     folder, or to the detection folder it was matched from;
   - `default`: the list of globs used when the file states no readable value, relative to the same
-    folder.
+    folder; it may be empty.
+
+  Every field is required except `pattern`, which is required with `"folder"` and not allowed
+  otherwise. A glob read from the file, or given in `default`, is used as the reading spec's KEY-5
+  reads a glob; one KEY-5 cannot read, or one that is absolute or steps out with `..`, or that
+  begins with `!`, is passed over with a notice naming the file and the glob, and the rest are used.
+  A value that leaves no glob uses `default`.
 
   The value is read only when it is written as a string, or a list of strings, in the object that is
   the file's default export (`export default {…}`, `module.exports = {…}`) or in the one object
@@ -237,8 +245,8 @@ launcher, the five targets and the report folder. Added here:
   reading spec's PACK-4 mark: a package whose own folder is a detection folder (design AN-4a). A file
   in no package is in none. For each package that holds analyzed files and is not marked, one notice
   names it and says the three kinds are not reported there and why; when files in no package are
-  analyzed, one notice says how many and the same. When the hand-off file says
-  detection was cut short, that notice exists already (reading HO-2). The other two kinds are
+  analyzed, one notice says how many and the same. These notices are given whether or not the
+  hand-off file says detection was cut short, which has its own notice (reading HO-2). The other two kinds are
   reported everywhere under the root.
 - **ENTRY-10** A computed `import()` or `require()` cannot be followed (design ENT-6). Each file's
   count is in `graph`'s output already; `audit` adds one notice for each file that has any, saying
@@ -249,7 +257,8 @@ launcher, the five targets and the report folder. Added here:
 - **USE-1** Each script, and each script block of a Vue component, is read for its names (this
   replaces the reading spec's IMP-5): what it exports, each with whether it is a type (an interface
   or a type alias) or a value (anything else: a function, a class, a variable, an enum, a namespace
-  with values), a name passed on from another file taking its kind from its origin (USE-2a); for each import, the names it brings in and
+  with values; a namespace that holds only types is a type), a name passed on from another file
+  taking its kind from its origin (USE-2a); for each import, the names it brings in and
   the local binding of each, or that it brings in the namespace, or nothing (`import './x'`); and
   each `export … from`, with its names or `*`. `oxc_semantic`, the oxc crate that ties each
   reference to its binding, is added for this, pinned with the oxc group (design AN-2, reading
@@ -283,7 +292,9 @@ launcher, the five targets and the report folder. Added here:
   the template and is not a compiler; it can count more uses than a compiler would, never fewer.
   The same holds for an import's binding in `<script setup>`, which the template uses directly. A
   component's default export is never reported. Session's call.
-- **USE-5** An MDX document's imported binding is used when the document's text, outside its
+- **USE-5** An MDX document's `import` statements (reading PARSE-4) are read for their names as a
+  script's are (USE-1), and its `export … from` statements pass use through as a script's do
+  (USE-2). Its imported binding is used when the document's text, outside its
   `import` and `export` statements and outside code blocks, names it as an identifier-shaped word
   (design AN-3). An MDX document's own exports are never reported.
 - **USE-6** A file imported with a query, such as `?raw`, is read as text (design AN-3). It is
@@ -314,8 +325,8 @@ launcher, the five targets and the report folder. Added here:
   from` statements that are not type-only, `import x = require`, and `require()` with a literal
   argument. Not an edge: `import type`, `export type`, an import all of whose names are marked
   `type`, a TypeScript import type, and `import()`. Session's call: `require()` loads on the spot and
-  can cause the same load-order fault. One finding is one set. Its first location is the import, of
-  the set's first file by path, that leads to another file of the set; its related locations are the
+  can cause the same load-order fault. One finding is one set. Its first location is the first import,
+  by line, of the set's first file by path, that leads to another file of the set; its related locations are the
   set's other files, each at its first such import (design IF-2). The message names one cycle
   through the set's first file by path: the shortest, found by a breadth-first walk over the set's
   edges that takes each file's targets in path order, so the same set gives the same words on every
@@ -327,7 +338,7 @@ launcher, the five targets and the report folder. Added here:
 
 - **REPORT-1** `audit` prints one SARIF 2.1.0 document with one run. The run names the tool, its
   version and the interface version; it lists the five rules (REPORT-2); and it holds one result per
-  finding, ordered by rule, then path, then line, then fingerprint, so the same project gives the
+  finding, ordered by rule in REPORT-2's order, then path, then line, then fingerprint, so the same project gives the
   same bytes on every platform (reading RUN-8). Each result carries its rule, a message a person can
   act on, a first location with a path relative to the root, with forward slashes, and a line where
   the kind has one, related locations where it has them, `partialFingerprints` (REPORT-3), and with
@@ -380,7 +391,8 @@ launcher, the five targets and the report folder. Added here:
   is not the project's: a base that is not a commit (CMD-2), and git failing while the base is read,
   which stops it as RUN-4's step 7 does, with git's own first line.
 - **COMMIT-5** The hand-off file's declarations apply to both sides (design BASE-3), with the base's
-  detection folders taken from the same file.
+  detection folders taken from the same file. Without a hand-off file, each side works out its own
+  detection folders from its own workspace list (reading PACK-4), as a run without one does.
 
 ### New against inherited
 
@@ -576,6 +588,8 @@ launcher, the five targets and the report folder. Added here:
   unused exports and types with Vue and MDX; unresolved imports and cycles with the report and
   `audit`; reading a commit and new against inherited, with LIFE-1 to LIFE-3; the check on real
   repositories.
+- Where in SARIF's run the interface version and the base's mark on a notification are written,
+  such as the run's or the notification's property bag.
 - The `partialFingerprints` key, the separator of REPORT-3, the field names `graph` adds, the notice
   kinds, and the wording of every message and line.
 - How the readers that read from disk are moved behind the reading spec's LIST-9 (COMMIT-1), and how
