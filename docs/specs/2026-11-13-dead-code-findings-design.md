@@ -185,6 +185,10 @@ notice, the named repositories, the stages, the report folder):
   function, a regular expression, is not read, and `default` stands (design ENT-4). The file itself
   is an entry point, so a helper it imports is reachable (design PROOF-1, pattern 6). A matched file
   that does not parse is treated as any file is (reading PARSE-2). Session's call for the shape.
+- **ENTRY-6a** A `configEntries` or `scriptCommands` value not of the shape ENTRY-6 or ENTRY-7 gives,
+  an object missing a field or holding one it does not allow included, is a declaration that cannot
+  be used (reading KEY-2): it stops the run at the reading spec's RUN-4 step 5, naming the stack, the
+  key and the field. This replaces KEY-2's "accepted whatever it holds". A fixture holds each case.
 - **ENTRY-7** A script of a `package.json` makes a file an entry point when a program that runs files
   is given the file as an argument. `node` is such a program for every package (design ENT-2); a
   `scriptCommands` declaration, a list of program names, adds others (design ENT-4). A script is read
@@ -207,7 +211,8 @@ notice, the named repositories, the stages, the report folder):
 - **ENTRY-9** Unused files, exports and types are reported only in files whose package carries the
   reading spec's PACK-4 mark: a package whose own folder is a detection folder (design AN-4a). A file
   in no package is in none. For each package that holds analyzed files and is not marked, one notice
-  names it and says the three kinds are not reported there and why. When the hand-off file says
+  names it and says the three kinds are not reported there and why; when files in no package are
+  analyzed, one notice says how many and the same. When the hand-off file says
   detection was cut short, that notice exists already (reading HO-2). The other two kinds are
   reported everywhere under the root.
 - **ENTRY-10** A computed `import()` or `require()` cannot be followed (design ENT-6). Each file's
@@ -475,7 +480,9 @@ notice, the named repositories, the stages, the report folder):
   to all exports anyway; counting all of them is the safe direction and the fixtures show it. Stage 2
   shows whether it hides true findings.
 - **Reporting the exports of an unused file too.** fallow does. Rejected: the file finding already
-  says the whole file can go, and each export finding beside it is noise.
+  says the whole file can go, and each export finding beside it is noise. For the bar against fallow
+  (design PROOF-4), an export fallow reports in a file the analyzer reports unused counts as found:
+  the unused-file finding covers it.
 - **Judging a sample of the findings in LIVE-3.** Faster on a repository with hundreds. Rejected: a
   false finding of a kind the sample missed would pass, and the owner's bar has no false finding.
 
