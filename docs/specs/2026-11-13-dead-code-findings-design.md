@@ -6,8 +6,9 @@
 
 **Amends:** `docs/specs/2026-11-11-reading-a-project-design.md`: IMP-5 (the names an import brings
 in are now recorded, USE-1), OUT-1 (`graph` gains the entry points and the uses, CMD-4), KEY-2 (the
-two opaque keys get their shapes, ENTRY-6 and ENTRY-7), and LIST-9 (this item says how a commit is
-read, COMMIT-1 to COMMIT-5). It also answers the question that spec passed on in its non-goals: what
+two opaque keys get their shapes, ENTRY-6 to ENTRY-7, and a wrong shape now stops the run, ENTRY-6a), LIST-9 (this item says how a commit is
+read, COMMIT-1 to COMMIT-5), PACK-6 (two more fields of a `package.json` are read, `bin` and
+`scripts`, ENTRY-1), RUN-1 (a third command, `audit`, CMD-1) and RUN-4 (one more stop, CMD-3). It also answers the question that spec passed on in its non-goals: what
 happens to the binary when the launcher is stopped (LIFE-1).
 
 **Builds from:** the analyzer's design spec,
@@ -44,16 +45,21 @@ matched to a new one passes the gate in silence. So the entry points, and every 
 counts, are printed by `graph` where a fixture can pin them down, and the end check audits real
 branches against their bases, not only whole trees.
 
-Terms (the reading spec's terms hold too: the root, a package, the hand-off file, a declaration, a
-notice, the named repositories, the stages, the report folder):
+Terms. Every term the reading spec's Intent defines holds here as it does there, among them the
+owner, a session, the builder, the plan, yak, a pack, a stack, the root, a package, the hand-off
+file, a declaration, a notice, the named repositories, the stages, the comparison, the swap, the
+launcher, the five targets and the report folder. Added here:
 
+- **fallow** is the dead-code tool yak runs at the gate today, which the analyzer is to replace.
 - **An entry point** is a file something outside the project's imports starts or loads: a program a
   `package.json` names, a test file a runner finds, a page a browser opens.
 - **A reachable file** is an entry point, or a file an import of a reachable file leads to.
 - **An export** is a name a file's `export` statements offer. **A use** of an export is a place
-  another file reads it (USE-2). **Detection folders** are the folders yak looked in for stacks
-  (reading PACK-4); the three entry-point kinds are reported only in packages whose own folder is
-  one of them.
+  another file reads it (USE-2).
+- **Detection folders** are the folders the reading spec's PACK-4 names: with a hand-off file, the
+  folders yak looked in for stacks; without one, the root and the workspace's folders. **The three
+  kinds that depend on entry points** are unused file, unused export and unused type; they are
+  reported only in packages whose own folder is a detection folder (ENTRY-9).
 - **A finding** has a **rule**, a message, a location and a **fingerprint**: a short digest that
   names the same finding on the base and on the branch.
 - **SARIF** is the Static Analysis Results Interchange Format, version 2.1.0, a JSON format that yak
@@ -120,10 +126,11 @@ notice, the named repositories, the stages, the report folder):
   list gains one stop, after its 7: the base is not a commit (CMD-2). A wrong command or option
   exits 2, a fault in the analyzer exits 3, as for `graph`.
 - **CMD-4** `graph`, with or without `--hand-off`, adds to what it prints (reading OUT-1): each entry
-  point with every source that made it one (ENTRY-1); for each package, whether the three
-  entry-point kinds are reported in it (ENTRY-9); for each file, its exports, and for each import
-  the names it brings in (USE-1); and each use the analyzer counted, with the file and line it
-  counts from. It does not print findings: those are `audit`'s. `graph` stays outside the interface
+  point with every source that made it one (ENTRY-1); for each package, whether the three kinds
+  that depend on entry points are reported in it (ENTRY-9); for each file, its exports, and for each import
+  the names it brings in (USE-1); and each use the analyzer counted, with where it counts from: the
+  file and line of the reference, of the import for a use of every export (USE-2), or the entry
+  point and its source for an entry point's exports (USE-3). It does not print findings: those are `audit`'s. `graph` stays outside the interface
   version (reading OUT-2), so stage 5's entry-point tool may take its own form. Session's call: one
   builder's command shows the whole basis of every finding, and no command is fixed before the MCP
   tools are designed.
@@ -148,6 +155,10 @@ notice, the named repositories, the stages, the report folder):
   - an `entries` glob, from a pack or from the project (design ENT-4);
   - a tool's configuration file read by a `configEntries` declaration (ENTRY-6).
 
+  `bin` and `scripts` join the fields the reading spec's PACK-6 reads, in every form npm gives them
+  (`bin` as a path or an object of paths, `scripts` as an object of strings); a value of another
+  form stops the run at RUN-4's step 11, as any field of the wrong form does.
+
   An MDX document is not an entry point by itself: which documents a documentation tool loads is
   that tool's convention, stated by an `entries` declaration in the tool's stack (design ENT-5).
   Where one is declared, the files it imports are reachable through it (design AN-3).
@@ -156,8 +167,18 @@ notice, the named repositories, the stages, the report folder):
   matches is an entry point. A `*` written twice stands for the same text both times. A target that
   maps to no source adds no entry point, and the package is marked as having one (ENTRY-8).
 - **ENTRY-3** An `entries` glob may name build output (design ENT-3). A glob that matches no listed
-  file is mapped back as a pattern, as ENTRY-2 maps one, and the files the mapped glob matches are
-  entry points. A glob that matches neither way gives a notice naming the glob and its source.
+  file is mapped back, and the files the mapped glob matches are entry points. Mapping rewrites two
+  parts of the glob and leaves the rest as written:
+  - its folder: the glob's leading segments that hold no wildcard or brace. When that folder lies
+    in the `outDir` of a tsconfig in the folder of the package the folder lies in, the `outDir` part
+    is replaced as the reading spec's MAP-1 step 1 replaces it; otherwise its first segment is
+    replaced by `src` (MAP-1 step 2). A glob whose first segment holds a wildcard has no folder to
+    rewrite, and is not mapped;
+  - its ending: when the last segment ends in an output form (`.js`, `.mjs`, `.cjs`, or a type
+    declaration's ending), written alone or among braces, that ending is replaced by the source
+    extensions of MAP-1, `{ts,tsx,mts,cts,js,jsx,mjs,cjs}`. Any other ending is left.
+
+  A glob that matches neither way gives a notice naming the glob and its source. Session's call.
 - **ENTRY-4** A pack's glob applies in each detection folder, relative to that folder; a project's
   glob applies once, relative to the root (design ENT-4, reading KEY-3).
 - **ENTRY-5** `internal` names package folders, as paths relative to the root (project) or to each
@@ -167,14 +188,16 @@ notice, the named repositories, the stages, the report folder):
   started and not imported.
 - **ENTRY-6** `configEntries` is a list of objects, one for each configuration file a tool reads
   (design ENT-4). Each object holds:
-  - `file`: a glob for the configuration file's name, matched in each package's folder and not
-    below it, such as `vitest.config.{ts,mts,js,mjs}`;
+  - `file`: a glob for the configuration file, matched relative to each detection folder (ENTRY-4),
+    such as `vitest.config.{ts,mts,js,mjs}` for one in the folder itself or
+    `**/vitest.config.{ts,mts,js,mjs}` for one at any depth;
   - `property`: the path to the value in the object the file exports, as a list of keys, such as
     `["test", "include"]`;
   - `value`: `"globs"` when the value is a list of globs or one glob, or `"folder"` when it is a
     folder to which `pattern` is joined;
   - `pattern`: with `"folder"`, the glob joined to the folder; absent otherwise;
-  - `relativeTo`: `"config"` or `"package"`, the folder the value is relative to;
+  - `relativeTo`: `"config"` or `"package"`: the value is relative to the configuration file's own
+    folder, or to the detection folder it was matched from;
   - `default`: the list of globs used when the file states no readable value, relative to the same
     folder.
 
@@ -193,8 +216,10 @@ notice, the named repositories, the stages, the report folder):
   is given the file as an argument. `node` is such a program for every package (design ENT-2); a
   `scriptCommands` declaration, a list of program names, adds others (design ENT-4). A script is read
   as a shell would split it, and only that far:
-  - it is cut into commands at `&&`, `||`, `;`, `|` and `&`;
-  - a command is cut into words at unquoted white space, and single and double quotes are removed;
+  - quotes are found first, from the left: text between a pair of single quotes, or of double
+    quotes, is quoted, and nothing in it splits;
+  - it is cut into commands at unquoted `&&`, `||`, `;`, `|` and `&`;
+  - a command is cut into words at unquoted white space, and the quotes are removed;
   - leading words of the form `NAME=value` are passed over;
   - when the first remaining word is `node` or a declared program, every later word of the command
     that names a listed file, from the package's folder, with the reading spec's RES-3 and MAP-1
@@ -222,9 +247,9 @@ notice, the named repositories, the stages, the report folder):
 ### Uses
 
 - **USE-1** Each script, and each script block of a Vue component, is read for its names (this
-  replaces the reading spec's IMP-5): what it exports, each with whether it is a type (an interface,
-  a type alias, or a re-export that `export type` marks) or a value (anything else: a function, a
-  class, a variable, an enum, a namespace with values); for each import, the names it brings in and
+  replaces the reading spec's IMP-5): what it exports, each with whether it is a type (an interface
+  or a type alias) or a value (anything else: a function, a class, a variable, an enum, a namespace
+  with values), a name passed on from another file taking its kind from its origin (USE-2a); for each import, the names it brings in and
   the local binding of each, or that it brings in the namespace, or nothing (`import './x'`); and
   each `export … from`, with its names or `*`. `oxc_semantic`, the oxc crate that ties each
   reference to its binding, is added for this, pinned with the oxc group (design AN-2, reading
@@ -244,6 +269,11 @@ notice, the named repositories, the stages, the report folder):
     every export of the target. Session's call: the safe direction, since what is read off the
     result is not followed;
   - an export used in its own file is noted, for FIND-3's message, and is not a use by another file.
+- **USE-2a** A name a file offers only by passing it on, through `export … from`, `export *`, or an
+  imported binding exported again, is not that file's own export and is never reported there. The
+  name's origin is the file that declares it, found by following the chain; that is where an unused
+  name is reported, once. Whether it is a value or a type is decided at the origin, whatever an
+  `export type` along the way says. Session's call: one finding for one unused name.
 - **USE-3** The exports of an entry point are all used: whatever starts the file consumes them
   (design FIND-3). That use passes through its re-exports as USE-2 says, so a package's public API
   reaches the files it re-exports from.
@@ -256,8 +286,10 @@ notice, the named repositories, the stages, the report folder):
 - **USE-5** An MDX document's imported binding is used when the document's text, outside its
   `import` and `export` statements and outside code blocks, names it as an identifier-shaped word
   (design AN-3). An MDX document's own exports are never reported.
-- **USE-6** A file imported with a query, such as `?raw`, is read as text: it is reachable, and its
-  exports are never reported (design AN-3).
+- **USE-6** A file imported with a query, such as `?raw`, is read as text (design AN-3). It is
+  reachable, so it is never an unused file, and when any import with a query leads to it, its
+  exports are never reported. Its own imports are followed only when an import without a query, or
+  an entry point source, also reaches it: read as text, it loads nothing.
 
 ### The five kinds
 
@@ -284,8 +316,10 @@ notice, the named repositories, the stages, the report folder):
   `type`, a TypeScript import type, and `import()`. Session's call: `require()` loads on the spot and
   can cause the same load-order fault. One finding is one set. Its first location is the import, of
   the set's first file by path, that leads to another file of the set; its related locations are the
-  set's other files, each at its first such import (design IF-2). The message names the files in a
-  cycle's order, up to ten and then how many more.
+  set's other files, each at its first such import (design IF-2). The message names one cycle
+  through the set's first file by path: the shortest, found by a breadth-first walk over the set's
+  edges that takes each file's targets in path order, so the same set gives the same words on every
+  platform. It names up to ten files, then how many more the set holds.
 - **KIND-5** Nothing else is reported: the design spec's FIND-12 list holds, and complexity and
   duplication wait for stage 4.
 
@@ -309,7 +343,8 @@ notice, the named repositories, the stages, the report folder):
   later scheme can sit beside it. Session's call for the digest.
 - **REPORT-4** Every notice of the run is a notification of the run's invocation, with its kind, its
   sentence and its file where it has one (design IF-3). With a base, one notification names the base
-  commit's full name, and the base's own notices (COMMIT-4) are notifications marked as the base's.
+  commit's full name, and every notice the base's reading gives, of any kind, COMMIT-4's included,
+  is a notification marked as the base's.
   yak does not read notifications; a person reads them in the report, or in `graph`'s output, which
   prints the same notices.
 
@@ -331,10 +366,19 @@ notice, the named repositories, the stages, the report folder):
   call: both sides then judge an import of a generated file the same way, as both sides use the
   declarations in force now (design BASE-3); the cost is that an ignore rule added on the branch also
   applies to the base.
-- **COMMIT-4** At the base, nothing stops the run but a base that is not a commit (CMD-2). A
-  `package.json`, workspace list or tsconfig that cannot be read, and a source file that does not
-  parse, are skipped with a notice marked as the base's (design AN-7): nobody can fix the base.
-  Findings that depend on a skipped file may then be marked new.
+- **COMMIT-4** At the base, the project's own files stop nothing (design AN-7): nobody can fix the
+  base. Every check of the reading spec's RUN-4 from step 8 on, which on the working tree stops the
+  run, at the base skips the file it is about, with a notice marked as the base's:
+  - a `package.json` that is skipped, whether it cannot be read or a field has the wrong form, makes
+    no package, and its files belong to the next package up;
+  - a workspace list that is skipped adds no workspace folders;
+  - a tsconfig that is skipped, or whose `extends` target is missing, governs nothing, and the search
+    for a governing tsconfig goes on upward (reading CFG-2);
+  - a source file that does not parse or cannot be read has no imports and no exports.
+
+  Findings that depend on a skipped file may then be marked new. What still stops the run is what
+  is not the project's: a base that is not a commit (CMD-2), and git failing while the base is read,
+  which stops it as RUN-4's step 7 does, with git's own first line.
 - **COMMIT-5** The hand-off file's declarations apply to both sides (design BASE-3), with the base's
   detection folders taken from the same file.
 
@@ -423,7 +467,11 @@ notice, the named repositories, the stages, the report folder):
   declaration with its reason and the number of files it matches, and the owner reads that list when
   validating the plan that carries this check.
 - **LIVE-3** Each root gets an `audit` with no base, and an `audit` of one recent merged pull request
-  with changes to code, run on a worktree of the merge's second parent against the merge base. The
+  with changes to code. Where the repository keeps the pull request's last commit, through a merge
+  commit's second parent or the pull request's ref on the remote, the worktree is made at that commit
+  and the base is its merge base with the default branch as it stood before the merge. Where it does
+  not, as after a squash or a rebase, the worktree is made at the last commit the merge put on the
+  default branch and the base is the commit just before the first. The
   session judges every finding of the run with no base by reading the code, kind by kind: true, or
   false with why. Findings with the same cause are one case and are judged once. Every finding the
   branch audit marks new is judged too, and so is every finding it marks inherited whose file the
