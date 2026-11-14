@@ -35,6 +35,9 @@ pub struct Package {
     pub imports: Option<Value>,
     /// The targets of its `types` (or `typings`), `module` and `main`, in that order, those it states.
     pub entries: Vec<String>,
+    /// The fields that make files entry points, each with the target it states: `types` (or
+    /// `typings`), `module`, `main`, then each of `bin` (spec ENTRY-1).
+    pub starts: Vec<(&'static str, String)>,
 }
 
 /// What a `package.json` states that a package keeps.
@@ -43,7 +46,8 @@ struct Fields {
     dependencies: BTreeMap<String, String>,
     exports: Option<Value>,
     imports: Option<Value>,
-    entries: Vec<String>,
+    entries: Vec<(&'static str, String)>,
+    bin: Vec<String>,
 }
 
 /// The packages of a project, and which package each file belongs to.
@@ -166,6 +170,13 @@ impl Loaded {
                     None => folder == "." || listed,
                 };
 
+                let starts = fields
+                    .entries
+                    .iter()
+                    .cloned()
+                    .chain(fields.bin.iter().map(|target| ("bin", target.clone())))
+                    .collect();
+
                 Package {
                     folder: folder.to_owned(),
                     name: fields.name,
@@ -174,7 +185,12 @@ impl Loaded {
                     dependencies: fields.dependencies,
                     exports: fields.exports,
                     imports: fields.imports,
-                    entries: fields.entries,
+                    entries: fields
+                        .entries
+                        .into_iter()
+                        .map(|(_, target)| target)
+                        .collect(),
+                    starts,
                 }
             })
             .collect();
@@ -202,6 +218,7 @@ fn fields(fields: &Map<String, Value>, file: &str) -> Result<Fields, Stop> {
         exports: targets(fields, "exports", file)?,
         imports: imports(fields, file)?,
         entries: entries(fields, file)?,
+        bin: bin(fields, file)?,
     })
 }
 
@@ -332,8 +349,8 @@ fn imports(fields: &Map<String, Value>, file: &str) -> Result<Option<Value>, Sto
 }
 
 /// The targets of a `package.json`'s `types` (or its older name `typings`), `module` and `main`, in
-/// that order, those it states.
-fn entries(fields: &Map<String, Value>, file: &str) -> Result<Vec<String>, Stop> {
+/// that order, those it states, each with the field that states it.
+fn entries(fields: &Map<String, Value>, file: &str) -> Result<Vec<(&'static str, String)>, Stop> {
     let types = if fields.contains_key("types") {
         "types"
     } else {
@@ -344,12 +361,33 @@ fn entries(fields: &Map<String, Value>, file: &str) -> Result<Vec<String>, Stop>
     for field in [types, "module", "main"] {
         match fields.get(field) {
             None => {}
-            Some(Value::String(target)) => entries.push(target.clone()),
+            Some(Value::String(target)) => entries.push((field, target.clone())),
             Some(_) => return Err(misshapen(field, file, "a path")),
         }
     }
 
     Ok(entries)
+}
+
+/// The paths a `package.json`'s `bin` states: one path, or an object that maps each command to a path,
+/// by the commands' names (spec ENTRY-1, PACK-6).
+fn bin(fields: &Map<String, Value>, file: &str) -> Result<Vec<String>, Stop> {
+    let form = "a path, or an object that maps each command to a path";
+
+    match fields.get("bin") {
+        None => Ok(Vec::new()),
+        Some(Value::String(target)) => Ok(vec![target.clone()]),
+        Some(Value::Object(commands)) => commands
+            .values()
+            .map(|target| {
+                target
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| misshapen("bin", file, form))
+            })
+            .collect(),
+        Some(_) => Err(misshapen("bin", file, form)),
+    }
 }
 
 /// The packages a `package.json`'s four lists of dependencies name, each with the version it asks for.

@@ -98,6 +98,9 @@ pub struct Configs {
     /// The builds of the configs in each folder, by the folder, the root's as the empty path: those of
     /// `tsconfig.json` first, then the others by path.
     builds: BTreeMap<String, Vec<Build>>,
+    /// The files each config under the root names in its own `files`, as pairs of the config's path and
+    /// the file's, both from the root, in the order of the configs and of each list (spec ENTRY-1).
+    pub named_files: Vec<(String, String)>,
 }
 
 /// Reads every tsconfig in the list that is not data, and the configs above the root they extend. A
@@ -306,6 +309,7 @@ impl Loaded {
         }
 
         let builds = self.builds();
+        let named_files = self.named_files();
         let options = ResolveOptions {
             tsconfig: Some(TsconfigDiscovery::Auto),
             ..ResolveOptions::default()
@@ -315,7 +319,28 @@ impl Loaded {
             resolver: ResolverGeneric::new_with_file_system(Served(Arc::new(served)), options),
             root: self.root,
             builds,
+            named_files,
         })
+    }
+
+    /// The files each config under the root names in its own `files`, each from the root; a path that
+    /// leads above the root is left out (spec ENTRY-1).
+    fn named_files(&self) -> Vec<(String, String)> {
+        self.configs
+            .iter()
+            .filter(|(path, _)| !is_above(path))
+            .flat_map(|(path, config)| {
+                config
+                    .fields
+                    .get("files")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|named| (path.clone(), normalized(parent(path), named)))
+                    .filter(|(_, named)| !is_above(named))
+            })
+            .collect()
     }
 
     /// A config as the library is given it: only the fields it uses, with each target of `extends` and

@@ -5,6 +5,7 @@
 
 mod cli;
 mod declarations;
+mod entries;
 mod files;
 mod git;
 mod glob;

@@ -658,6 +658,42 @@ impl<'p> Resolver<'p> {
         }
     }
 
+    /// The files a target of a package's `package.json` leads to, a path from the package's folder,
+    /// mapped back to the source it is built from where it names build output; nothing when it leads to
+    /// no file (spec ENTRY-1, MAP-1).
+    pub fn package_target(&self, package: &Package, target: &str) -> Option<Vec<String>> {
+        let folder = folder_path(&package.folder);
+        let path = joined(folder, target)?;
+
+        match self.target(folder, &path, None) {
+            Found::Done(Outcome::Files(files)) => Some(files),
+            _ => None,
+        }
+    }
+
+    /// The paths, from the root, where the source of an `exports` target with a `*` may lie: the target
+    /// in its source forms, the target itself, then the places MAP-1 maps build output to, each still
+    /// holding its `*` (spec ENTRY-2, MAP-3).
+    pub fn pattern_places(&self, package: &Package, target: &str) -> Vec<String> {
+        let folder = folder_path(&package.folder);
+        let Some(path) = joined(folder, target) else {
+            return Vec::new();
+        };
+        let mut places: Vec<String> = SOURCE_FORMS
+            .iter()
+            .find_map(|(output, forms)| {
+                path.strip_suffix(output)
+                    .map(|stem| forms.iter().map(|form| format!("{stem}{form}")).collect())
+            })
+            .unwrap_or_default();
+
+        let mapped = self.sources(folder, &path, true);
+
+        places.push(path);
+        places.extend(mapped);
+        places
+    }
+
     /// Every file a package's `types`, `module` and `main` lead to; nothing when it states none of them
     /// (spec RES-3, RES-6).
     fn entries(&self, package: &Package) -> Option<Found> {
@@ -896,7 +932,7 @@ fn combined(each: Vec<Found>) -> Found {
 /// The key of an `exports` or `imports` map that a subpath matches, as Node matches one: the key
 /// itself when it has no `*`, or else the pattern with the longest part before its one `*`, the
 /// longer key where two are as long; with the text the `*` stands for (spec RES-5, RES-6).
-fn matched<'v, 'w>(
+pub fn matched<'v, 'w>(
     map: &'v Map<String, Value>,
     wanted: &'w str,
 ) -> Option<(&'v Value, Option<&'w str>)> {

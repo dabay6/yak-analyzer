@@ -1,7 +1,8 @@
 //! The `graph` command: reads a project and prints what it read as one JSON document (spec OUT-1).
 //!
 //! So far it reads the hand-off file, the file list, the `data` and `generated` declarations, the
-//! packages, the tsconfig files, the imports of every script, and where each import leads.
+//! packages, the tsconfig files, the imports of every script, where each import leads, and the entry
+//! points with the source of each (spec CMD-4).
 
 use std::collections::BTreeMap;
 use std::env;
@@ -10,6 +11,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::declarations;
+use crate::entries::{self, Entries};
 use crate::files::{self, File};
 use crate::hand_off;
 use crate::imports::Import;
@@ -90,8 +92,26 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
         (Err(first), Err(second)) => return Err(first.earlier(second).stop()),
     };
     let scripts = scripts::read(&root, files, &marks.data, &mut notices)?;
-    let resolved = Resolver::new(&listing, &packages, &configs).resolve(&root, &scripts)?;
+    let resolver = Resolver::new(&listing, &packages, &configs);
+    let resolved = resolver.resolve(&root, &scripts)?;
+    let entries = entries::find(
+        &entries::Project {
+            files,
+            packages: &packages,
+            configs: &configs,
+            resolver: &resolver,
+            resolved: &resolved,
+            handed: handed.as_ref(),
+        },
+        &mut notices,
+    )?;
     let mut document = json!({
+        "entries": entry_points(&entries),
+        "entryFaults": entries
+            .faults
+            .iter()
+            .map(|(folder, fault)| json!({ "fault": fault.name(), "package": folder }))
+            .collect::<Vec<Value>>(),
         "files": files
             .iter()
             .filter(|each| !scripts.gone.contains(&each.path))
@@ -106,6 +126,21 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
     document.sort_all_objects();
 
     Ok(format!("{document:#}"))
+}
+
+/// The entry points as they are printed, by path, each with every source that made it one (spec
+/// CMD-4).
+fn entry_points(entries: &Entries) -> Vec<Value> {
+    entries
+        .points
+        .iter()
+        .map(|(path, sources)| {
+            json!({
+                "path": path,
+                "sources": sources.iter().map(entries::Source::printed).collect::<Vec<Value>>(),
+            })
+        })
+        .collect()
 }
 
 /// One file as it is printed. A file that was read has its imports, each with where it leads, and the
