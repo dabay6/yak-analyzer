@@ -129,7 +129,8 @@ launcher, the five targets and the report folder. Added here:
   with the name given and `git fetch` as the fix.
 - **CMD-3** `audit` exits 0 when it ran, whether or not it found anything; a run that cannot go on
   stops as the reading spec's RUN-3 and RUN-4 say, exit 1 and one line on standard error. RUN-4's
-  list gains one stop, 7b, after its 7a: the base is not a commit (CMD-2). A wrong command or option
+  list gains two stops after its 7a: 7b, the base is not a commit (CMD-2); 7c, a partial clone
+  with a git too old to read the base without the network (COMMIT-2). A wrong command or option
   exits 2, a fault in the analyzer exits 3, as for `graph`.
 - **CMD-4** `graph`, with or without `--hand-off`, adds to what it prints (reading OUT-1): each entry
   point with every source that made it one (ENTRY-1); for each package, whether the three kinds
@@ -398,7 +399,12 @@ launcher, the five targets and the report folder. Added here:
   `working-tree-encoding` that is not UTF-8, does not parse or is not UTF-8 at the base, and is
   skipped (COMMIT-4). Lazy fetching is turned off for every start of git, so a partial clone that
   lacks a stored file makes git fail, which stops the run with git's line, and never fetches over
-  the network (reading RUN-6). The plan names the oldest git version the commands this item adds work with,
+  the network (reading RUN-6). The git floor of the reading spec's DEP-2 stays where it is for this:
+  when an audit with a base runs in a partial clone (one whose settings name a promisor remote) and
+  the git found is older than the first version that honours the switch, the run stops before the
+  base is read, with a line that names both versions and says a partial clone needs the newer git.
+  A run without a base, and a run in a full clone, need nothing more. Session's call: it keeps the
+  promise of no network without raising the floor for everyone. The plan names the oldest git version the commands this item adds work with,
   and raises the reading spec's DEP-2 floor if it must. A tsconfig above
   the root (reading CFG-3) is read from the same commit.
 - **COMMIT-3** At the base, "git ignores this path" (reading RES-4, LIST-5) is answered by the
@@ -627,8 +633,8 @@ launcher, the five targets and the report folder. Added here:
 - **The draft keys and rule names change in stage 2.** Only hand-written files and fixtures hold them
   until then (CMD-5).
 - **A git too old to turn lazy fetching off.** git's switch for it is recent; an older git in a
-  partial clone could fetch a missing file. The plan names the git version that honours it, and
-  where the floor is older the README says partial clones need that version.
+  partial clone could fetch a missing file. COMMIT-2 stops an audit with a base in that case, the
+  plan names the version, and the README says partial clones need it.
 - **A value from a caller turned into a git option.** The base is the first value from outside the
   analyzer that reaches git's command line; one beginning with `-`, such as `--output=…`, could make
   git write a file. CMD-2 refuses such a value before git sees it, and only git's own full name for
