@@ -145,10 +145,12 @@ notice, the named repositories, the stages, the report folder):
     point;
   - an HTML page, whose `<script src>` targets are entry points (design ENT-2); the page itself, of
     the kind "html", is never reported;
-  - an MDX document, which is always an entry point, since a documentation tool loads it by its own
-    convention, and which is never reported (design AN-3); session's call;
   - an `entries` glob, from a pack or from the project (design ENT-4);
   - a tool's configuration file read by a `configEntries` declaration (ENTRY-6).
+
+  An MDX document is not an entry point by itself: which documents a documentation tool loads is
+  that tool's convention, stated by an `entries` declaration in the tool's stack (design ENT-5).
+  Where one is declared, the files it imports are reachable through it (design AN-3).
 - **ENTRY-2** An `exports` or `bin` pattern with a `*` is mapped as a pattern (reading MAP-3): its
   folder and extension are rewritten to the source's, and every listed file the rewritten pattern
   matches is an entry point. A `*` written twice stands for the same text both times. A target that
@@ -230,6 +232,8 @@ notice, the named repositories, the stages, the report folder):
     reference of `ns`, passing it on included, uses every export of the target;
   - `export { a } from './x'` and `export * from './x'` pass use through: a use of the re-exporting
     file's `a`, or of a name `*` covers, is a use of `./x`'s export, and so on through a chain;
+  - `import { a } from './x'; export { a }`, an imported binding exported again, passes use through
+    the same way; the `export` statement itself is not a reference that uses `./x`'s `a`;
   - `export * as ns from './x'` passes a use of `ns` on to every export of `./x`;
   - `import x = require('./x')`, `require('./x')` and `import('./x')` with a literal argument use
     every export of the target. Session's call: the safe direction, since what is read off the
@@ -252,8 +256,8 @@ notice, the named repositories, the stages, the report folder):
 
 ### The five kinds
 
-- **KIND-1** **Unused file** (design FIND-2). A listed script, type declaration file or Vue component
-  that is not reachable, in a package ENTRY-9 reports in. Reachability follows every import that
+- **KIND-1** **Unused file** (design FIND-2). A listed script or Vue component that is not
+  reachable, in a package ENTRY-9 reports in. Reachability follows every import that
   leads to files, of every form: type imports, `require`, literal `import()`, re-exports, a page's
   script, a Vue block's `src`. Not reported: a data file, a generated file, a type declaration
   file, an MDX document, an HTML page, a file of the kind "other" (design FIND-10). The location is
@@ -342,18 +346,20 @@ notice, the named repositories, the stages, the report folder):
   without writing to the index. Session's call.
 - **INH-3** Cycles (design BASE-5). A working-tree cycle is inherited when the base, after INH-2's
   rewriting, has a strongly connected set that contains all of its files, and the branch added no
-  edge of KIND-4 between two of its files: no import, by file and specifier, that the base did not
-  have. Otherwise it is new. A new cycle's first location is an edge the branch added, the first by
-  path and line, and its message names that import and the files; with no added edge, as when a file
-  joins an old set by an import in the joining file, that edge is the added one.
+  edge of KIND-4 between two of its files. An edge is a pair of files, the importing file and the
+  file it leads to, with the base's paths rewritten by INH-2; so a specifier rewritten without
+  changing its target, such as `./a` becoming `./a.js`, adds no edge. Otherwise the cycle is new. A
+  new cycle's first location is the first import, by path and line, that makes an edge the branch
+  added, and its message names that import and the files. A new cycle with no added edge, which
+  happens only when the base's set was cut by a file COMMIT-4 skipped, takes KIND-4's first location.
 - **INH-4** The two sides are read in parallel where the builder finds it worth it; the output is
   the same bytes either way (reading RUN-8).
 
 ### Life of a run
 
-- **LIFE-1** When the process that started the binary ends, the binary ends soon after, on every
-  target, writing nothing. In particular, when yak stops the npm launcher (skeleton spec), the
-  binary started under it does not run on. The builder chooses how, such as the launcher handing the
+- **LIFE-1** When the npm launcher (skeleton spec) that started the binary ends, as when yak stops
+  it, the binary ends soon after, on every target, writing nothing. A binary started directly is
+  stopped directly, and needs nothing more. The builder chooses how, such as the launcher handing the
   binary a pipe it never writes and the binary ending when that pipe closes, and a test stops a
   launcher during a long audit and checks that its binary is gone within five seconds. Session's
   call; the reading spec passed this question to the first command yak starts and stops.
@@ -361,12 +367,10 @@ notice, the named repositories, the stages, the report folder):
   end or has its input closed, and git's optional locks stay off (reading RUN-6a), so a killed audit
   leaves no lock. A test kills an audit while it reads a base and checks that nothing under the
   root changed and no git it started is still running.
-- **LIFE-3** No walk of the graph or of a syntax tree recurses to a depth that grows with the
-  project: reachability, the strongly connected sets and use passing are written as loops over an
-  explicit stack, and parsing runs on a thread whose stack the builder sizes for deeply nested code.
-  A fixture holds an import chain of 10,000 files and a cycle of 10,000 files, and passes on every
-  target. Windows' main thread has 1 MB of stack, and a process that runs out of stack writes
-  nothing (reading RUN-3).
+- **LIFE-3** No project's size or shape runs the analyzer out of stack. Windows' main thread has
+  1 MB of stack, and a process that runs out of stack writes nothing (reading RUN-3). A fixture holds
+  an import chain of 10,000 files, a cycle of 10,000 files and a re-export chain of 10,000 files, and
+  passes on every target.
 
 ### Fixtures
 
@@ -408,8 +412,9 @@ notice, the named repositories, the stages, the report folder):
 - **LIVE-2** Each run has a hand-off file written by hand, kept in the report folder as the reading
   spec's LIVE-1 keeps one. It holds the declarations a pack would state, in a stack of their own, and
   those the repository would state, as the project's, kept apart as yak keeps them (design PROOF-2):
-  `data` and `generated` from the reading item's files, and `entries`, `internal`, `configEntries`
-  and `scriptCommands` from the session's reading of each repository. The report lists each
+  `data` and `generated` from the reading item's files, and `entries` and `internal`, from the
+  session's reading of each repository. `configEntries` and `scriptCommands` describe what a tool
+  does, so only the pack's stack holds them (reading KEY-2), as the pack will in stage 3. The report lists each
   declaration with its reason and the number of files it matches, and the owner reads that list when
   validating the plan that carries this check.
 - **LIVE-3** Each root gets an `audit` with no base, and an `audit` of one recent merged pull request
@@ -521,5 +526,6 @@ notice, the named repositories, the stages, the report folder):
 - How the readers that read from disk are moved behind the reading spec's LIST-9 (COMMIT-1), and how
   git is asked for a commit's files and contents and for renames, within a small, fixed number of
   starts.
-- The stack size of LIFE-3, and how LIFE-1 is done.
+- How LIFE-1 and LIFE-3 are met, such as walks written as loops over an explicit stack and work run
+  on a thread with a larger stack.
 - Which merged pull request each repository's branch audit uses (LIVE-3), named in the report.
