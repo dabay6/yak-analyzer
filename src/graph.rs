@@ -96,6 +96,7 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
     let resolved = resolver.resolve(&root, &scripts)?;
     let entries = entries::find(
         &entries::Project {
+            root: &root,
             files,
             packages: &packages,
             configs: &configs,

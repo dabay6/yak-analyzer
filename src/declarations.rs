@@ -1,8 +1,8 @@
 //! The declaration keys the analyzer knows, and the check that it can use every declaration a hand-off
 //! file holds (spec KEY-1, KEY-2, KEY-5).
 //!
-//! The keys are drafts until the design spec's stage 2 ends. This part checks them; the parts that read a
-//! project use them.
+//! The keys are drafts until the design spec's stage 2 ends. This part checks them, the shapes of the two
+//! that describe what a tool does included (spec ENTRY-6a); the parts that read a project use them.
 
 use serde_json::Value;
 
@@ -19,9 +19,22 @@ enum Kind {
     Paths,
     /// A positive whole number.
     Number,
-    /// Any JSON, which only a pack may state.
-    Opaque,
+    /// What a tool reads from its configuration file, which only a pack may state (spec ENTRY-6).
+    ConfigEntries,
+    /// The programs whose file arguments in scripts are entry points, which only a pack may state (spec
+    /// ENTRY-7).
+    ScriptCommands,
 }
+
+/// The fields an object of `configEntries` may hold, each required but `pattern` (spec ENTRY-6).
+const CONFIG_FIELDS: [&str; 6] = [
+    "file",
+    "property",
+    "value",
+    "pattern",
+    "relativeTo",
+    "default",
+];
 
 /// Every key the analyzer knows, with the kind of its value (spec KEY-1).
 const KEYS: [(&str, Kind); 9] = [
@@ -32,8 +45,8 @@ const KEYS: [(&str, Kind); 9] = [
     ("cyclomaticLimit", Kind::Number),
     ("cognitiveLimit", Kind::Number),
     ("duplicationMinimum", Kind::Number),
-    ("configEntries", Kind::Opaque),
-    ("scriptCommands", Kind::Opaque),
+    ("configEntries", Kind::ConfigEntries),
+    ("scriptCommands", Kind::ScriptCommands),
 ];
 
 /// Who states a declaration: the hand-off file keeps the two apart.
@@ -108,11 +121,93 @@ fn problem(key: &str, value: &Value, source: Source) -> Option<String> {
             Some(number) if number > 0 => None,
             _ => Some("its value must be a positive whole number".to_owned()),
         },
-        Kind::Opaque => match source {
-            Source::Pack => None,
-            Source::Project => Some("only a pack may state this key".to_owned()),
+        Kind::ConfigEntries | Kind::ScriptCommands if matches!(source, Source::Project) => {
+            Some("only a pack may state this key".to_owned())
+        }
+        Kind::ConfigEntries => config_entries_problem(value),
+        Kind::ScriptCommands => match texts(value) {
+            Some(names) => names
+                .iter()
+                .find(|name| name.is_empty() || name.contains(char::is_whitespace))
+                .map(|name| format!("the program name `{name}` is empty or holds white space")),
+            None => Some("its value must be a list of program names".to_owned()),
         },
     }
+}
+
+/// Why a `configEntries` value cannot be used, or nothing when it can: a list of objects, each with the
+/// fields ENTRY-6 gives and no other (spec ENTRY-6, ENTRY-6a).
+fn config_entries_problem(value: &Value) -> Option<String> {
+    let Some(list) = value.as_array() else {
+        return Some("its value must be a list of objects".to_owned());
+    };
+
+    list.iter().enumerate().find_map(|(index, entry)| {
+        let number = index + 1;
+        let Some(fields) = entry.as_object() else {
+            return Some(format!("its entry {number} must be an object"));
+        };
+        let field =
+            |name: &str, why: &str| Some(format!("its entry {number}'s field `{name}` {why}"));
+
+        if let Some(unknown) = fields
+            .keys()
+            .find(|key| !CONFIG_FIELDS.contains(&key.as_str()))
+        {
+            return field(unknown, "is not one it may hold");
+        }
+
+        let folder = fields.get("value") == Some(&Value::from("folder"));
+
+        match (fields.get("pattern"), folder) {
+            (None, true) => return field("pattern", "is missing, and a `folder` value needs it"),
+            (Some(_), false) => return field("pattern", "is only for a `folder` value"),
+            _ => {}
+        }
+
+        if let Some(missing) = CONFIG_FIELDS
+            .iter()
+            .find(|name| **name != "pattern" && !fields.contains_key(**name))
+        {
+            return field(missing, "is missing");
+        }
+
+        let property = fields["property"]
+            .as_array()
+            .filter(|keys| !keys.is_empty() && keys.iter().all(Value::is_string));
+
+        if property.is_none() {
+            return field("property", "must be a list of keys, one or more");
+        }
+
+        if !matches!(fields["value"].as_str(), Some("globs" | "folder")) {
+            return field("value", "must be `globs` or `folder`");
+        }
+
+        if !matches!(fields["relativeTo"].as_str(), Some("config" | "detection")) {
+            return field("relativeTo", "must be `config` or `detection`");
+        }
+
+        for name in ["file", "pattern"] {
+            match fields.get(name).map(Value::as_str) {
+                None => {}
+                Some(Some(glob)) => {
+                    if let Some(why) = glob_problem(glob) {
+                        return field(name, &format!("cannot be used: {why}"));
+                    }
+                }
+                Some(None) => return field(name, "must be a glob"),
+            }
+        }
+
+        match texts(&fields["default"]) {
+            Some(globs) => globs
+                .iter()
+                .find_map(|glob| glob_problem(glob))
+                .and_then(|why| field("default", &format!("cannot be used: {why}"))),
+            None => field("default", "must be a list of globs"),
+        }
+    })
 }
 
 /// The entries of a list of text, or nothing when the value is not one.

@@ -19,6 +19,7 @@ mod pages;
 mod resolve;
 mod scripts;
 mod stop;
+mod tools;
 mod tsconfig;
 
 use std::env;
