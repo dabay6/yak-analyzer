@@ -8,7 +8,9 @@
 in are now recorded, USE-1), OUT-1 (`graph` gains the entry points and the uses, CMD-4), KEY-2 (the
 two opaque keys get their shapes, ENTRY-6 to ENTRY-7, and a wrong shape now stops the run, ENTRY-6a), LIST-9 (this item says how a commit is
 read, COMMIT-1 to COMMIT-5), PACK-6 (two more fields of a `package.json` are read, `bin` and
-`scripts`, ENTRY-1), RUN-1 (a third command, `audit`, CMD-1) and RUN-4 (one more stop, CMD-3). It also answers the question that spec passed on in its non-goals: what
+`scripts`, ENTRY-1), RUN-1 (a third command, `audit`, CMD-1) and RUN-4 (one more stop, CMD-3). It amends
+`docs/specs/2026-11-11-skeleton-and-release-pipeline-design.md`, its PKG-5: the launcher tells the
+binary it was started by a launcher (LIFE-1). It also answers the question that spec passed on in its non-goals: what
 happens to the binary when the launcher is stopped (LIFE-1).
 
 **Builds from:** the analyzer's design spec,
@@ -212,10 +214,14 @@ launcher, the five targets and the report folder. Added here:
     folder; it may be empty.
 
   Every field is required except `pattern`, which is required with `"folder"` and not allowed
-  otherwise. A glob read from the file, or given in `default`, is used as the reading spec's KEY-5
-  reads a glob; one KEY-5 cannot read, or one that is absolute or steps out with `..`, or that
-  begins with `!`, is passed over with a notice naming the file and the glob, and the rest are used.
-  A value that leaves no glob uses `default`.
+  otherwise. The globs the declaration itself holds, `file`, `pattern` and `default`, are a
+  declaration's globs: one the reading spec's KEY-5 cannot read stops the run as KEY-2 says
+  (ENTRY-6a). A glob read from the configuration file is the project's tool's, not a declaration,
+  so it never stops a run: one that KEY-5 cannot read, that is absolute or steps out with `..`, that
+  begins with `!`, or that holds an extended pattern of the form `?(…)`, `*(…)`, `+(…)`, `@(…)` or
+  `!(…)`, which some tools accept and KEY-5 does not, is passed over with a notice naming the file
+  and the glob, and the rest are used. A value that leaves no glob uses `default`. A pack writes its
+  `default` in KEY-5's form, braces in place of extended patterns.
 
   The value is read only when it is written as a string, or a list of strings, in the object that is
   the file's default export (`export default {…}`, `module.exports = {…}`) or in the one object
@@ -281,8 +287,12 @@ launcher, the five targets and the report folder. Added here:
     reference of `ns`, passing it on included, uses every export of the target;
   - `export { a } from './x'` and `export * from './x'` pass use through: a use of the re-exporting
     file's `a`, or of a name `*` covers, is a use of `./x`'s export, and so on through a chain;
-  - `import { a } from './x'; export { a }`, an imported binding exported again, passes use through
-    the same way; the `export` statement itself is not a reference that uses `./x`'s `a`;
+  - `import { a } from './x'; export { a }`, an imported binding exported again, and `export
+    default a` of one, pass use through the same way; the `export` statement itself is not a
+    reference that uses `./x`'s `a`;
+  - a TypeScript import type, `import('./x').T`, uses `./x`'s `T`;
+  - a use counts from any file, reachable or not: an export an unused file uses is used until that
+    file goes, and the unused-file finding says the file can go. Session's call;
   - `export * as ns from './x'` passes a use of `ns` on to every export of `./x`;
   - `import x = require('./x')`, `require('./x')` and `import('./x')` with a literal argument use
     every export of the target. Session's call: the safe direction, since what is read off the
@@ -349,7 +359,7 @@ launcher, the five targets and the report folder. Added here:
 
 - **REPORT-1** `audit` prints one SARIF 2.1.0 document with one run. The run names the tool, its
   version and the interface version; it lists the five rules (REPORT-2); and it holds one result per
-  finding, ordered by rule in REPORT-2's order, then path, then line, then fingerprint, so the same project gives the
+  finding, ordered by rule in REPORT-2's order, then path, then line, then column, then fingerprint, so the same project gives the
   same bytes on every platform (reading RUN-8). Each result carries its rule, a message a person can
   act on, a first location with a path relative to the root, with forward slashes, and a line where
   the kind has one, related locations where it has them, `partialFingerprints` (REPORT-3), and with
@@ -383,9 +393,12 @@ launcher, the five targets and the report folder. Added here:
   every one tracked: the same paths the working tree's list would hold if it were checked out clean.
   A stored symbolic link and a submodule are left out, as the working tree's are (reading LIST-3).
   Contents are read in one batch from git, never with one start of git per file, as git stores them,
-  with no filter applied: a line-ending or other filter changes nothing the analyzer reads but line
-  endings, and a file stored through a filter such as a large-file pointer does not parse and is
-  skipped (COMMIT-4). The plan names the oldest git version the commands this item adds work with,
+  with no filter applied. A line-ending filter changes nothing the analyzer reads but line endings.
+  A file stored in another form than the working tree's, through a large-file pointer or a
+  `working-tree-encoding` that is not UTF-8, does not parse or is not UTF-8 at the base, and is
+  skipped (COMMIT-4). Lazy fetching is turned off for every start of git, so a partial clone that
+  lacks a stored file makes git fail, which stops the run with git's line, and never fetches over
+  the network (reading RUN-6). The plan names the oldest git version the commands this item adds work with,
   and raises the reading spec's DEP-2 floor if it must. A tsconfig above
   the root (reading CFG-3) is read from the same commit.
 - **COMMIT-3** At the base, "git ignores this path" (reading RES-4, LIST-5) is answered by the
@@ -403,12 +416,14 @@ launcher, the five targets and the report folder. Added here:
     for a governing tsconfig goes on upward (reading CFG-2);
   - a source file that does not parse or cannot be read has no imports and no exports.
 
-  A skipped file can also leave the base with findings the base never had, such as files that look
-  unused because a skipped `package.json` named their entry points, and those would make the same
-  findings on the branch look inherited. So no finding is marked inherited in a package where the
-  base skipped a `package.json` or a tsconfig, nor anywhere when it skipped the workspace list: such
-  findings are new, and one notification says why. A skipped source file changes only what it
-  imports and exports, and findings that depend on it may be marked new. What still stops the run is what
+  A skipped file can leave the base with findings it never had, and their reach is not confined to
+  one package: a skipped tsconfig changes how other packages' imports resolve, and a skipped source
+  file's lost imports make the files it imported look unused. Those would make the same findings on
+  the branch look inherited, which the gate passes in silence. So when the base skipped any file,
+  no finding is marked inherited: every finding is new, and one notification names the skipped
+  files and says why. Session's call: a broken file at the base is rare, since a file broken on
+  purpose is declared data, and a gate that asks about every finding once is the safe direction.
+  What still stops the run is what
   is not the project's: a base that is not a commit (CMD-2), and git failing while the base is read,
   which stops it as RUN-4's step 7 does, with git's own first line.
 - **COMMIT-5** The hand-off file's declarations apply to both sides (design BASE-3), with the base's
@@ -420,8 +435,8 @@ launcher, the five targets and the report folder. Added here:
 - **INH-1** A finding of the working tree is inherited, `unchanged`, when the base has a finding of
   the same fingerprint, with INH-2's renames; otherwise it is `new` (design BASE-1). Several findings
   can share a fingerprint, such as two unresolved imports of one specifier in one file: when the
-  working tree has more of one fingerprint than the base, the base's count of them, first by line,
-  are inherited and the rest are new. A cycle is decided by INH-3 alone, not by its fingerprint. A
+  working tree has more of one fingerprint than the base, the base's count of them, first by line
+  and column, are inherited and the rest are new. A cycle is decided by INH-3 alone, not by its fingerprint. A
   finding only the base has is not printed.
 - **INH-2** Renames (design BASE-4). The analyzer asks git for the files renamed between the base
   commit and the working tree, with git's own rename detection and its default similarity, for the
@@ -447,14 +462,19 @@ launcher, the five targets and the report folder. Added here:
 
 - **LIFE-1** When the npm launcher (skeleton spec) that started the binary ends, as when yak stops
   it, the binary ends soon after, on every target, writing nothing. A binary started directly is
-  stopped directly, and needs nothing more. The builder chooses how, such as the launcher handing the
-  binary a pipe it never writes and the binary ending when that pipe closes, and a test stops a
-  launcher during a long audit and checks that its binary is gone within five seconds. Session's
+  stopped directly, and its behaviour does not change: nothing about it depends on what its
+  standard input is. The launcher still passes standard input, output and error through as the
+  skeleton spec's PKG-5 says; what it adds is only what lets the binary know it was started by a
+  launcher that has since gone, such as the launcher's process id in a variable of the binary's
+  environment, which the binary checks while it runs. The builder chooses how, and a test stops a
+  launcher during a long audit and checks that its binary is gone within five seconds. This amends
+  the skeleton spec's PKG-5 by that addition. Session's
   call; the reading spec passed this question to the first command yak starts and stops.
 - **LIFE-2** Every git process the analyzer starts ends when the analyzer does: each is read to its
   end or has its input closed, and git's optional locks stay off (reading RUN-6a), so a killed audit
-  leaves no lock. A test kills an audit while it reads a base and checks that nothing under the
-  root changed and no git it started is still running.
+  leaves no lock. A git process that is working when the analyzer is killed may run on until it
+  next reads or writes, and then ends. A test kills an audit while it reads a base and checks that
+  nothing under the root changed and that within thirty seconds no git it started is still running.
 - **LIFE-3** No project's size or shape, and no ordinary depth of nesting in a file, runs the
   analyzer out of stack. Windows' main thread has 1 MB of stack, and a process that runs out of
   stack writes nothing (reading RUN-3). Fixtures, generated by the test and not committed, hold an
@@ -606,6 +626,9 @@ launcher, the five targets and the report folder. Added here:
   removes recursion over the graph and tests the depth.
 - **The draft keys and rule names change in stage 2.** Only hand-written files and fixtures hold them
   until then (CMD-5).
+- **A git too old to turn lazy fetching off.** git's switch for it is recent; an older git in a
+  partial clone could fetch a missing file. The plan names the git version that honours it, and
+  where the floor is older the README says partial clones need that version.
 - **A value from a caller turned into a git option.** The base is the first value from outside the
   analyzer that reaches git's command line; one beginning with `-`, such as `--output=…`, could make
   git write a file. CMD-2 refuses such a value before git sees it, and only git's own full name for
