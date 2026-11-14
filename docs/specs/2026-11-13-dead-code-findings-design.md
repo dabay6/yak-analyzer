@@ -73,8 +73,9 @@ launcher, the five targets and the report folder. Added here:
 
 - The analyzer reports the five dead-code kinds of the design spec (FIND-1) as one SARIF report,
   from an `audit` command yak can run where it runs fallow's today.
-- Given a base, every finding is marked new or inherited, the same way whether the base is a commit
-  in the history or the working tree is full of uncommitted edits.
+- Given a base, every finding is marked new or inherited, with uncommitted edits and new files
+  counted as the branch's. The one thing the working tree cannot show is a move git was not told of
+  (INH-2).
 - Entry points come from a project's standard files and from declarations, never from a tool's name
   written into the code (design ENT-5).
 - The entry points and the uses behind every finding can be seen in `graph`'s output, and fixtures
@@ -118,12 +119,15 @@ launcher, the five targets and the report folder. Added here:
   it, every finding is printed with no `baselineState` (design IF-1). The `base` field of a hand-off
   file is not used by `audit`: it is the MCP server's default (design MCP-1a), and yak hands the
   audit its base as an argument, as it fills `{base}` in fallow's command today. Session's call.
-- **CMD-2** `--base` takes anything git names a commit by. The analyzer asks git for the full name
-  and prints that in the report (REPORT-4). A base that is not a commit in the repository stops the
-  run (design BASE-6), with the name given and `git fetch` as the fix.
+- **CMD-2** `--base` takes anything git names a commit by. A value that begins with `-`, or holds a
+  control character, is refused before git sees it, as a wrong option is (exit 2): git would read
+  it as an option, and the oldest git the analyzer supports has no way to mark the end of options.
+  The analyzer asks git for the full name and uses only that afterwards, and prints it in the
+  report (REPORT-4). A base that is not a commit in the repository stops the run (design BASE-6),
+  with the name given and `git fetch` as the fix.
 - **CMD-3** `audit` exits 0 when it ran, whether or not it found anything; a run that cannot go on
   stops as the reading spec's RUN-3 and RUN-4 say, exit 1 and one line on standard error. RUN-4's
-  list gains one stop, after its 7: the base is not a commit (CMD-2). A wrong command or option
+  list gains one stop, 7b, after its 7a: the base is not a commit (CMD-2). A wrong command or option
   exits 2, a fault in the analyzer exits 3, as for `graph`.
 - **CMD-4** `graph`, with or without `--hand-off`, adds to what it prints (reading OUT-1): each entry
   point with every source that made it one (ENTRY-1); for each package, whether the three kinds
@@ -146,7 +150,9 @@ launcher, the five targets and the report folder. Added here:
   - the `package.json` of its package: `main`, `module`, `types` and `typings`, `bin` (a path or
     each value of an object), and every target of `exports`, each followed through every condition
     as an import is (reading RES-5, RES-6) and mapped back to source (reading MAP-1); a package
-    declared **internal** (ENTRY-5) adds none from `exports`;
+    declared **internal** (ENTRY-5) adds none from `exports`. A key of `exports` whose target is
+    `null` hides its subpaths, as Node has it: no file is an entry point through a subpath a `null`
+    key matches, also where a wider pattern would otherwise offer it;
   - a script of its package's `package.json` that runs it (ENTRY-7);
   - the `files` list of a tsconfig that is not data (design ENT-2); `include` makes nothing an entry
     point;
@@ -185,14 +191,16 @@ launcher, the five targets and the report folder. Added here:
   glob applies once, relative to the root (design ENT-4, reading KEY-3).
 - **ENTRY-5** `internal` names package folders, as paths relative to the root (project) or to each
   detection folder (pack). A package whose folder it names adds no entry points from its `exports`,
-  so its exports' use is counted like any other file's (design FIND-5). `main`, `module`, `types` and
-  `bin` still make entry points in an internal package. Session's call: `bin` is a program, which is
+  so its exports' use is counted like any other file's (design FIND-5). `main`, `module`, `types`,
+  `typings` and `bin` still make entry points in an internal package. Session's call: `bin` is a program, which is
   started and not imported.
 - **ENTRY-6** `configEntries` is a list of objects, one for each configuration file a tool reads
   (design ENT-4). Each object holds:
   - `file`: a glob for the configuration file, matched relative to each detection folder (ENTRY-4),
     such as `vitest.config.{ts,mts,js,mjs}` for one in the folder itself or
-    `**/vitest.config.{ts,mts,js,mjs}` for one at any depth;
+    `**/vitest.config.{ts,mts,js,mjs}` for one at any depth. A file is matched once, from the
+    deepest detection folder that holds it, so detection folders inside one another never apply one
+    file twice;
   - `property`: the path to the value in the object the file exports, as a list of keys, such as
     `["test", "include"]`;
   - `value`: `"globs"` when the value is a list of globs or one glob, or `"folder"` when it is a
@@ -257,7 +265,8 @@ launcher, the five targets and the report folder. Added here:
 - **USE-1** Each script, and each script block of a Vue component, is read for its names (this
   replaces the reading spec's IMP-5): what it exports, each with whether it is a type (an interface
   or a type alias) or a value (anything else: a function, a class, a variable, an enum, a namespace
-  with values; a namespace that holds only types is a type), a name passed on from another file
+  with values; a namespace that holds only types is a type; a name declared both as a value and as
+  a type, as merged declarations are, is one value export, used when either is used), a name passed on from another file
   taking its kind from its origin (USE-2a); for each import, the names it brings in and
   the local binding of each, or that it brings in the namespace, or nothing (`import './x'`); and
   each `export … from`, with its names or `*`. `oxc_semantic`, the oxc crate that ties each
@@ -265,7 +274,8 @@ launcher, the five targets and the report folder. Added here:
   DEP-3). Session's call: the binding analysis is oxc's, not a second writing of scope rules.
 - **USE-2** A use is a reference, not a mention (design FIND-4):
   - a named or default import is a use of that export of the target only when its local binding is
-    referenced somewhere in the importing file, in code or in a type;
+    referenced somewhere in the importing file, in code or in a type; where the import leads to
+    several files (reading RES-1), it is a use of that export in each of them;
   - an import whose binding is never referenced is not a use;
   - through `import * as ns`, `ns.name` and `ns["name"]` with a literal key use `name`; any other
     reference of `ns`, passing it on included, uses every export of the target;
@@ -324,7 +334,8 @@ launcher, the five targets and the report folder. Added here:
   or one file that imports itself, over the edges of static value imports: `import` and `export …
   from` statements that are not type-only, `import x = require`, and `require()` with a literal
   argument. Not an edge: `import type`, `export type`, an import all of whose names are marked
-  `type`, a TypeScript import type, and `import()`. Session's call: `require()` loads on the spot and
+  `type`, a TypeScript import type, `import()`, and any import from or to a type declaration file,
+  which loads nothing at run time. Session's call: `require()` loads on the spot and
   can cause the same load-order fault. One finding is one set. Its first location is the first import,
   by line, of the set's first file by path, that leads to another file of the set; its related locations are the
   set's other files, each at its first such import (design IF-2). The message names one cycle
@@ -347,7 +358,8 @@ launcher, the five targets and the report folder. Added here:
 - **REPORT-2** The rule names are `unused-file`, `unused-export`, `unused-type`,
   `unresolved-import` and `circular-dependency`. Session's call, as drafts (CMD-5).
 - **REPORT-3** A fingerprint is a SHA-256 digest, written as the first 32 hexadecimal digits, of the
-  rule and the parts the design spec's IF-4 names, joined with a separator no path or name holds:
+  rule and the parts the design spec's IF-4 names, each part written with its length in bytes before
+  it, so no two lists of parts give the same input whatever characters they hold:
   for an unused file its path; for an unused export or type its path and name; for an unresolved
   import its path and specifier; for a cycle its files' paths, sorted. It holds no line number. It is
   carried under one `partialFingerprints` key the builder names, with a version in the key, so a
@@ -370,7 +382,11 @@ launcher, the five targets and the report folder. Added here:
 - **COMMIT-2** The base's file list is the files git stores at that commit under the root, with
   every one tracked: the same paths the working tree's list would hold if it were checked out clean.
   A stored symbolic link and a submodule are left out, as the working tree's are (reading LIST-3).
-  Contents are read in one batch from git, never with one start of git per file. A tsconfig above
+  Contents are read in one batch from git, never with one start of git per file, as git stores them,
+  with no filter applied: a line-ending or other filter changes nothing the analyzer reads but line
+  endings, and a file stored through a filter such as a large-file pointer does not parse and is
+  skipped (COMMIT-4). The plan names the oldest git version the commands this item adds work with,
+  and raises the reading spec's DEP-2 floor if it must. A tsconfig above
   the root (reading CFG-3) is read from the same commit.
 - **COMMIT-3** At the base, "git ignores this path" (reading RES-4, LIST-5) is answered by the
   working tree's ignore rules, the same question asked of git as for the working tree. Session's
@@ -387,7 +403,12 @@ launcher, the five targets and the report folder. Added here:
     for a governing tsconfig goes on upward (reading CFG-2);
   - a source file that does not parse or cannot be read has no imports and no exports.
 
-  Findings that depend on a skipped file may then be marked new. What still stops the run is what
+  A skipped file can also leave the base with findings the base never had, such as files that look
+  unused because a skipped `package.json` named their entry points, and those would make the same
+  findings on the branch look inherited. So no finding is marked inherited in a package where the
+  base skipped a `package.json` or a tsconfig, nor anywhere when it skipped the workspace list: such
+  findings are new, and one notification says why. A skipped source file changes only what it
+  imports and exports, and findings that depend on it may be marked new. What still stops the run is what
   is not the project's: a base that is not a commit (CMD-2), and git failing while the base is read,
   which stops it as RUN-4's step 7 does, with git's own first line.
 - **COMMIT-5** The hand-off file's declarations apply to both sides (design BASE-3), with the base's
@@ -397,11 +418,17 @@ launcher, the five targets and the report folder. Added here:
 ### New against inherited
 
 - **INH-1** A finding of the working tree is inherited, `unchanged`, when the base has a finding of
-  the same fingerprint, with the rules of INH-2 and INH-3; otherwise it is `new` (design BASE-1). A
+  the same fingerprint, with INH-2's renames; otherwise it is `new` (design BASE-1). Several findings
+  can share a fingerprint, such as two unresolved imports of one specifier in one file: when the
+  working tree has more of one fingerprint than the base, the base's count of them, first by line,
+  are inherited and the rest are new. A cycle is decided by INH-3 alone, not by its fingerprint. A
   finding only the base has is not printed.
 - **INH-2** Renames (design BASE-4). The analyzer asks git for the files renamed between the base
   commit and the working tree, with git's own rename detection and its default similarity, for the
-  files git tracks and the index's staged additions. Before fingerprints are compared, each base
+  files git tracks and the index's staged additions. Detection is turned on, and its limit on the
+  number of files set to a fixed value the plan names, for every start of git, whatever the user's
+  or repository's settings say (reading RUN-6a), so the answer is the same on every machine; when
+  git reports that it gave up for the limit, a notification says so. Before fingerprints are compared, each base
   path git reports renamed is rewritten to its new path, so the base's fingerprints are made with the
   working tree's paths. An untracked file is never the new side of a rename: git cannot pair it
   without writing to the index. Session's call.
@@ -428,10 +455,11 @@ launcher, the five targets and the report folder. Added here:
   end or has its input closed, and git's optional locks stay off (reading RUN-6a), so a killed audit
   leaves no lock. A test kills an audit while it reads a base and checks that nothing under the
   root changed and no git it started is still running.
-- **LIFE-3** No project's size or shape runs the analyzer out of stack. Windows' main thread has
-  1 MB of stack, and a process that runs out of stack writes nothing (reading RUN-3). A fixture holds
-  an import chain of 10,000 files, a cycle of 10,000 files and a re-export chain of 10,000 files, and
-  passes on every target.
+- **LIFE-3** No project's size or shape, and no ordinary depth of nesting in a file, runs the
+  analyzer out of stack. Windows' main thread has 1 MB of stack, and a process that runs out of
+  stack writes nothing (reading RUN-3). Fixtures, generated by the test and not committed, hold an
+  import chain, a cycle and a re-export chain of 10,000 files each, and a file nested 1,000 levels
+  deep in expressions and blocks, and pass on every target.
 
 ### Fixtures
 
@@ -578,6 +606,12 @@ launcher, the five targets and the report folder. Added here:
   removes recursion over the graph and tests the depth.
 - **The draft keys and rule names change in stage 2.** Only hand-written files and fixtures hold them
   until then (CMD-5).
+- **A value from a caller turned into a git option.** The base is the first value from outside the
+  analyzer that reaches git's command line; one beginning with `-`, such as `--output=…`, could make
+  git write a file. CMD-2 refuses such a value before git sees it, and only git's own full name for
+  the commit is used afterwards. Every other path given to git comes from git's own listings or the
+  hand-off file's checked fields (reading HO-2), and the analyzer still writes nothing and uses no
+  network (reading RUN-6).
 - **The SARIF schema's copy goes stale.** It records its source and digest (FIX-3); SARIF 2.1.0 is a
   fixed standard.
 
