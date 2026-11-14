@@ -45,6 +45,8 @@ fn reads_a_hand_off_file_it_can_use() {
     assert_eq!(
         printed,
         json!({
+            "entries": [],
+            "entryFaults": [],
             "files": [],
             "handOff": true,
             "notices": [
