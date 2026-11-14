@@ -1,5 +1,6 @@
 //! Runs the built binary on made-up projects and checks the entry points it finds, the source of each,
-//! and the packages whose entry points are likely incomplete (spec ENTRY-1 to ENTRY-8, CMD-4, FIX-1,
+//! the packages whose entry points are likely incomplete, the uses an entry point makes of its own
+//! exports, and the files the entry points reach (spec ENTRY-1 to ENTRY-8, USE-3, USE-6, CMD-4, FIX-1,
 //! FIX-2).
 
 #[path = "support/project.rs"]
@@ -481,4 +482,172 @@ fn a_configuration_file_names_entry_points_by_a_literal_a_folder_or_its_default(
              entry point."
         )
     );
+}
+
+/// The uses a document holds that count from an entry point: each with the file whose exports are
+/// used, the export's name, `*` for every export, and the field or declaration that made the entry
+/// point one.
+fn entry_uses(document: &Value) -> Vec<(&str, &str, &str)> {
+    document["uses"]
+        .as_array()
+        .expect("a list of uses")
+        .iter()
+        .filter(|used| !used["entry"].is_null())
+        .map(|used| {
+            (
+                used["file"].as_str().expect("a file"),
+                used["name"].as_str().expect("a name"),
+                used["entry"]["from"].as_str().expect("a source"),
+            )
+        })
+        .collect()
+}
+
+/// The files a document says the entry points reach, each with whether it is reached only as text.
+fn reachable(document: &Value) -> Vec<(&str, bool)> {
+    document["reachable"]
+        .as_array()
+        .expect("a list of files")
+        .iter()
+        .map(|file| {
+            (
+                file["path"].as_str().expect("a path"),
+                file["text"].as_bool().expect("a mark"),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn an_entry_points_exports_are_all_used_through_its_re_exports_too() {
+    let project = Project::new("entries-uses");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "lib", "main": "src/index.ts", "bin": "src/index.ts" }"#,
+        )
+        .write(
+            "src/index.ts",
+            "export { helper } from './helper';\nexport * from './all';\nexport const own = 1;\n",
+        )
+        .write(
+            "src/helper.ts",
+            "export const helper = 1;\nexport const internal = 2;\n",
+        )
+        .write("src/all.ts", "export const a = 1;\nexport default 2;\n")
+        .write("src/unused.ts", "export const dead = 1;\n")
+        .commit();
+
+    let document = project.graph();
+
+    // Whatever starts an entry point consumes its exports, once for each source that made it one, and
+    // that use passes on through its re-exports: to the one name of `./helper`, and to every name of
+    // `./all` but `default` (spec USE-3).
+    assert_eq!(
+        entry_uses(&document),
+        [
+            ("src/all.ts", "a", "bin"),
+            ("src/all.ts", "a", "main"),
+            ("src/helper.ts", "helper", "bin"),
+            ("src/helper.ts", "helper", "main"),
+            ("src/index.ts", "*", "bin"),
+            ("src/index.ts", "*", "main"),
+        ]
+    );
+    assert_eq!(
+        reachable(&document),
+        [
+            ("src/all.ts", false),
+            ("src/helper.ts", false),
+            ("src/index.ts", false),
+        ]
+    );
+}
+
+#[test]
+fn reaches_files_through_every_form_of_import_and_reads_one_imported_with_a_query_as_text() {
+    let project = Project::new("entries-reach");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "src/main.ts" }"#,
+        )
+        .write(
+            "src/main.ts",
+            "import type { T } from './types';\n\
+             import raw from './shader.ts?raw';\n\
+             import both from './both.ts?raw';\n\
+             import './both';\n\
+             import App from './App.vue';\n\
+             const lazy = () => import('./lazy');\n\
+             const old = require('./old.cjs');\n\
+             export * from './again';\n\
+             export const value: T = 'x';\n\
+             console.log(raw, both, App, lazy, old);\n",
+        )
+        .write("src/types.ts", "export type T = string;\n")
+        .write(
+            "src/shader.ts",
+            "export * from './never';\nexport const shade = 1;\n",
+        )
+        .write("src/never.ts", "export const never = 1;\n")
+        .write("src/both.ts", "import './deep';\nexport const both = 1;\n")
+        .write("src/deep.ts", "")
+        .write(
+            "src/App.vue",
+            "<script src=\"./logic.ts\"></script>\n<template><p /></template>\n",
+        )
+        .write("src/logic.ts", "export default {};\n")
+        .write("src/lazy.ts", "")
+        .write("src/old.cjs", "")
+        .write("src/again.ts", "")
+        .write(
+            "index.html",
+            "<script type=\"module\" src=\"./src/page.ts\"></script>\n",
+        )
+        .write("src/page.ts", "")
+        .write("src/orphan.ts", "import './island';\n")
+        .write("src/island.ts", "")
+        .commit();
+
+    let document = project.graph();
+
+    // Every import that leads to files is followed, of every form: a type import, a call, a re-export,
+    // a component's `src` and a page's script. A file only imports with a query reach is read as text,
+    // so the file it imports is not reached; one an import without a query also reaches is read as
+    // code. A file no entry point reaches is not here (spec USE-6).
+    assert_eq!(
+        reachable(&document),
+        [
+            ("src/App.vue", false),
+            ("src/again.ts", false),
+            ("src/both.ts", false),
+            ("src/deep.ts", false),
+            ("src/lazy.ts", false),
+            ("src/logic.ts", false),
+            ("src/main.ts", false),
+            ("src/old.cjs", false),
+            ("src/page.ts", false),
+            ("src/shader.ts", true),
+            ("src/types.ts", false),
+        ]
+    );
+
+    let uses = |path: &str| -> Vec<Value> {
+        document["uses"]
+            .as_array()
+            .expect("a list of uses")
+            .iter()
+            .filter(|used| used["file"] == json!(path))
+            .map(|used| json!([used["name"], used["by"], used["line"]]))
+            .collect()
+    };
+
+    // Read as text, a file's exports are all used, and it passes nothing on.
+    assert_eq!(uses("src/shader.ts"), [json!(["*", "src/main.ts", 2])]);
+    assert_eq!(uses("src/never.ts"), Vec::<Value>::new());
+    // The script a component's block names is the component's own.
+    assert_eq!(uses("src/logic.ts"), [json!(["*", "src/App.vue", 1])]);
 }

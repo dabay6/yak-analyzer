@@ -5,9 +5,10 @@
 //! Each reader is the analyzer's own and small. It finds only what the analyzer needs from its format,
 //! and the scripts it finds are parsed as any script is.
 
+use std::collections::BTreeMap;
 use std::ops::Range;
 
-use crate::imports::{self, Broken, Form, Import, Read};
+use crate::imports::{self, Broken, DEFAULT, EVERY, Form, Import, Name, Read, Used};
 
 /// The elements of an HTML page whose content is text a browser does not read as markup.
 const RAW_TEXT: [&str; 9] = [
@@ -24,20 +25,29 @@ pub enum Skipped {
     Statement { line: usize },
 }
 
-/// The script blocks of a Vue component: each block's `src` and the imports of its content, in the
-/// language its `lang` names; a block in another language is passed over. A block that does not parse
-/// makes the component not parse, at the block's line in the file (spec PARSE-3).
+/// The script blocks of a Vue component: each block's `src` and the imports and names of its content,
+/// in the language its `lang` names; a block in another language is passed over. A block that does not
+/// parse makes the component not parse, at the block's line in the file (spec PARSE-3).
+///
+/// The component's default export is the component, which is never reported, so it is not among its
+/// exports. A name its template holds uses the export of that name, and the binding of that name that
+/// an import of a `<script setup>` block makes (spec USE-4).
 pub fn vue(text: &str) -> Result<(Read, Vec<Skipped>), Broken> {
-    let mut read = Read {
-        imports: Vec::new(),
-        computed: 0,
-    };
+    let mut read = Read::default();
     let mut skipped = Vec::new();
+    let blocks = blocks(text);
+    let mut named: BTreeMap<String, usize> = BTreeMap::new();
 
-    for block in blocks(text)
-        .into_iter()
-        .filter(|block| block.tag.name == "script")
-    {
+    for block in blocks.iter().filter(|block| block.tag.name == "template") {
+        words(
+            &text[block.content.clone()],
+            line_at(text, block.content.start),
+            true,
+            &mut named,
+        );
+    }
+
+    for block in blocks.iter().filter(|block| block.tag.name == "script") {
         let line = line_at(text, block.start);
 
         if let Some(src) = block.tag.attribute("src") {
@@ -54,12 +64,32 @@ pub fn vue(text: &str) -> Result<(Read, Vec<Skipped>), Broken> {
                 language: lang.unwrap_or_default().to_owned(),
             }),
             Some(Ok(found)) => {
-                read.imports
-                    .extend(found.imports.into_iter().map(|import| Import {
-                        line: import.line + above,
-                        ..import
-                    }));
+                let setup = block.tag.attribute("setup").is_some();
+
+                read.imports.extend(found.imports.into_iter().map(|import| {
+                    let mut import = moved(import, above);
+
+                    if setup {
+                        name_bindings(&mut import, &named);
+                    }
+
+                    import
+                }));
                 read.computed += found.computed;
+
+                for export in found.exports {
+                    if export.name != DEFAULT
+                        && read
+                            .exports
+                            .iter()
+                            .all(|earlier| earlier.name != export.name)
+                    {
+                        read.exports.push(imports::Export {
+                            line: export.line + above,
+                            ..export
+                        });
+                    }
+                }
             }
             Some(Err(broken)) => {
                 return Err(Broken {
@@ -70,12 +100,104 @@ pub fn vue(text: &str) -> Result<(Read, Vec<Skipped>), Broken> {
         }
     }
 
+    read.named = read
+        .exports
+        .iter()
+        .filter_map(|export| {
+            named.get(&export.name).map(|line| Used {
+                name: Some(export.name.clone()),
+                line: *line,
+            })
+        })
+        .collect();
+
     Ok((read, skipped))
+}
+
+/// An import of a block, with its lines counted in the file: the lines above the block are added.
+fn moved(import: Import, above: usize) -> Import {
+    Import {
+        line: import.line + above,
+        uses: import
+            .uses
+            .into_iter()
+            .map(|used| Used {
+                line: used.line + above,
+                ..used
+            })
+            .collect(),
+        ..import
+    }
+}
+
+/// Records, for each binding of an import that a text names, the use the text makes of it, from the
+/// line of the name's first place in the text, unless a script already uses it (spec USE-4, USE-5).
+fn name_bindings(import: &mut Import, named: &BTreeMap<String, usize>) {
+    for Name { name, local, .. } in &import.names {
+        let Some(line) = local.as_ref().and_then(|local| named.get(local)) else {
+            continue;
+        };
+        let used = (name != EVERY).then(|| name.clone());
+
+        if import.uses.iter().all(|earlier| earlier.name != used) {
+            import.uses.push(Used {
+                name: used,
+                line: *line,
+            });
+        }
+    }
+}
+
+/// Adds each identifier-shaped word of a text to the words given, with the line of its first place;
+/// `first` is the line the text begins on. With `tags`, a word written with hyphens is also added in
+/// camelCase and in PascalCase, as a template names a component by its tag (spec USE-4). This is a
+/// scan and not a compiler: it finds more names than a compiler would, never fewer.
+fn words(text: &str, first: usize, tags: bool, found: &mut BTreeMap<String, usize>) {
+    let is_word = |each: char| each.is_alphanumeric() || each == '_' || each == '$';
+    let mut add = |word: String, line: usize| {
+        if word.chars().next().is_some_and(|start| !start.is_numeric()) {
+            found.entry(word).or_insert(line);
+        }
+    };
+
+    for (index, line) in text.split('\n').enumerate() {
+        for chain in line.split(|each: char| !(is_word(each) || each == '-')) {
+            let parts: Vec<&str> = chain.split('-').filter(|part| !part.is_empty()).collect();
+
+            for part in &parts {
+                add((*part).to_owned(), first + index);
+            }
+
+            if tags && parts.len() > 1 {
+                let pascal: String = parts.iter().map(|part| capitalized(part)).collect();
+                let camel = parts[0].to_owned()
+                    + &parts[1..]
+                        .iter()
+                        .map(|part| capitalized(part))
+                        .collect::<String>();
+
+                add(pascal, first + index);
+                add(camel, first + index);
+            }
+        }
+    }
+}
+
+/// A word with its first letter in upper case.
+fn capitalized(word: &str) -> String {
+    let mut letters = word.chars();
+
+    letters.next().map_or_else(String::new, |start| {
+        start.to_uppercase().chain(letters).collect()
+    })
 }
 
 /// The `import` and `export … from` statements of an MDX document, and nothing else (spec PARSE-4). A
 /// statement begins at the start of a line with `import` or `export`, outside the front matter and
 /// outside a fenced code block, and runs to the next blank line. One that does not parse is text.
+///
+/// A binding an import makes is used where the document's text names it, outside its statements and
+/// its fenced code blocks (spec USE-5).
 pub fn mdx(text: &str) -> (Read, Vec<Skipped>) {
     let lines: Vec<(usize, &str)> = text
         .split_inclusive('\n')
@@ -91,6 +213,7 @@ pub fn mdx(text: &str) -> (Read, Vec<Skipped>) {
     let mut skipped = Vec::new();
     let mut index = front_matter(&lines);
     let mut fence: Option<(char, usize)> = None;
+    let mut named: BTreeMap<String, usize> = BTreeMap::new();
 
     while let Some((start, line)) = lines.get(index).copied() {
         if let Some((mark, size)) = fence {
@@ -111,6 +234,7 @@ pub fn mdx(text: &str) -> (Read, Vec<Skipped>) {
         }
 
         if !begins_statement(line) {
+            words(line, index + 1, false, &mut named);
             index += 1;
 
             continue;
@@ -122,20 +246,28 @@ pub fn mdx(text: &str) -> (Read, Vec<Skipped>) {
         let stop = lines.get(end).map_or(text.len(), |(at, _)| *at);
 
         match imports::read_statements(&text[start..stop]) {
-            Ok(found) => imports.extend(found.into_iter().map(|import| Import {
-                line: import.line + index,
-                ..import
-            })),
-            Err(_) => skipped.push(Skipped::Statement { line: index + 1 }),
+            Ok(found) => imports.extend(found.into_iter().map(|import| moved(import, index))),
+            Err(_) => {
+                skipped.push(Skipped::Statement { line: index + 1 });
+
+                // A statement that does not parse is text, so its words are the text's.
+                for (offset, (_, line)) in lines[index..end].iter().enumerate() {
+                    words(line, index + offset + 1, false, &mut named);
+                }
+            }
         }
 
         index = end;
     }
 
+    for import in &mut imports {
+        name_bindings(import, &named);
+    }
+
     (
         Read {
             imports,
-            computed: 0,
+            ..Read::default()
         },
         skipped,
     )
@@ -181,17 +313,20 @@ pub fn html(text: &str) -> Read {
 
     Read {
         imports,
-        computed: 0,
+        ..Read::default()
     }
 }
 
-/// The import a `src` attribute makes.
+/// The import a `src` attribute makes. The script it names is the block's or the page's own, so every
+/// export of it is used (spec USE-2).
 fn source(src: &str, line: usize) -> Import {
     Import {
         specifier: src.to_owned(),
         form: Form::Src,
         type_only: false,
         line,
+        names: Vec::new(),
+        uses: vec![Used { name: None, line }],
     }
 }
 

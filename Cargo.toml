@@ -60,11 +60,13 @@ name = "entries"
 path = "tests/entries.test.rs"
 
 [dependencies]
-# Parse scripts into syntax trees and walk them; released together, so pinned together (spec AN-2, DEP-3).
+# Parse scripts into syntax trees, walk them, and tie each reference to the binding it names
+# (`oxc_semantic`, spec USE-1); released together, so pinned together (spec AN-2, DEP-3).
 oxc_allocator = "=0.158.0"
 oxc_ast = "=0.158.0"
 oxc_ast_visit = "=0.158.0"
 oxc_parser = "=0.158.0"
+oxc_semantic = "=0.158.0"
 oxc_span = "=0.158.0"
 # Finds the tsconfig that governs a file, through its `references` and `extends`, with its `paths` and
 # `baseUrl`, from a file system of the analyzer's own (spec RES-9).

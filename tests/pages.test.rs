@@ -1,6 +1,7 @@
 //! Runs the built binary on made-up projects and checks the imports it finds in Vue components, MDX
-//! documents and HTML pages, and where a page's scripts lead (spec PARSE-2 to PARSE-5, IMP-1, RES-7,
-//! CFG-2, FIX-2, FIX-4).
+//! documents and HTML pages, where a page's scripts lead, and the bindings a component's template and a
+//! document's text use (spec PARSE-2 to PARSE-5, IMP-1, RES-7, CFG-2, FIX-2, FIX-4; dead-code spec
+//! USE-4, USE-5, FIX-1).
 
 #[path = "support/project.rs"]
 mod project;
@@ -313,4 +314,151 @@ fn never_reads_a_component_a_document_or_a_page_declared_as_data() {
     ] {
         assert_eq!(file(&document, path).get("imports"), None, "{path}");
     }
+}
+
+/// The uses of a file's exports a document holds, in its order: each with the export's name, `*` for
+/// every export, and the file and line it counts from.
+fn uses<'a>(document: &'a Value, path: &str) -> Vec<(&'a str, &'a str, u64)> {
+    document["uses"]
+        .as_array()
+        .expect("a list of uses")
+        .iter()
+        .filter(|used| used["file"] == json!(path))
+        .map(|used| {
+            (
+                used["name"].as_str().expect("a name"),
+                used["by"].as_str().expect("a file"),
+                used["line"].as_u64().expect("a line"),
+            )
+        })
+        .collect()
+}
+
+/// The names of the exports `graph` prints for a file.
+fn exported<'a>(document: &'a Value, path: &str) -> Vec<&'a str> {
+    file(document, path)["exports"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{path} was read"))
+        .iter()
+        .map(|export| export["name"].as_str().expect("a name"))
+        .collect()
+}
+
+#[test]
+fn a_vue_template_uses_the_bindings_it_names() {
+    let project = Project::new("pages-vue-uses");
+
+    project
+        .write(
+            "src/App.vue",
+            "<template>\n\
+             \x20 <Child :value=\"format(count)\" />\n\
+             \x20 <other-child class=\"plain\" />\n\
+             \x20 <p>{{ label }} {{ texts.title }}</p>\n\
+             </template>\n\
+             \n\
+             <script setup lang=\"ts\">\n\
+             import Child from './Child';\n\
+             import OtherChild from './OtherChild';\n\
+             import Unused from './Unused';\n\
+             import { format, spare } from './format';\n\
+             import * as texts from './texts';\n\
+             const count = 1;\n\
+             </script>\n\
+             \n\
+             <script lang=\"ts\">\n\
+             import plain from './plain';\n\
+             export const label = 'x';\n\
+             export const quiet = 'y';\n\
+             export default { name: 'App' };\n\
+             </script>\n",
+        )
+        .write("src/Child.ts", "export default {};\n")
+        .write("src/OtherChild.ts", "export default {};\n")
+        .write("src/Unused.ts", "export default {};\n")
+        .write(
+            "src/format.ts",
+            "export const format = String;\nexport const spare = 1;\n",
+        )
+        .write("src/texts.ts", "export const title = 't';\n")
+        .write("src/plain.ts", "export default 1;\n")
+        .commit();
+
+    let document = project.graph();
+
+    // A binding a `<script setup>` block imports is used where the template names it: as a tag, in
+    // PascalCase or in kebab-case, or as a word anywhere in its text. One it does not name is not used
+    // (spec USE-4, FIX-1 pattern 16).
+    assert_eq!(
+        uses(&document, "src/Child.ts"),
+        [("default", "src/App.vue", 2)]
+    );
+    assert_eq!(
+        uses(&document, "src/OtherChild.ts"),
+        [("default", "src/App.vue", 3)]
+    );
+    assert_eq!(uses(&document, "src/Unused.ts"), []);
+    assert_eq!(
+        uses(&document, "src/format.ts"),
+        [("format", "src/App.vue", 2)]
+    );
+    assert_eq!(uses(&document, "src/texts.ts"), [("*", "src/App.vue", 4)]);
+    // A plain block's import is not the template's to use, though the template holds the word.
+    assert_eq!(uses(&document, "src/plain.ts"), []);
+    // An export of a block is used when the template names it, and the component's default export is
+    // the component, never among its exports.
+    assert_eq!(exported(&document, "src/App.vue"), ["label", "quiet"]);
+    assert_eq!(
+        uses(&document, "src/App.vue"),
+        [("label", "src/App.vue", 4)]
+    );
+}
+
+#[test]
+fn an_mdx_document_uses_the_bindings_its_text_names() {
+    let project = Project::new("pages-mdx-uses");
+
+    project
+        .write(
+            "docs/guide.mdx",
+            "import { Chart, Table, Hidden } from './widgets'\n\
+             export { extra } from './extra'\n\
+             \n\
+             # Guide\n\
+             \n\
+             <Chart />\n\
+             \n\
+             ```jsx\n\
+             <Table />\n\
+             ```\n",
+        )
+        .write(
+            "docs/widgets.ts",
+            "export const Chart = 1;\nexport const Table = 2;\nexport const Hidden = 3;\n",
+        )
+        .write("docs/extra.ts", "export const extra = 1;\n")
+        .write(
+            "src/main.ts",
+            "import { extra } from '../docs/guide.mdx';\nconsole.log(extra);\n",
+        )
+        .commit();
+
+    let document = project.graph();
+
+    // A binding the document's text names is used, from the line that names it; one named only in its
+    // statements or in a fenced code block is not (spec USE-5, FIX-1 pattern 16).
+    assert_eq!(
+        uses(&document, "docs/widgets.ts"),
+        [("Chart", "docs/guide.mdx", 6)]
+    );
+    // Its `export … from` passes a use on as a script's does, and it has no export of its own.
+    assert_eq!(
+        uses(&document, "docs/extra.ts"),
+        [("extra", "src/main.ts", 2)]
+    );
+    assert_eq!(
+        uses(&document, "docs/guide.mdx"),
+        [("extra", "src/main.ts", 2)]
+    );
+    assert_eq!(exported(&document, "docs/guide.mdx"), Vec::<&str>::new());
 }

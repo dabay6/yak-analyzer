@@ -54,6 +54,8 @@ fn reads_a_hand_off_file_it_can_use() {
                 nothing("generated", "src/generated/**", "project"),
             ],
             "packages": [],
+            "reachable": [],
+            "uses": [],
         })
     );
 }
