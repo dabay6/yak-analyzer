@@ -156,7 +156,10 @@ launcher, the five targets and the report folder. Added here:
     declared **internal** (ENTRY-5) adds none from `exports`. A key of `exports` whose target is
     `null` hides its subpaths, as Node has it: no file is an entry point through a subpath a `null`
     key matches, also where a wider pattern would otherwise offer it;
-  - a script of its package's `package.json` that runs it (ENTRY-7);
+  - a script of any `package.json` that runs it (ENTRY-7): the word is read from that
+    `package.json`'s folder, and the file it names is an entry point wherever under the root it
+    lies, in that package or another, as a root script's `node packages/a/run.mjs` names one in a
+    workspace package. Session's call;
   - the `files` list of a tsconfig that is not data (design ENT-2); `include` makes nothing an entry
     point;
   - an HTML page, whose `<script src>` targets are entry points (design ENT-2); the page itself, of
