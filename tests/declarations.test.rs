@@ -1,5 +1,5 @@
 //! Hands the built binary declarations and checks which it can use and how it refuses the rest (spec
-//! KEY-1, KEY-2, KEY-5, RUN-4).
+//! KEY-1, KEY-2, KEY-5, RUN-4, ENTRY-6a).
 
 mod support;
 
@@ -38,8 +38,24 @@ fn uses_every_key_it_knows_in_every_form_a_glob_may_take() {
         "cyclomaticLimit": 20,
         "cognitiveLimit": 15,
         "duplicationMinimum": 50,
-        "configEntries": [{ "file": "runner.config.*", "property": ["test", "include"] }],
-        "scriptCommands": { "any": "JSON", "is": ["accepted", 1, null] }
+        "configEntries": [
+            {
+                "file": "runner.config.*",
+                "property": ["test", "include"],
+                "value": "globs",
+                "relativeTo": "config",
+                "default": ["**/*.test.ts"]
+            },
+            {
+                "file": "**/runner.config.{js,ts}",
+                "property": ["roots"],
+                "value": "folder",
+                "pattern": "**/*.spec.{js,ts}",
+                "relativeTo": "detection",
+                "default": []
+            }
+        ],
+        "scriptCommands": ["cross-env", "tsx"]
     });
     handed["stacks"][0]["project"] = json!({
         "entries": ["tools/run.ts"],
@@ -132,6 +148,92 @@ fn refuses_a_value_that_is_not_of_its_keys_kind() {
             && line.contains(": its value must be a list of globs; "),
         "{line}"
     );
+}
+
+#[test]
+fn refuses_a_configuration_or_script_declaration_of_another_shape() {
+    let usable = || {
+        json!({
+            "file": "runner.config.js",
+            "property": ["include"],
+            "value": "globs",
+            "relativeTo": "config",
+            "default": ["**/*.test.js"]
+        })
+    };
+    let changed = |change: &dyn Fn(&mut Value)| {
+        let mut entry = usable();
+
+        change(&mut entry);
+
+        json!({ "configEntries": [entry] })
+    };
+    let cases: [(Value, &str); 14] = [
+        (
+            json!({ "configEntries": {} }),
+            ": its value must be a list of objects; ",
+        ),
+        (
+            json!({ "configEntries": [3] }),
+            ": its entry 1 must be an object; ",
+        ),
+        (
+            changed(&|entry| entry["extra"] = json!(1)),
+            ": its entry 1's field `extra` is not one it may hold; ",
+        ),
+        (
+            changed(&|entry| {
+                entry.as_object_mut().expect("an object").remove("default");
+            }),
+            ": its entry 1's field `default` is missing; ",
+        ),
+        (
+            changed(&|entry| entry["value"] = json!("folder")),
+            ": its entry 1's field `pattern` is missing, and a `folder` value needs it; ",
+        ),
+        (
+            changed(&|entry| entry["pattern"] = json!("**/*.js")),
+            ": its entry 1's field `pattern` is only for a `folder` value; ",
+        ),
+        (
+            changed(&|entry| entry["property"] = json!([])),
+            ": its entry 1's field `property` must be a list of keys, one or more; ",
+        ),
+        (
+            changed(&|entry| entry["value"] = json!("list")),
+            ": its entry 1's field `value` must be `globs` or `folder`; ",
+        ),
+        (
+            changed(&|entry| entry["relativeTo"] = json!("package")),
+            ": its entry 1's field `relativeTo` must be `config` or `detection`; ",
+        ),
+        (
+            changed(&|entry| entry["file"] = json!("src/[a")),
+            ": its entry 1's field `file` cannot be used: the glob `src/[a` has a bracket left open; ",
+        ),
+        (
+            changed(&|entry| entry["file"] = json!(4)),
+            ": its entry 1's field `file` must be a glob; ",
+        ),
+        (
+            changed(&|entry| entry["default"] = json!(["../x/*.js"])),
+            ": its entry 1's field `default` cannot be used: the glob `../x/*.js` is absolute or steps out",
+        ),
+        (
+            json!({ "scriptCommands": "node" }),
+            ": its value must be a list of program names; ",
+        ),
+        (
+            json!({ "scriptCommands": ["cross env"] }),
+            ": the program name `cross env` is empty or holds white space; ",
+        ),
+    ];
+
+    for (index, (pack, expected)) in cases.into_iter().enumerate() {
+        let line = refused(&format!("declarations-shape-{index}"), pack, json!({}));
+
+        assert!(line.contains(expected), "{line}");
+    }
 }
 
 #[test]

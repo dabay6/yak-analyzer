@@ -1,6 +1,6 @@
 //! Runs the built binary on made-up projects and checks the entry points it finds, the source of each,
-//! and the packages whose entry points are likely incomplete (spec ENTRY-1 to ENTRY-5, ENTRY-8, CMD-4,
-//! FIX-1).
+//! and the packages whose entry points are likely incomplete (spec ENTRY-1 to ENTRY-8, CMD-4, FIX-1,
+//! FIX-2).
 
 #[path = "support/project.rs"]
 mod project;
@@ -299,5 +299,186 @@ fn a_bin_of_a_form_npm_does_not_give_it_stops_the_run() {
     assert_eq!(
         entries(&document),
         [("cli.js", vec![named("bin", "package.json")])]
+    );
+}
+
+/// A source that a stack's `configEntries` declaration names: the configuration file itself, with no
+/// file, or a file the configuration file's value names.
+fn configured(file: Option<&str>) -> Value {
+    json!({ "by": "pack", "file": file, "from": "configEntries", "stack": "typescript" })
+}
+
+#[test]
+fn a_scripts_words_after_node_or_a_declared_program_are_entry_points() {
+    let project = Project::new("entries-scripts");
+
+    project
+        .write(
+            "package.json",
+            r#"{
+                "name": "app",
+                "scripts": {
+                    "test": "node scripts/run-tests.mjs",
+                    "dev": "NODE_ENV=dev node --watch './src/server.ts' && echo done",
+                    "bundle": "cross-env MODE=prod esbuild src/cli.ts --outfile=dist/cli.js",
+                    "lint": "eslint src/other.ts",
+                    "spaced": "node \"scripts/a b.mjs\"; node scripts/missing.mjs"
+                }
+            }"#,
+        )
+        .write("scripts/run-tests.mjs", "")
+        .write("scripts/a b.mjs", "")
+        .write("src/server.ts", "")
+        .write("src/cli.ts", "")
+        .write("src/other.ts", "")
+        .commit();
+
+    let scripts = || vec![named("scripts", "package.json")];
+
+    // Without a hand-off file only `node` runs files: `cross-env` is no program the analyzer knows.
+    assert_eq!(
+        entries(&project.graph()),
+        [
+            ("scripts/a b.mjs", scripts()),
+            ("scripts/run-tests.mjs", scripts()),
+            ("src/server.ts", scripts()),
+        ]
+    );
+
+    // Declared, every later word of `cross-env`'s command is tried, the option's value mapped back from
+    // build output (spec ENTRY-7).
+    let file = project.hand_off(
+        &project.root,
+        &["."],
+        stack(json!({ "scriptCommands": ["cross-env"] }), json!({})),
+    );
+    let document = printed(&project.run(|binary| {
+        binary.args(["--hand-off", &file]);
+    }));
+
+    assert_eq!(
+        entries(&document),
+        [
+            ("scripts/a b.mjs", scripts()),
+            ("scripts/run-tests.mjs", scripts()),
+            ("src/cli.ts", scripts()),
+            ("src/server.ts", scripts()),
+        ]
+    );
+}
+
+#[test]
+fn scripts_of_a_form_npm_does_not_give_them_stop_the_run() {
+    let project = Project::new("entries-scripts-form");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "scripts": ["node x.js"] }"#,
+        )
+        .commit();
+
+    assert_eq!(
+        stopped(&project.run(|_| {})),
+        "yak-analyzer: the field `scripts` in package.json holds a value of a form it does not have; it must \
+         be an object that maps each script's name to its command; fix it"
+    );
+}
+
+#[test]
+fn a_configuration_file_names_entry_points_by_a_literal_a_folder_or_its_default() {
+    let project = Project::new("entries-configured");
+
+    project
+        .write(
+            "packages/app/vitest.config.ts",
+            "import { defineConfig } from 'vitest/config';\n\
+             import './test/helper';\n\
+             export default defineConfig({\n\
+               test: { include: ['test/**/*.spec.ts', '!skip/**', 'odd/**/*.?(c|m)ts'] },\n\
+             });\n",
+        )
+        .write("packages/app/test/a.spec.ts", "")
+        .write("packages/app/test/helper.ts", "")
+        .write(
+            "packages/app/tools/jest.config.js",
+            "module.exports = { roots: [`tools/tests`] };\n",
+        )
+        .write("packages/app/tools/tests/x.test.js", "")
+        .write(
+            "runner.config.js",
+            "const folders = ['x'];\nexport default { include: folders };\n",
+        )
+        .write("checks/a.check.js", "")
+        .commit();
+
+    let declarations = json!({
+        "configEntries": [
+            {
+                "file": "vitest.config.{ts,mts,js,mjs}",
+                "property": ["test", "include"],
+                "value": "globs",
+                "relativeTo": "config",
+                "default": ["**/*.test.ts"]
+            },
+            {
+                "file": "**/jest.config.js",
+                "property": ["roots"],
+                "value": "folder",
+                "pattern": "**/*.test.js",
+                "relativeTo": "detection",
+                "default": ["**/*.test.js"]
+            },
+            {
+                "file": "runner.config.js",
+                "property": ["include"],
+                "value": "globs",
+                "relativeTo": "detection",
+                "default": ["checks/*.check.js"]
+            }
+        ]
+    });
+    let file = project.hand_off(
+        &project.root,
+        &[".", "packages/app"],
+        stack(declarations, json!({})),
+    );
+    let document = printed(&project.run(|binary| {
+        binary.args(["--hand-off", &file]);
+    }));
+
+    // The literal inside `defineConfig`, from the configuration file's folder; the folder `roots` names,
+    // from the detection folder, joined to its pattern; and the default where the value is a variable
+    // (spec ENTRY-6). Each configuration file is itself an entry point, from the deepest detection folder.
+    assert_eq!(
+        entries(&document),
+        [
+            (
+                "checks/a.check.js",
+                vec![configured(Some("runner.config.js"))]
+            ),
+            (
+                "packages/app/test/a.spec.ts",
+                vec![configured(Some("packages/app/vitest.config.ts"))]
+            ),
+            ("packages/app/tools/jest.config.js", vec![configured(None)]),
+            (
+                "packages/app/tools/tests/x.test.js",
+                vec![configured(Some("packages/app/tools/jest.config.js"))]
+            ),
+            ("packages/app/vitest.config.ts", vec![configured(None)]),
+            ("runner.config.js", vec![configured(None)]),
+        ]
+    );
+    assert_eq!(
+        notices(&document),
+        ["config-glob-not-read", "config-glob-not-read"]
+    );
+    assert_eq!(
+        document["notices"][0]["sentence"],
+        json!(
+            "The glob `!skip/**` in packages/app/vitest.config.ts is not one the analyzer reads, so it adds no \
+             entry point."
+        )
     );
 }

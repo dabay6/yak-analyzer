@@ -59,7 +59,13 @@ pub fn document(folder: &Path) -> Value {
                 "pack": {
                     "data": ["**/fixtures/**"],
                     "cyclomaticLimit": 20,
-                    "configEntries": [{ "file": "runner.config.*", "property": "include" }]
+                    "configEntries": [{
+                        "file": "runner.config.*",
+                        "property": ["include"],
+                        "value": "globs",
+                        "relativeTo": "config",
+                        "default": []
+                    }]
                 },
                 "project": { "generated": ["src/generated/**"], "internal": ["packages/core"] }
             },

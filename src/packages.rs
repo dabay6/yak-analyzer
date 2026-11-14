@@ -38,6 +38,8 @@ pub struct Package {
     /// The fields that make files entry points, each with the target it states: `types` (or
     /// `typings`), `module`, `main`, then each of `bin` (spec ENTRY-1).
     pub starts: Vec<(&'static str, String)>,
+    /// The commands of its `scripts`, by the scripts' names (spec ENTRY-7).
+    pub scripts: Vec<String>,
 }
 
 /// What a `package.json` states that a package keeps.
@@ -48,6 +50,7 @@ struct Fields {
     imports: Option<Value>,
     entries: Vec<(&'static str, String)>,
     bin: Vec<String>,
+    scripts: Vec<String>,
 }
 
 /// The packages of a project, and which package each file belongs to.
@@ -191,6 +194,7 @@ impl Loaded {
                         .map(|(_, target)| target)
                         .collect(),
                     starts,
+                    scripts: fields.scripts,
                 }
             })
             .collect();
@@ -219,6 +223,7 @@ fn fields(fields: &Map<String, Value>, file: &str) -> Result<Fields, Stop> {
         imports: imports(fields, file)?,
         entries: entries(fields, file)?,
         bin: bin(fields, file)?,
+        scripts: scripts(fields, file)?,
     })
 }
 
@@ -387,6 +392,26 @@ fn bin(fields: &Map<String, Value>, file: &str) -> Result<Vec<String>, Stop> {
             })
             .collect(),
         Some(_) => Err(misshapen("bin", file, form)),
+    }
+}
+
+/// The commands of a `package.json`'s `scripts`, an object that maps each script's name to its command,
+/// by the scripts' names (spec ENTRY-7, PACK-6).
+fn scripts(fields: &Map<String, Value>, file: &str) -> Result<Vec<String>, Stop> {
+    let form = "an object that maps each script's name to its command";
+
+    match fields.get("scripts") {
+        None => Ok(Vec::new()),
+        Some(Value::Object(scripts)) => scripts
+            .values()
+            .map(|command| {
+                command
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| misshapen("scripts", file, form))
+            })
+            .collect(),
+        Some(_) => Err(misshapen("scripts", file, form)),
     }
 }
 
