@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/dabay6/yak-analyzer/compare/v0.3.0...v0.4.0) (2026-11-14)
+
+
+### Features
+
+* **entries:** read entry points from scripts and tool configuration ([194e0a3](https://github.com/dabay6/yak-analyzer/commit/194e0a3172849864eb908829b2485d938f4440f8))
+* **entries:** read entry points from scripts and tool configuration ([8dc96ff](https://github.com/dabay6/yak-analyzer/commit/8dc96ff66de80a0c2bb4c86567ba78b3c2feea73))
+
 ## [0.3.0](https://github.com/dabay6/yak-analyzer/compare/v0.2.0...v0.3.0) (2026-11-14)
 
 
