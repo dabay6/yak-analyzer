@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/dabay6/yak-analyzer/compare/v0.2.0...v0.3.0) (2026-11-14)
+
+
+### Features
+
+* **entries:** find entry points from standard files and declarations ([480603b](https://github.com/dabay6/yak-analyzer/commit/480603bd0411b099c12327dbac9b56ef676cd299))
+* **entries:** find entry points from standard files and declarations ([6f8f15d](https://github.com/dabay6/yak-analyzer/commit/6f8f15d8ef0929f4e9d7ed1ca5e113c8ff43896a))
+
 ## [0.2.0](https://github.com/dabay6/yak-analyzer/compare/v0.1.0...v0.2.0) (2026-11-13)
 
 
