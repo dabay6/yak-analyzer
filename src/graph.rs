@@ -1,8 +1,9 @@
 //! The `graph` command: reads a project and prints what it read as one JSON document (spec OUT-1).
 //!
 //! So far it reads the hand-off file, the file list, the `data` and `generated` declarations, the
-//! packages, the tsconfig files, the imports of every script, where each import leads, and the entry
-//! points with the source of each (spec CMD-4).
+//! packages, the tsconfig files, the imports and the names of every script, where each import leads,
+//! the entry points with the source of each, every use of an export, and the files the entry points
+//! reach (spec CMD-4).
 
 use std::collections::BTreeMap;
 use std::env;
@@ -14,7 +15,7 @@ use crate::declarations;
 use crate::entries::{self, Entries};
 use crate::files::{self, File};
 use crate::hand_off;
-use crate::imports::Import;
+use crate::imports::{EVERY, Export, Import, Name};
 use crate::marks::{self, Marks};
 use crate::notice::{self, Notice};
 use crate::packages::{self, Package, Packages};
@@ -22,6 +23,7 @@ use crate::resolve::{Outcome, Place, Resolution, Resolver};
 use crate::scripts::{self, Scripts};
 use crate::stop::Stop;
 use crate::tsconfig;
+use crate::uses::{self, Origin, Reach, Use, Uses};
 
 /// Reads the project, with the hand-off file at the path given or with none, and returns the document
 /// to print.
@@ -106,6 +108,7 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
         },
         &mut notices,
     )?;
+    let uses = uses::find(&scripts, &resolved, &entries);
     let mut document = json!({
         "entries": entry_points(&entries),
         "entryFaults": entries
@@ -121,6 +124,8 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
         "handOff": handed.is_some(),
         "notices": notice::printed(notices),
         "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
+        "reachable": reachable(&uses),
+        "uses": uses.list.iter().map(used).collect::<Vec<Value>>(),
     });
 
     // An object's keys in order, whatever order they were added in.
@@ -144,8 +149,34 @@ fn entry_points(entries: &Entries) -> Vec<Value> {
         .collect()
 }
 
-/// One file as it is printed. A file that was read has its imports, each with where it leads, and the
-/// count of those that cannot be followed.
+/// The files the entry points reach, by path, each with whether it is reached only as text, by
+/// imports that carry a query (spec USE-6).
+fn reachable(uses: &Uses) -> Vec<Value> {
+    uses.reached
+        .iter()
+        .map(|(path, reach)| json!({ "path": path, "text": *reach == Reach::Text }))
+        .collect()
+}
+
+/// One use as it is printed: the file whose export is used, the export's name, `*` for every export,
+/// and where it counts from, the file and line of a reference or an entry point's source (spec CMD-4).
+fn used(used: &Use) -> Value {
+    let (by, line, entry) = match &used.origin {
+        Origin::Reference { file, line } => (Some(file), Some(line), None),
+        Origin::Entry(source) => (None, None, Some(source.printed())),
+    };
+
+    json!({
+        "by": by,
+        "entry": entry,
+        "file": used.file,
+        "line": line,
+        "name": used.name.as_deref().unwrap_or(EVERY),
+    })
+}
+
+/// One file as it is printed. A file that was read has its imports, each with where it leads, the
+/// count of those that cannot be followed, and its own exports.
 fn file(
     file: &File,
     marks: &Marks,
@@ -166,6 +197,7 @@ fn file(
         (scripts.read.get(&file.path), resolved.get(&file.path))
     {
         printed["computedImports"] = json!(read.computed);
+        printed["exports"] = read.exports.iter().map(export).collect();
         printed["imports"] = read
             .imports
             .iter()
@@ -177,11 +209,30 @@ fn file(
     printed
 }
 
+/// One export of a file as it is printed: its name, whether it is a value or a type, where its name
+/// is written, and whether its own file refers to it (spec USE-1, USE-2).
+fn export(export: &Export) -> Value {
+    json!({
+        "column": export.column,
+        "kind": if export.is_type { "type" } else { "value" },
+        "line": export.line,
+        "name": export.name,
+        "usedInFile": export.used_in_file,
+    })
+}
+
+/// One name an import brings in as it is printed: the target's name for it, `*` for the namespace,
+/// its local binding, and the names the importing file passes it on under (spec USE-1, USE-2a).
+fn name(name: &Name) -> Value {
+    json!({ "exported": name.exported, "local": name.local, "name": name.name })
+}
+
 /// One import as it is printed, with where it leads and the rule that decided it (spec OUT-1).
 fn import(import: &Import, resolution: &Resolution) -> Value {
     let mut printed = json!({
         "form": import.form.name(),
         "line": import.line,
+        "names": import.names.iter().map(name).collect::<Vec<Value>>(),
         "query": import.has_query(),
         "rule": resolution.rule.name(),
         "specifier": import.specifier,
