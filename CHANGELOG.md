@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/dabay6/yak-analyzer/compare/v0.4.0...v0.5.0) (2026-11-14)
+
+
+### Features
+
+* **uses:** read each file's names and count the uses of its exports ([ee5beed](https://github.com/dabay6/yak-analyzer/commit/ee5beed9c83b12ca0beedd04d70c26919fab5ca5))
+* **uses:** read each file's names and count the uses of its exports ([05f8f37](https://github.com/dabay6/yak-analyzer/commit/05f8f37dc9fc47ca8df977d5aea6bd608ac1be38))
+
 ## [0.4.0](https://github.com/dabay6/yak-analyzer/compare/v0.3.0...v0.4.0) (2026-11-14)
 
 
