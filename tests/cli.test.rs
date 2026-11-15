@@ -116,8 +116,8 @@ fn audit_without_a_hand_off_file_prints_one_sarif_report_and_exits_zero() {
 
 #[test]
 fn refuses_anything_else_with_one_line_on_standard_error() {
-    // `audit` takes no base yet: reading a commit comes with the plan after this one.
-    let cases: [&[&str]; 8] = [
+    // `graph` takes no base, and `audit` takes each option once, with its value.
+    let cases: [&[&str]; 10] = [
         &["analyze"],
         &["--version", "extra"],
         &["--help"],
@@ -125,7 +125,9 @@ fn refuses_anything_else_with_one_line_on_standard_error() {
         &["graph", "extra"],
         &["graph", "--base", "main"],
         &["audit", "extra"],
-        &["audit", "--base", "main"],
+        &["audit", "--base"],
+        &["audit", "--base", "main", "--base", "main"],
+        &["audit", "--hand-off", "a.json", "--hand-off", "b.json"],
     ];
 
     for args in cases {
@@ -142,6 +144,39 @@ fn refuses_anything_else_with_one_line_on_standard_error() {
             "{args:?}"
         );
     }
+}
+
+#[test]
+fn refuses_a_base_git_would_read_as_an_option_before_git_sees_it() {
+    // A base that begins with `-`, such as one of git's options that writes a file, or that holds a
+    // control character, or that is empty, is refused as a wrong option is, before any git starts
+    // (dead-code spec CMD-2).
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-base-refused");
+    let _ = fs::remove_dir_all(&folder);
+
+    fs::create_dir_all(&folder).expect("the test's folder can be made");
+
+    for base in ["--output=written.txt", "-", "main\nother", ""] {
+        let output = Command::new(env!("CARGO_BIN_EXE_yak-analyzer"))
+            .args(["audit", "--base", base])
+            .current_dir(&folder)
+            .output()
+            .expect("the binary starts");
+        let error = String::from_utf8_lossy(&output.stderr);
+
+        assert_eq!(output.status.code(), Some(2), "{base:?}");
+        assert!(output.stdout.is_empty(), "{base:?}");
+        assert_eq!(error.lines().count(), 1, "{base:?}");
+        assert!(error.starts_with("yak-analyzer: the base `"), "{error}");
+        assert!(error.contains("name the commit another way"), "{error}");
+    }
+
+    assert_eq!(
+        fs::read_dir(&folder)
+            .expect("the folder can be read")
+            .count(),
+        0
+    );
 }
 
 #[test]

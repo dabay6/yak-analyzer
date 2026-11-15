@@ -1,16 +1,23 @@
-//! The `audit` command: prints what a reading shows as one SARIF 2.1.0 document with one run (spec
-//! CMD-1, REPORT-1).
+//! The `audit` command: reads the project, and with a base the base commit too, and prints what the
+//! reading shows as one SARIF 2.1.0 document with one run (spec CMD-1, REPORT-1, COMMIT-1, INH-4).
 //!
 //! The run names the tool and lists the five rules, the findings and the notices.
 
 use std::fmt::Write as _;
+use std::path::Path;
+use std::thread;
 
 use serde_json::{Value, json};
 
-use crate::INTERFACE_VERSION;
+use crate::files;
 use crate::findings::{self, Finding, Location, Rule};
+use crate::git;
+use crate::inherit::{self, Base};
 use crate::notice::{self, Notice};
-use crate::reading::Reading;
+use crate::reading::{self, Reading, Start};
+use crate::stop::Stop;
+use crate::tree::Tree;
+use crate::{INTERFACE_VERSION, STACK};
 
 /// The key of `partialFingerprints` that holds a finding's fingerprint, with the scheme's version in
 /// it, so that a later scheme can sit beside it (spec REPORT-3).
@@ -30,11 +37,86 @@ const ROOT: &str = "%SRCROOT%";
 /// ones, the sub-delimiters, `@`, and the `/` between segments (RFC 3986).
 const PLAIN: &str = "-._~!$&'()*+,;=@/";
 
-/// The report `audit` prints for a reading.
-pub fn printed(mut reading: Reading) -> String {
-    let (found, notices) = findings::find(&reading);
+/// Reads the project, with the hand-off file given or with none, and with the base given the base
+/// commit too, and returns the report (spec CMD-1, CMD-3). The stops come in RUN-4's order: the base is
+/// asked about after the working tree's file list, as its steps 7b and 7c.
+pub fn run(hand_off: Option<&Path>, base: Option<&str>) -> Result<String, Stop> {
+    let Start {
+        handed,
+        root,
+        mut notices,
+    } = reading::start(hand_off)?;
+    let listing = files::list(&root, &mut notices)?;
+    let Some(base) = base else {
+        return reading::read(handed.as_ref(), &Tree::working(root), listing, notices)
+            .map(|reading| printed(reading, None));
+    };
+    let commit = git::commit(&root, base)?;
+
+    if git::partial(&root)?
+        && let Some(version) = git::older_than(git::NO_LAZY_FETCH)
+    {
+        let (major, minor) = git::NO_LAZY_FETCH;
+
+        return Err(Stop::new(format!(
+            "the root is in a partial clone, and git {version} cannot read the base without fetching over the \
+             network; a partial clone needs git {major}.{minor} or newer, so update git"
+        )));
+    }
+
+    let mut base_notices = Vec::new();
+    let (base_tree, base_listing) = Tree::base(root.clone(), &commit, &mut base_notices)?;
+    let working_tree = Tree::working(root);
+
+    // The two sides are read at once, each on a thread with the stack every reading has (dead-code spec
+    // INH-4, LIFE-3).
+    let (working, base) = thread::scope(|scope| {
+        let base = thread::Builder::new()
+            .stack_size(STACK)
+            .spawn_scoped(scope, || {
+                let reading =
+                    reading::read(handed.as_ref(), &base_tree, base_listing, base_notices)?;
+                let renamed = git::renamed(base_tree.root(), &commit)?;
+
+                Ok::<_, Stop>(Base {
+                    commit: commit.clone(),
+                    reading,
+                    renames: inherit::renames(&renamed.output),
+                    renames_cut_short: renamed
+                        .warning
+                        .is_some_and(|warning| warning.contains("rename")),
+                })
+            })
+            .map_err(|error| {
+                Stop::new(format!(
+                    "the base cannot be read on a thread of its own ({error})"
+                ))
+            })?;
+        let working = reading::read(handed.as_ref(), &working_tree, listing, notices);
+        let base = base
+            .join()
+            .unwrap_or_else(|fault| std::panic::resume_unwind(fault));
+
+        Ok::<_, Stop>((working?, base?))
+    })?;
+
+    Ok(printed(working, Some(base)))
+}
+
+/// The report `audit` prints for a reading, compared with the base's where there is one.
+pub fn printed(mut reading: Reading, base: Option<Base>) -> String {
+    let (mut found, notices) = findings::find(&reading);
 
     reading.notices.extend(notices);
+
+    if let Some(base) = base {
+        let compared = inherit::mark(&reading, &mut found, &base);
+
+        reading.notices.extend(compared);
+        reading
+            .notices
+            .extend(base.reading.notices.into_iter().map(Notice::of_base));
+    }
 
     let mut document = json!({
         "$schema": SCHEMA,
@@ -84,6 +166,10 @@ fn result(finding: &Finding) -> Value {
         "ruleIndex": finding.rule.index(),
     });
 
+    if let Some(baseline) = finding.baseline {
+        result["baselineState"] = json!(baseline.name());
+    }
+
     if !finding.related.is_empty() {
         result["relatedLocations"] = finding
             .related
@@ -128,6 +214,11 @@ fn notification(notice: &Notice) -> Value {
     if let Some(file) = notice.file() {
         notification["locations"] =
             json!([{ "physicalLocation": { "artifactLocation": artifact(file) } }]);
+    }
+
+    // A notice of the base's reading says so in its property bag (dead-code spec REPORT-4).
+    if notice.is_base() {
+        notification["properties"] = json!({ "base": true });
     }
 
     notification

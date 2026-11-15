@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
-import { launch, linuxLibc } from '#yak-analyzer/launch.js';
+import { binaryEnvironment, launch, linuxLibc } from '#yak-analyzer/launch.js';
 
 /** Resolves a package from where this package is installed, which is where its platform package is too. */
 const require = createRequire(import.meta.url);
@@ -16,7 +16,11 @@ process.exitCode = launch({
     return require.resolve(id);
   },
   run: (file, args) => {
-    return spawnSync(file, args, { stdio: 'inherit', windowsHide: true });
+    return spawnSync(file, args, {
+      env: binaryEnvironment(process.env, process.pid),
+      stdio: 'inherit',
+      windowsHide: true,
+    });
   },
   write: (line) => {
     process.stderr.write(line);

@@ -378,3 +378,78 @@ pub fn list(root: &Path, notices: &mut Vec<Notice>) -> Result<Listing, Stop> {
         links: link_paths,
     })
 }
+
+/// The file list of a commit: every file git stores at it under the root, each tracked, with the object
+/// that holds each file's content, by its path (dead-code spec COMMIT-2). A stored symbolic link and a
+/// submodule are left out, as the working tree's are (spec LIST-3).
+pub fn stored(
+    root: &Path,
+    commit: &str,
+    notices: &mut Vec<Notice>,
+) -> Result<(Listing, BTreeMap<String, String>), Stop> {
+    let answer = git::stored(root, commit)?;
+    let mut listing = Listing::default();
+    let mut objects = BTreeMap::new();
+    let mut unreadable_names = 0_usize;
+
+    // Each entry is its mode, its type and its object, then a tab and its path, ended by a zero byte.
+    for record in answer
+        .output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let Ok(record) = std::str::from_utf8(record) else {
+            unreadable_names += 1;
+
+            continue;
+        };
+        let entry = record.split_once('\t').and_then(|(facts, name)| {
+            let mut facts = facts.split(' ');
+
+            Some((facts.next()?, facts.next()?, facts.next()?, name))
+        });
+        let Some((mode, kind, object, name)) = entry else {
+            return Err(Stop::new(format!(
+                "git listed an entry of the base the analyzer cannot read, `{record}`; this is a fault in the \
+                 analyzer, so report it with the git version"
+            )));
+        };
+
+        if mode == SUBMODULE_MODE || kind == "commit" {
+            listing.elsewhere.insert(name.to_owned());
+        } else if mode == LINK_MODE {
+            listing.links.insert(name.to_owned());
+        } else if kind == "blob" {
+            objects.insert(name.to_owned(), object.to_owned());
+            listing.files.push(File {
+                kind: Kind::of(name),
+                path: name.to_owned(),
+                tracked: true,
+            });
+        }
+    }
+
+    if !listing.links.is_empty() {
+        let links = listing.links.len();
+
+        notices.push(Notice::new(
+            "links-left-out",
+            None,
+            format!("{links} symbolic link(s) were left out of the file list; a link is never followed or read."),
+        ));
+    }
+
+    if unreadable_names > 0 {
+        notices.push(Notice::new(
+            "names-left-out",
+            None,
+            format!("{unreadable_names} file(s) whose names are not valid UTF-8 were left out of the file list."),
+        ));
+    }
+
+    listing
+        .files
+        .sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
+
+    Ok((listing, objects))
+}

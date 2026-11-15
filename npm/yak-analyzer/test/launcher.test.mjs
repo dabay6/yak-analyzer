@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { launch, linuxLibc, TARGETS } from '#yak-analyzer/launch.js';
+import { binaryEnvironment, LAUNCHER_VARIABLE, launch, linuxLibc, TARGETS } from '#yak-analyzer/launch.js';
 
 /** A folder that stands for an installed platform package. */
 const INSTALLED = join('made-up', 'node_modules', '@dabay6', 'yak-analyzer-linux-x64');
@@ -129,6 +129,15 @@ test('every line the launcher writes is one line', () => {
 
     assert.equal(lines.join('').trimEnd().split('\n').length, 1);
   }
+});
+
+test('hands the binary its environment with its own process id added (dead-code spec LIFE-1)', () => {
+  const given = { PATH: '/usr/bin', [LAUNCHER_VARIABLE]: 'stale' };
+
+  assert.equal(LAUNCHER_VARIABLE, 'YAK_ANALYZER_LAUNCHER');
+  assert.deepEqual(binaryEnvironment(given, 4242), { PATH: '/usr/bin', YAK_ANALYZER_LAUNCHER: '4242' });
+  // The launcher's own environment is left as it was.
+  assert.deepEqual(given, { PATH: '/usr/bin', YAK_ANALYZER_LAUNCHER: 'stale' });
 });
 
 test('reads the C library only on Linux', () => {

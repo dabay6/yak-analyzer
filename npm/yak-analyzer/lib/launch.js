@@ -6,6 +6,21 @@ export const TARGETS = ['win32-x64', 'darwin-arm64', 'darwin-x64', 'linux-x64', 
 /** The exit code when the launcher itself cannot run the binary. */
 const FAILED = 1;
 
+/** The variable the binary finds the launcher's process id in, so it ends soon after the launcher does. */
+export const LAUNCHER_VARIABLE = 'YAK_ANALYZER_LAUNCHER';
+
+/**
+ * The binary's environment: the launcher's own, with the launcher's process id added (dead-code spec LIFE-1). The
+ * binary watches that process and ends when it is gone, as when yak stops the launcher.
+ *
+ * @param {Readonly<Record<string, string | undefined>>} environment - The launcher's environment.
+ * @param {number} id - The launcher's process id.
+ * @returns {Record<string, string | undefined>} The environment to start the binary with.
+ */
+export function binaryEnvironment(environment, id) {
+  return { ...environment, [LAUNCHER_VARIABLE]: String(id) };
+}
+
 /**
  * The targets as a person reads them: the Linux ones are for glibc.
  *

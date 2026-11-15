@@ -28,6 +28,14 @@ impl Stop {
     pub fn line(&self) -> String {
         line(&self.0)
     }
+
+    /// What failed, without the fix after the last `;`: at the base, where a file is skipped rather than
+    /// fixed (dead-code spec COMMIT-4).
+    pub fn reason(&self) -> &str {
+        self.0
+            .rsplit_once("; ")
+            .map_or(&self.0, |(reason, _)| reason)
+    }
 }
 
 /// One line for standard error: the program's name, then the text with every line break and control
@@ -82,5 +90,10 @@ impl Fault {
     /// The stop.
     pub fn stop(self) -> Stop {
         self.stop
+    }
+
+    /// The file and the stop.
+    pub fn parts(self) -> (String, Stop) {
+        (self.file, self.stop)
     }
 }

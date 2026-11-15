@@ -10,7 +10,6 @@
 //! no `node_modules`, and meets no field the analyzer has not checked.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -27,6 +26,7 @@ use crate::notice::Notice;
 use crate::packages::{Packages, misshapen};
 use crate::scripts;
 use crate::stop::{Fault, Stop};
+use crate::tree::Tree;
 
 /// The names of the configs that govern the files of their folder (spec CFG-2).
 const GOVERNING: [&str; 2] = ["tsconfig.json", "jsconfig.json"];
@@ -69,6 +69,9 @@ pub struct Loaded {
     configs: BTreeMap<String, Config>,
     /// The configs a file the analyzer reads depends on (spec CFG-4).
     named: BTreeSet<String>,
+    /// Whether a config whose field does not have its form is skipped rather than stopping the run, as
+    /// at the base (dead-code spec COMMIT-4).
+    skipping: bool,
 }
 
 /// One build a config states, for MAP-1: the folder its output goes to, and the folders its sources are
@@ -107,14 +110,16 @@ pub struct Configs {
 /// config that a file the analyzer reads depends on stops the run when it cannot be read, or when it
 /// extends a file that should be read and is not there; any other is left out with a notice (spec
 /// CFG-1, CFG-3, CFG-4). `packages` is there when the `package.json` files' fields hold their forms,
-/// for an `extends` that names a workspace package.
+/// for an `extends` that names a workspace package. At the base, a config that would stop the run is
+/// skipped with a notice instead, and governs nothing (dead-code spec COMMIT-4).
 pub fn load(
-    root: &Path,
+    tree: &Tree,
     files: &[File],
     data: &BTreeSet<String>,
     packages: Option<&Packages>,
     notices: &mut Vec<Notice>,
 ) -> Result<Loaded, Stop> {
+    let root = tree.root();
     let listed: BTreeSet<&str> = files
         .iter()
         .filter(|file| file.kind == Kind::Tsconfig && !data.contains(&file.path))
@@ -122,10 +127,10 @@ pub fn load(
         .collect();
     let mut parsed: BTreeMap<String, Result<Map<String, Value>, String>> = listed
         .iter()
-        .map(|path| ((*path).to_owned(), parse(root, path)))
+        .map(|path| ((*path).to_owned(), parse(tree, path)))
         .collect();
     let finder = Finder {
-        root,
+        tree,
         listed: &listed,
         data,
         packages,
@@ -149,7 +154,7 @@ pub fn load(
             if let Target::Read(above) = &target
                 && !parsed.contains_key(above)
             {
-                parsed.insert(above.clone(), parse(root, above));
+                parsed.insert(above.clone(), parse(tree, above));
                 waiting.push(above.clone());
             }
 
@@ -199,6 +204,22 @@ pub fn load(
         }
     }
 
+    // At the base, each such config is skipped with a notice, and governs nothing (dead-code spec
+    // COMMIT-4).
+    let mut skipped = BTreeSet::new();
+
+    if tree.is_base() {
+        for fault in faults.drain(..) {
+            let (file, stop) = fault.parts();
+
+            // A config with two faults is skipped once, for the first.
+            if !skipped.contains(&file) {
+                notices.push(Notice::skipped(&file, &stop));
+                skipped.insert(file);
+            }
+        }
+    }
+
     if let Some(fault) = Fault::first(faults) {
         return Err(fault.stop());
     }
@@ -206,6 +227,10 @@ pub fn load(
     let mut configs = BTreeMap::new();
 
     for (path, read) in parsed {
+        if skipped.contains(&path) {
+            continue;
+        }
+
         let fields = match read {
             Ok(fields) => fields,
             Err(why) => {
@@ -257,8 +282,8 @@ pub fn load(
             path,
             Config {
                 fields,
-                extends: read_targets(extends),
-                references: read_targets(references),
+                extends: read_targets(extends, &skipped),
+                references: read_targets(references, &skipped),
             },
         );
     }
@@ -267,21 +292,45 @@ pub fn load(
         root: clean(root),
         configs,
         named,
+        skipping: tree.is_base(),
     })
 }
 
 impl Loaded {
     /// Checks the fields the analyzer reads in every config it read, and gives the library the configs a
-    /// file depends on (spec CFG-1, RES-9, PACK-6).
-    pub fn checked(self) -> Result<Configs, Fault> {
-        let faults = self.configs.iter().filter_map(|(path, config)| {
-            forms(&config.fields, path)
-                .err()
-                .map(|stop| Fault::new(path.clone(), stop))
-        });
+    /// file depends on (spec CFG-1, RES-9, PACK-6). At the base, a config whose field does not have its
+    /// form is skipped with a notice, and governs nothing (dead-code spec COMMIT-4).
+    pub fn checked(mut self, notices: &mut Vec<Notice>) -> Result<Configs, Fault> {
+        let faults: Vec<Fault> = self
+            .configs
+            .iter()
+            .filter_map(|(path, config)| {
+                forms(&config.fields, path)
+                    .err()
+                    .map(|stop| Fault::new(path.clone(), stop))
+            })
+            .collect();
 
-        if let Some(fault) = Fault::first(faults) {
-            return Err(fault);
+        if !self.skipping {
+            if let Some(fault) = Fault::first(faults) {
+                return Err(fault);
+            }
+        } else if !faults.is_empty() {
+            let mut skipped = BTreeSet::new();
+
+            for fault in faults {
+                let (file, stop) = fault.parts();
+
+                notices.push(Notice::skipped(&file, &stop));
+                skipped.insert(file);
+            }
+
+            self.configs.retain(|path, _| !skipped.contains(path));
+
+            for config in self.configs.values_mut() {
+                config.extends.retain(|target| !skipped.contains(target));
+                config.references.retain(|target| !skipped.contains(target));
+            }
         }
 
         let mut served = BTreeMap::new();
@@ -533,7 +582,7 @@ impl Configs {
 
 /// Finds the targets of `extends` and `references`.
 struct Finder<'a> {
-    root: &'a Path,
+    tree: &'a Tree,
     listed: &'a BTreeSet<&'a str>,
     data: &'a BTreeSet<String>,
     packages: Option<&'a Packages>,
@@ -559,7 +608,7 @@ impl Finder<'_> {
 
         if is_above(&tried[0]) {
             for candidate in &tried {
-                match git::above(self.root, candidate)? {
+                match self.tree.above(candidate)? {
                     Above::File => return Ok(Target::Read(candidate.clone())),
                     Above::Ignored => return Ok(Target::Without("a file git ignores")),
                     Above::OutsideWorkTree => {
@@ -585,7 +634,7 @@ impl Finder<'_> {
 
         let asked: Vec<&str> = tried.iter().map(String::as_str).collect();
 
-        Ok(if git::ignored(self.root, &asked)?.is_empty() {
+        Ok(if git::ignored(self.tree.root(), &asked)?.is_empty() {
             Target::Missing(tried[0].clone())
         } else {
             Target::Without("a file git ignores")
@@ -686,12 +735,12 @@ fn depended_on(
     named
 }
 
-/// The targets that are read, by path.
-fn read_targets(targets: Vec<(String, Target)>) -> Vec<String> {
+/// The targets that are read, by path, but those skipped at the base.
+fn read_targets(targets: Vec<(String, Target)>, skipped: &BTreeSet<String>) -> Vec<String> {
     targets
         .into_iter()
         .filter_map(|(_, target)| match target {
-            Target::Read(path) => Some(path),
+            Target::Read(path) if !skipped.contains(&path) => Some(path),
             _ => None,
         })
         .collect()
@@ -699,8 +748,8 @@ fn read_targets(targets: Vec<(String, Target)>) -> Vec<String> {
 
 /// A config's content as JSON that may hold comments and trailing commas, with a byte-order mark at its
 /// start passed over (spec CFG-1, PARSE-1); or why it cannot be read.
-fn parse(root: &Path, path: &str) -> Result<Map<String, Value>, String> {
-    let bytes = fs::read(root.join(path)).map_err(|error| error.to_string())?;
+fn parse(tree: &Tree, path: &str) -> Result<Map<String, Value>, String> {
+    let bytes = tree.read(path).map_err(|error| error.to_string())?;
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
     let mut text =
         String::from_utf8(bytes.to_vec()).map_err(|_| "it is not valid UTF-8".to_owned())?;

@@ -89,6 +89,25 @@ pub struct Location {
     pub column: Option<usize>,
 }
 
+/// Whether a finding is new on the branch or the base has it too (spec REPORT-1, INH-1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Baseline {
+    /// The branch made it.
+    New,
+    /// The base has it too: it is inherited.
+    Unchanged,
+}
+
+impl Baseline {
+    /// Its name as SARIF's `baselineState` writes it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Unchanged => "unchanged",
+        }
+    }
+}
+
 /// One finding.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Finding {
@@ -102,6 +121,10 @@ pub struct Finding {
     pub related: Vec<Location>,
     /// The digest that names the same finding on the base and on the branch (spec REPORT-3).
     pub fingerprint: String,
+    /// What the fingerprint is made from, after the rule: paths first, as REPORT-3 lists them.
+    parts: Vec<String>,
+    /// Whether it is new or inherited, with a base; none without one.
+    pub baseline: Option<Baseline>,
 }
 
 impl Finding {
@@ -113,7 +136,45 @@ impl Finding {
             location,
             related: Vec::new(),
             fingerprint: fingerprint(rule, parts),
+            parts: parts.iter().map(|part| (*part).to_owned()).collect(),
+            baseline: None,
         }
+    }
+
+    /// The fingerprint the finding would have with each path it names moved as `moved` says, as a
+    /// rename moves a base's file to its path on the branch (spec INH-2). A cycle's paths are sorted
+    /// again after they move.
+    pub fn moved(&self, moved: impl Fn(&str) -> String) -> String {
+        let parts: Vec<String> = if self.rule == Rule::CircularDependency {
+            let mut paths: Vec<String> = self.parts.iter().map(|path| moved(path)).collect();
+
+            paths.sort();
+            paths
+        } else {
+            // The first part is the path; a name or a specifier after it does not move.
+            self.parts
+                .iter()
+                .enumerate()
+                .map(|(place, part)| {
+                    if place == 0 {
+                        moved(part)
+                    } else {
+                        part.clone()
+                    }
+                })
+                .collect()
+        };
+        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+
+        fingerprint(self.rule, &parts)
+    }
+
+    /// The files of a circular dependency: its first location's, then its related locations'.
+    pub fn files(&self) -> Vec<&str> {
+        std::iter::once(&self.location)
+            .chain(&self.related)
+            .map(|location| location.path.as_str())
+            .collect()
     }
 }
 
@@ -149,11 +210,17 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
     not_reported(reading, &mut notices);
     computed(reading, &mut notices);
 
+    sort(&mut found);
+
+    (found, notices)
+}
+
+/// Puts findings in the report's order: by rule, then path, line and column, then fingerprint (spec
+/// REPORT-1).
+pub fn sort(found: &mut [Finding]) {
     found.sort_by(|a, b| {
         (a.rule, &a.location, &a.fingerprint).cmp(&(b.rule, &b.location, &b.fingerprint))
     });
-
-    (found, notices)
 }
 
 /// Whether the three kinds that depend on entry points are reported for a file: its package's own
@@ -432,6 +499,54 @@ fn edges(reading: &Reading) -> (Vec<&str>, Edges) {
     }
 
     (nodes, edges)
+}
+
+/// The files cycles are found over, and which file loads which, by their paths (spec KIND-4, INH-3).
+pub struct Graph<'r> {
+    /// The files, in path order.
+    nodes: Vec<&'r str>,
+    /// What each file loads.
+    edges: Edges,
+}
+
+impl<'r> Graph<'r> {
+    /// The graph of a reading.
+    pub fn of(reading: &'r Reading) -> Self {
+        let (nodes, edges) = edges(reading);
+
+        Self { nodes, edges }
+    }
+
+    /// Each pair of files where the first loads the second.
+    pub fn pairs(&self) -> Vec<(&'r str, &'r str)> {
+        self.edges
+            .iter()
+            .enumerate()
+            .flat_map(|(from, targets)| {
+                targets
+                    .keys()
+                    .map(move |to| (self.nodes[from], self.nodes[*to]))
+            })
+            .collect()
+    }
+
+    /// The strongly connected set each file is in, as the set's number, by the file's path.
+    pub fn sets(&self) -> BTreeMap<&'r str, usize> {
+        strongly_connected(&self.edges)
+            .iter()
+            .enumerate()
+            .flat_map(|(number, set)| set.iter().map(move |node| (self.nodes[*node], number)))
+            .collect()
+    }
+
+    /// The first import, by line, by which one file loads another: its line, and its place among the
+    /// file's imports.
+    pub fn first(&self, from: &str, to: &str) -> Option<(usize, usize)> {
+        let from = self.nodes.binary_search(&from).ok()?;
+        let to = self.nodes.binary_search(&to).ok()?;
+
+        self.edges[from].get(&to).copied()
+    }
 }
 
 /// The strongly connected sets of a graph, each in the order of its nodes, found by Tarjan's walk

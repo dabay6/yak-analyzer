@@ -1,8 +1,16 @@
 //! Runs the built binary's `audit` on made-up projects and checks the report it prints: its form, its
-//! notifications and how it stops (dead-code spec CMD-1, CMD-3, REPORT-1, REPORT-2, REPORT-4, FIX-3).
+//! notifications and how it stops (dead-code spec CMD-1, CMD-3, REPORT-1, REPORT-2, REPORT-4, FIX-3);
+//! and, with a base as a commit and a branch as later commits and edits, which findings are new and
+//! which inherited (dead-code spec CMD-2, COMMIT-1 to COMMIT-5, INH-1, FIX-4).
 
 #[path = "support/project.rs"]
 mod project;
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+use std::time::SystemTime;
 
 use serde_json::{Value, json};
 
@@ -12,12 +20,19 @@ use project::{Project, notices, paths, printed, stopped};
 const SCHEMA: &str = include_str!("sarif/sarif-schema-2.1.0.json");
 
 /// The one run of the report `audit` prints for the checkout, with the hand-off file given or with
-/// none. The run must succeed and write no line, and the schema must accept the report (spec FIX-3).
+/// none.
 fn audit(project: &Project, hand_off: Option<&str>) -> Value {
+    match hand_off {
+        Some(file) => audited(project, &["--hand-off", file]),
+        None => audited(project, &[]),
+    }
+}
+
+/// The one run of the report `audit` prints for the checkout with the options given. The run must
+/// succeed and write no line, and the schema must accept the report (spec FIX-3).
+fn audited(project: &Project, options: &[&str]) -> Value {
     let report = printed(&project.start("audit", |binary| {
-        if let Some(file) = hand_off {
-            binary.args(["--hand-off", file]);
-        }
+        binary.args(options);
     }));
     let schema: Value = serde_json::from_str(SCHEMA).expect("the schema's copy is JSON");
     let faults: Vec<String> = jsonschema::validator_for(&schema)
@@ -817,5 +832,539 @@ fn names_ten_files_of_a_long_loop_and_how_many_more() {
             .as_array()
             .map(Vec::len),
         Some(11)
+    );
+}
+
+/// The findings of a run, in its order: each with its rule, its file as the report writes it, its line
+/// where it has one, and whether it is new or inherited where the run says.
+fn states(run: &Value) -> Vec<(&str, &str, Option<u64>, Option<&str>)> {
+    run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .map(|result| {
+            let place = &result["locations"][0]["physicalLocation"];
+
+            (
+                result["ruleId"].as_str().expect("a rule"),
+                place["artifactLocation"]["uri"].as_str().expect("a file"),
+                place["region"]["startLine"].as_u64(),
+                result["baselineState"].as_str(),
+            )
+        })
+        .collect()
+}
+
+/// The notifications of a run, in its order: each with its kind, the file it is about as the report
+/// writes it, and whether the base's reading gave it.
+fn marked(run: &Value) -> Vec<(&str, Option<&str>, bool)> {
+    run["invocations"][0]["toolExecutionNotifications"]
+        .as_array()
+        .expect("a list of notifications")
+        .iter()
+        .map(|notification| {
+            (
+                notification["descriptor"]["id"].as_str().expect("a kind"),
+                notification["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                    .as_str(),
+                notification["properties"]["base"] == json!(true),
+            )
+        })
+        .collect()
+}
+
+/// The sentence of the notification of the kind given.
+fn sentence<'r>(run: &'r Value, kind: &str) -> &'r str {
+    run["invocations"][0]["toolExecutionNotifications"]
+        .as_array()
+        .expect("a list of notifications")
+        .iter()
+        .find(|notification| notification["descriptor"]["id"] == json!(kind))
+        .and_then(|notification| notification["message"]["text"].as_str())
+        .unwrap_or_else(|| panic!("a notification of the kind {kind}"))
+}
+
+/// Every path under a folder, `.git` included, with the size of each file and when it was last
+/// changed. A folder's own time is left out: the system may record a change made in it a little
+/// later, and a change shows in its files anyway.
+fn snapshot(folder: &Path) -> BTreeMap<String, Option<(u64, Option<SystemTime>)>> {
+    let mut found = BTreeMap::new();
+    let mut waiting = vec![folder.to_path_buf()];
+
+    while let Some(next) = waiting.pop() {
+        for entry in fs::read_dir(&next).expect("the folder can be read") {
+            let entry = entry.expect("an entry can be read");
+            let facts = entry.metadata().expect("an entry can be looked at");
+            let path = entry.path();
+
+            if facts.is_dir() {
+                found.insert(path.display().to_string(), None);
+                waiting.push(path);
+            } else {
+                found.insert(
+                    path.display().to_string(),
+                    Some((facts.len(), facts.modified().ok())),
+                );
+            }
+        }
+    }
+
+    found
+}
+
+/// A project of one package whose base is the commit on `main`, with the branch `branch` checked out.
+fn branched(name: &str, files: &[(&str, &str)]) -> Project {
+    let project = Project::new(name);
+
+    for (path, content) in files {
+        project.write(path, content);
+    }
+
+    project.commit();
+    project.git(&["switch", "--quiet", "-c", "branch"]);
+
+    project
+}
+
+#[test]
+fn a_finding_the_base_has_too_is_unchanged_and_one_the_branch_made_is_new() {
+    let project = branched(
+        "base-new-and-inherited",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            (
+                "src/index.ts",
+                "import { a } from './a';\nimport './missing';\na();\n",
+            ),
+            (
+                "src/a.ts",
+                "export const a = (): void => {};\nexport const old = 1;\nexport const dropped = 2;\n",
+            ),
+        ],
+    );
+
+    // The branch drops one unused export and adds another in a commit, and adds unresolved imports and
+    // an untracked file without committing them (spec FIX-4).
+    project
+        .write(
+            "src/a.ts",
+            "export const a = (): void => {};\nexport const old = 1;\nexport const fresh = 3;\n",
+        )
+        .commit()
+        .write(
+            "src/index.ts",
+            "import { a } from './a';\nimport './missing';\nimport './missing';\nimport './elsewhere';\na();\n",
+        )
+        .write("src/scratch.ts", "export const scratch = 1;\n");
+
+    let run = audited(&project, &["--base", "main"]);
+
+    // A finding the base has too is unchanged; one the branch made is new; one only the base has is not
+    // printed. Of two findings with one fingerprint, the base's one is the first by line (spec INH-1,
+    // REPORT-1, FIX-1 pattern 22).
+    assert_eq!(
+        states(&run),
+        [
+            ("unused-file", "src/scratch.ts", None, Some("new")),
+            ("unused-export", "src/a.ts", Some(2), Some("unchanged")),
+            ("unused-export", "src/a.ts", Some(3), Some("new")),
+            (
+                "unresolved-import",
+                "src/index.ts",
+                Some(2),
+                Some("unchanged")
+            ),
+            ("unresolved-import", "src/index.ts", Some(3), Some("new")),
+            ("unresolved-import", "src/index.ts", Some(4), Some("new")),
+        ]
+    );
+    // The same project gives the same bytes every run (spec INH-4, RUN-8).
+    assert_eq!(run, audited(&project, &["--base", "main"]));
+    // Without a base, no finding is new or inherited (spec CMD-1).
+    assert!(
+        states(&audited(&project, &[]))
+            .iter()
+            .all(|(_, _, _, state)| state.is_none())
+    );
+}
+
+#[test]
+fn the_base_is_read_from_the_commit_and_nothing_is_written() {
+    let project = branched(
+        "base-from-the-commit",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            ("src/index.ts", "import { used } from './util';\nused();\n"),
+            (
+                "src/util.ts",
+                "export const used = (): void => {};\nexport const spare = 1;\n",
+            ),
+            ("src/old.ts", "export const old = 1;\n"),
+        ],
+    );
+
+    // The working tree changes a file and deletes another, and commits neither change: the base still
+    // reads both as the commit stores them.
+    project.write(
+        "src/util.ts",
+        "export const used = (): void => {};\nexport const extra = 1;\n",
+    );
+    fs::remove_file(project.root.join("src/old.ts")).expect("the file can be removed");
+
+    // git's own `status` may write its index, so it is asked before the snapshot is taken.
+    let status = project.git(&["status", "--porcelain"]);
+    let before = snapshot(&project.root);
+    let run = audited(&project, &["--base", "branch"]);
+
+    // The base's `spare` and its unused file are the commit's, so neither is printed, and `extra` is
+    // the working tree's alone (spec COMMIT-1, COMMIT-2).
+    assert_eq!(
+        states(&run),
+        [("unused-export", "src/util.ts", Some(2), Some("new"))]
+    );
+    // Nothing is checked out and nothing is written, `.git` included (spec COMMIT-1, RUN-6).
+    assert_eq!(snapshot(&project.root), before);
+    assert_eq!(project.git(&["status", "--porcelain"]), status);
+}
+
+#[test]
+fn names_the_base_commit_and_marks_the_notices_of_the_bases_reading() {
+    let project = branched(
+        "base-notifications",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            ("src/index.ts", "export {};\n"),
+            // A tsconfig no script depends on, which extends a file that is not there: left out, with a
+            // notice.
+            ("other/tsconfig.json", r#"{ "extends": "./missing.json" }"#),
+        ],
+    );
+
+    project.git(&["rm", "--quiet", "other/tsconfig.json"]);
+    project.commit();
+
+    let full = project.git(&["rev-parse", "main"]).trim().to_owned();
+    let run = audited(&project, &["--base", "main"]);
+
+    // One notification names the base by its full name, whatever name it was given by; each notice of
+    // the base's reading is marked as the base's (spec REPORT-4, CMD-2).
+    assert_eq!(
+        marked(&run),
+        [
+            ("base", None, false),
+            ("no-hand-off-file", None, false),
+            (
+                "tsconfig-extends-left-out",
+                Some("other/tsconfig.json"),
+                true
+            ),
+        ]
+    );
+    assert!(sentence(&run, "base").contains(&full), "{full}");
+}
+
+#[test]
+fn a_base_that_is_not_a_commit_stops_the_run_after_the_file_list() {
+    let project = Project::new("base-not-a-commit");
+
+    project
+        .write("package.json", r#"{ "name": "app" }"#)
+        .write("src/index.ts", "export {};\n")
+        .commit();
+
+    // A name git does not know, and a name of a file rather than a commit, stop the run with the name
+    // and the fix (spec CMD-2, CMD-3 stop 7b).
+    for name in ["nosuch", "HEAD:package.json"] {
+        let line = stopped(&project.start("audit", |binary| {
+            binary.args(["--base", name]);
+        }));
+
+        assert_eq!(
+            line,
+            format!(
+                "yak-analyzer: the base `{name}` is not a commit in this repository; fetch it with `git \
+                 fetch`, or name another, and run again"
+            )
+        );
+    }
+
+    // It is asked before any `package.json` is read: a broken one is reported after it (spec RUN-4).
+    project.write("package.json", "{ broken");
+
+    let line = stopped(&project.start("audit", |binary| {
+        binary.args(["--base", "nosuch"]);
+    }));
+
+    assert!(line.contains("`nosuch` is not a commit"), "{line}");
+}
+
+#[test]
+fn a_base_whose_files_cannot_be_read_skips_them_and_marks_every_finding_new() {
+    let project = branched(
+        "base-skipped-files",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            // A tsconfig the scripts depend on, and a script, that do not parse at the base: on the
+            // working tree each would stop the run.
+            ("tsconfig.json", "{ broken"),
+            ("src/index.ts", "import { a } from './a';\na();\n"),
+            (
+                "src/a.ts",
+                "export const a = (): void => {};\nexport const old = 1;\n",
+            ),
+            ("src/broken.ts", "const = ;\n"),
+        ],
+    );
+
+    project
+        .write("tsconfig.json", "{}")
+        .write("src/broken.ts", "export {};\n")
+        .commit();
+
+    let run = audited(&project, &["--base", "main"]);
+
+    // At the base each is skipped with a notice marked as the base's, and since a skipped file can make
+    // a finding look inherited, every finding is new, with one notification that says why (spec
+    // COMMIT-4, FIX-2).
+    assert_eq!(
+        states(&run),
+        [
+            ("unused-file", "src/broken.ts", None, Some("new")),
+            ("unused-export", "src/a.ts", Some(2), Some("new")),
+        ]
+    );
+    assert_eq!(
+        marked(&run),
+        [
+            ("base", None, false),
+            ("base-files-skipped", None, false),
+            ("no-hand-off-file", None, false),
+            ("file-skipped", Some("src/broken.ts"), true),
+            ("file-skipped", Some("tsconfig.json"), true),
+        ]
+    );
+    assert_eq!(
+        sentence(&run, "base-files-skipped"),
+        "2 file(s) were skipped at the base, so no finding is marked unchanged: `tsconfig.json`, \
+         `src/broken.ts`."
+    );
+}
+
+#[test]
+fn the_base_is_read_with_the_hand_off_files_declarations_and_the_working_trees_ignore_rules() {
+    let project = branched(
+        "base-declarations",
+        &[
+            ("package.json", r#"{ "name": "app" }"#),
+            (".gitignore", "out/\n"),
+            (
+                "src/tool.ts",
+                "import { used } from './helper';\nimport './out/built.js';\nused();\n",
+            ),
+            (
+                "src/helper.ts",
+                "export const used = (): void => {};\nexport const extra = 1;\n",
+            ),
+        ],
+    );
+
+    // The branch drops the ignore rule, so the import of the folder it ignored leads nowhere now.
+    project.git(&["rm", "--quiet", ".gitignore"]);
+    project.commit();
+
+    let hand_off = project.hand_off(
+        &project.root,
+        &["."],
+        json!([{
+            "name": "typescript",
+            "interfaceVersion": 1,
+            "pack": {},
+            "project": { "entries": ["src/tool.ts"] }
+        }]),
+    );
+    let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
+
+    // The declaration makes `src/tool.ts` an entry point at the base too, so `extra` is unused on both
+    // sides rather than in a file nothing reaches; and the base asks the working tree's ignore rules,
+    // so the import was unresolved there too (spec COMMIT-3, COMMIT-5).
+    assert_eq!(
+        states(&run),
+        [
+            ("unused-export", "src/helper.ts", Some(2), Some("unchanged")),
+            (
+                "unresolved-import",
+                "src/tool.ts",
+                Some(2),
+                Some("unchanged")
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_partial_clone_reads_its_base_with_a_git_that_never_fetches_and_stops_with_an_older_one() {
+    let project = branched(
+        "base-partial-clone",
+        &[
+            ("package.json", r#"{ "name": "app" }"#),
+            ("src/index.ts", "export {};\n"),
+        ],
+    );
+
+    // A promisor remote is what makes a repository a partial clone.
+    project.git(&["config", "remote.origin.promisor", "true"]);
+
+    let version = Command::new("git")
+        .arg("--version")
+        .output()
+        .expect("git starts");
+    let version = String::from_utf8_lossy(&version.stdout);
+    let numbers: Vec<u32> = version
+        .trim()
+        .trim_start_matches("git version ")
+        .split(['.', ' '])
+        .take(2)
+        .map(|number| number.parse().expect("a number"))
+        .collect();
+    let output = project.start("audit", |binary| {
+        binary.args(["--base", "main"]);
+    });
+
+    // git 2.44 is the first to honour the switch that turns lazy fetching off (spec COMMIT-2, CMD-3
+    // stop 7c).
+    if numbers.as_slice() >= [2, 44].as_slice() {
+        assert_eq!(printed(&output)["version"], json!("2.1.0"));
+    } else {
+        let line = stopped(&output);
+
+        assert!(line.contains("partial clone"), "{line}");
+        assert!(line.contains("2.44"), "{line}");
+    }
+}
+
+#[test]
+fn a_renamed_files_findings_are_inherited_under_its_new_path() {
+    let project = branched(
+        "base-renames",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            ("src/index.ts", "import { kept } from './kept';\nkept();\n"),
+            (
+                "src/kept.ts",
+                "export const kept = (): void => {};\nexport const spare = 1;\n",
+            ),
+            ("src/moved.ts", "export const moved = 1;\n"),
+            ("src/staged.ts", "export const staged = 1;\n"),
+            ("src/copied.ts", "export const copied = 1;\n"),
+        ],
+    );
+
+    // Renamed in a commit, and the import that names it changed with it; and moved to a new folder.
+    fs::create_dir_all(project.root.join("src/lib")).expect("the folder can be made");
+    project.git(&["mv", "src/kept.ts", "src/held.ts"]);
+    project.git(&["mv", "src/moved.ts", "src/lib/moved.ts"]);
+    project
+        .write("src/index.ts", "import { kept } from './held';\nkept();\n")
+        .commit();
+    // Renamed and staged, not committed.
+    project.git(&["mv", "src/staged.ts", "src/staged-now.ts"]);
+    // Removed, and the same content written again as an untracked file, which git cannot pair with it.
+    project.git(&["rm", "--quiet", "src/copied.ts"]);
+    project.write("src/copy.ts", "export const copied = 1;\n");
+
+    let run = audited(&project, &["--base", "main"]);
+
+    // Before fingerprints are compared, each base path git found renamed takes its new path (spec
+    // INH-2, FIX-1 pattern 22).
+    assert_eq!(
+        states(&run),
+        [
+            ("unused-file", "src/copy.ts", None, Some("new")),
+            ("unused-file", "src/lib/moved.ts", None, Some("unchanged")),
+            ("unused-file", "src/staged-now.ts", None, Some("unchanged")),
+            ("unused-export", "src/held.ts", Some(2), Some("unchanged")),
+        ]
+    );
+}
+
+#[test]
+fn a_cycle_the_base_has_is_unchanged_and_one_the_branch_joined_or_grew_is_new() {
+    let project = branched(
+        "base-cycles",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            (
+                "src/index.ts",
+                "import './a';\nimport './c';\nimport './p';\n",
+            ),
+            ("src/a.ts", "import './b';\nexport {};\n"),
+            ("src/b.ts", "import './a';\nexport {};\n"),
+            ("src/c.ts", "import './d';\nexport {};\n"),
+            ("src/d.ts", "import './c';\nexport {};\n"),
+            ("src/p.ts", "import './q';\nexport {};\n"),
+            ("src/q.ts", "import './r';\nexport {};\n"),
+            ("src/r.ts", "import './p';\nexport {};\n"),
+        ],
+    );
+
+    // The branch rewrites a specifier without changing where it leads, has a new file join a cycle,
+    // and adds an import inside another (spec FIX-1 pattern 18).
+    project
+        .write("src/b.ts", "import './a.js';\nexport {};\n")
+        .write("src/d.ts", "import './c';\nimport './x';\nexport {};\n")
+        .write("src/x.ts", "import './c';\nexport {};\n")
+        .write("src/q.ts", "import './r';\nimport './p';\nexport {};\n")
+        .commit();
+
+    let run = audited(&project, &["--base", "main"]);
+    let cycles: Vec<_> = states(&run)
+        .into_iter()
+        .filter(|(rule, ..)| *rule == "circular-dependency")
+        .collect();
+
+    // A cycle is inherited when one set of the base holds all its files and the branch added no edge
+    // between them; otherwise it is new, at the first import that adds one (spec INH-3).
+    assert_eq!(
+        cycles,
+        [
+            (
+                "circular-dependency",
+                "src/a.ts",
+                Some(1),
+                Some("unchanged")
+            ),
+            ("circular-dependency", "src/d.ts", Some(2), Some("new")),
+            ("circular-dependency", "src/q.ts", Some(2), Some("new")),
+        ]
+    );
+    assert_eq!(
+        message(&run, "circular-dependency", "src/d.ts"),
+        "These files import each other in a loop: `src/c.ts` → `src/d.ts` → `src/c.ts`. The loop is part \
+         of a set of 3 files that each reach all the others. The branch added the import of `./x` on line \
+         2 of `src/d.ts`, which leads to `src/x.ts`."
+    );
+    assert_eq!(
+        message(&run, "circular-dependency", "src/q.ts"),
+        "These files import each other in a loop: `src/p.ts` → `src/q.ts` → `src/p.ts`. The loop is part \
+         of a set of 3 files that each reach all the others. The branch added the import of `./p` on line \
+         2 of `src/q.ts`, which leads to `src/p.ts`."
     );
 }

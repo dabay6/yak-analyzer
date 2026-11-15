@@ -2,6 +2,11 @@
 
 use serde_json::{Value, json};
 
+use crate::stop::Stop;
+
+/// The kind of the notice for a file the base's reading skipped (dead-code spec COMMIT-4).
+pub const SKIPPED: &str = "file-skipped";
+
 /// Something a person should know about a run that went on.
 #[derive(Debug)]
 pub struct Notice {
@@ -11,6 +16,8 @@ pub struct Notice {
     file: Option<String>,
     /// What happened, as a sentence.
     sentence: String,
+    /// Whether the base's reading gave it (dead-code spec REPORT-4).
+    base: bool,
 }
 
 impl Notice {
@@ -20,7 +27,27 @@ impl Notice {
             kind,
             file,
             sentence,
+            base: false,
         }
+    }
+
+    /// The notice for a file the base's reading skips, with what would have stopped the run on the
+    /// working tree (dead-code spec COMMIT-4).
+    pub fn skipped(file: &str, stop: &Stop) -> Self {
+        Self::new(
+            SKIPPED,
+            Some(file.to_owned()),
+            format!(
+                "The file is skipped at the base, where nobody can fix it: {}.",
+                stop.reason()
+            ),
+        )
+    }
+
+    /// The notice, marked as the base's.
+    pub const fn of_base(mut self) -> Self {
+        self.base = true;
+        self
     }
 
     /// The kind of notice.
@@ -38,16 +65,23 @@ impl Notice {
         &self.sentence
     }
 
+    /// Whether the base's reading gave it.
+    pub const fn is_base(&self) -> bool {
+        self.base
+    }
+
     /// The notice as `graph` prints it.
     fn printed(&self) -> Value {
         json!({ "file": self.file, "kind": self.kind, "sentence": self.sentence })
     }
 }
 
-/// The notices in the order they are printed in: those about no file first, then by file, by kind and
-/// by sentence (spec RUN-8).
+/// The notices in the order they are printed in: the working tree's before the base's, and of each,
+/// those about no file first, then by file, by kind and by sentence (spec RUN-8).
 pub fn sorted(mut notices: Vec<Notice>) -> Vec<Notice> {
-    notices.sort_by(|a, b| (&a.file, a.kind, &a.sentence).cmp(&(&b.file, b.kind, &b.sentence)));
+    notices.sort_by(|a, b| {
+        (a.base, &a.file, a.kind, &a.sentence).cmp(&(b.base, &b.file, b.kind, &b.sentence))
+    });
 
     notices
 }

@@ -45,7 +45,7 @@ pub fn printed(reading: Reading) -> String {
             .filter(|each| !scripts.gone.contains(&each.path))
             .map(|each| file(each, &marks, &packages, &scripts, &resolved))
             .collect::<Vec<Value>>(),
-        "handOff": handed.is_some(),
+        "handOff": handed,
         "notices": notice::printed(notices),
         "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
         "reachable": reachable(&uses),
