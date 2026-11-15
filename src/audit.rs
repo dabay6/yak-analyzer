@@ -1,16 +1,20 @@
 //! The `audit` command: prints what a reading shows as one SARIF 2.1.0 document with one run (spec
 //! CMD-1, REPORT-1).
 //!
-//! So far the run names the tool and lists the five rules and the notices; it holds no finding yet.
+//! The run names the tool and lists the five rules, the findings and the notices.
 
 use std::fmt::Write as _;
 
 use serde_json::{Value, json};
 
 use crate::INTERFACE_VERSION;
-use crate::findings::Rule;
+use crate::findings::{self, Finding, Location, Rule};
 use crate::notice::{self, Notice};
 use crate::reading::Reading;
+
+/// The key of `partialFingerprints` that holds a finding's fingerprint, with the scheme's version in
+/// it, so that a later scheme can sit beside it (spec REPORT-3).
+const FINGERPRINT_KEY: &str = "yakAnalyzer/v1";
 
 /// Where the schema of SARIF 2.1.0 is published.
 const SCHEMA: &str =
@@ -27,7 +31,11 @@ const ROOT: &str = "%SRCROOT%";
 const PLAIN: &str = "-._~!$&'()*+,;=@/";
 
 /// The report `audit` prints for a reading.
-pub fn printed(reading: Reading) -> String {
+pub fn printed(mut reading: Reading) -> String {
+    let (found, notices) = findings::find(&reading);
+
+    reading.notices.extend(notices);
+
     let mut document = json!({
         "$schema": SCHEMA,
         "version": SARIF_VERSION,
@@ -41,7 +49,7 @@ pub fn printed(reading: Reading) -> String {
                     .collect::<Vec<Value>>(),
             }],
             "properties": { "interfaceVersion": INTERFACE_VERSION },
-            "results": [],
+            "results": found.iter().map(result).collect::<Vec<Value>>(),
             "tool": {
                 "driver": {
                     "informationUri": env!("CARGO_PKG_REPOSITORY"),
@@ -62,6 +70,50 @@ pub fn printed(reading: Reading) -> String {
 /// One rule as the run lists it.
 fn described(rule: Rule) -> Value {
     json!({ "id": rule.name(), "shortDescription": { "text": rule.description() } })
+}
+
+/// One finding as a result of the run: its rule, its message, its location, the other places it
+/// involves, and its fingerprint (spec REPORT-1).
+fn result(finding: &Finding) -> Value {
+    let mut result = json!({
+        "level": "warning",
+        "locations": [placed(&finding.location)],
+        "message": { "text": finding.message },
+        "partialFingerprints": { FINGERPRINT_KEY: finding.fingerprint },
+        "ruleId": finding.rule.name(),
+        "ruleIndex": finding.rule.index(),
+    });
+
+    if !finding.related.is_empty() {
+        result["relatedLocations"] = finding
+            .related
+            .iter()
+            .enumerate()
+            .map(|(id, location)| {
+                let mut related = placed(location);
+
+                related["id"] = json!(id);
+                related
+            })
+            .collect();
+    }
+
+    result
+}
+
+/// A location as SARIF writes one: the file, and the line and column where there are some.
+fn placed(location: &Location) -> Value {
+    let mut physical = json!({ "artifactLocation": artifact(&location.path) });
+
+    if let Some(line) = location.line {
+        physical["region"] = json!({ "startLine": line });
+
+        if let Some(column) = location.column {
+            physical["region"]["startColumn"] = json!(column);
+        }
+    }
+
+    json!({ "physicalLocation": physical })
 }
 
 /// One notice as a notification of the run's invocation: its kind, its sentence, and its file where

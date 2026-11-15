@@ -2,8 +2,7 @@
 //!
 //! It answers its version and its interface version, and reads a project: its hand-off file, its files,
 //! its packages, its scripts' imports and where they lead, its entry points, and which export of which
-//! file is used. `graph` prints what was read, and `audit` prints a report of it, which holds no finding
-//! yet.
+//! file is used. `graph` prints what was read, and `audit` prints a report of the findings it shows.
 
 mod audit;
 mod cli;
