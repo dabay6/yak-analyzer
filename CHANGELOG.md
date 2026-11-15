@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0](https://github.com/dabay6/yak-analyzer/compare/v0.6.0...v0.7.0) (2026-11-15)
+
+
+### Features
+
+* **audit:** compare with a base commit and mark findings new or inherited ([e3788ac](https://github.com/dabay6/yak-analyzer/commit/e3788ac0f14be1b423dd337d73ab0d92e0274090))
+* **audit:** compare with a base commit and mark findings new or inherited ([37696f5](https://github.com/dabay6/yak-analyzer/commit/37696f5e8f75ef955e6e84a4b00e0d76e74e1161))
+* **audit:** end with the launcher and keep deep projects off a small stack ([3046e13](https://github.com/dabay6/yak-analyzer/commit/3046e136545c054b89b93ab62b084b6b57e4439d))
+* **audit:** follow renames and compare cycles by their edges ([5705c76](https://github.com/dabay6/yak-analyzer/commit/5705c7645d584f0f0c86c5ce67dc7ac75e581915))
+
 ## [0.6.0](https://github.com/dabay6/yak-analyzer/compare/v0.5.0...v0.6.0) (2026-11-15)
 
 
