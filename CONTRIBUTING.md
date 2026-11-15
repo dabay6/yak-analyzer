@@ -67,9 +67,15 @@ node scripts/check-floor.mjs
 - `yak-analyzer interface` prints one line of JSON: the interface version, and the hand-off
   formats the analyzer reads.
 - `yak-analyzer graph` reads the project in the folder it is started in and prints what it read,
-  as one JSON document: the packages, the files, each file's imports and where each leads, and the
+  as one JSON document: the packages, the files, each file's imports and where each leads, the
+  entry points with what made each one, the files they reach, the uses of each export, and the
   notices. `yak-analyzer graph --hand-off <file>` reads the project the hand-off file names, with
   its declarations. A run that cannot go on prints one line on standard error and exits 1.
+- `yak-analyzer audit` reads the project as `graph` does and prints one SARIF 2.1.0 report of the
+  five dead-code kinds, with the notices as the run's notifications. `yak-analyzer audit
+  --hand-off <file> --base <commit>` reads with the hand-off file's declarations, reads the base
+  commit from git as well, and marks each finding new or unchanged. A command line it refuses
+  exits 2.
 
 What `graph` prints is the builder's and the tests' view of a reading, not part of the interface
 version; its form may change. When it does, the fixtures' written-down output changes in the same

@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json};
 
 use crate::files::{File, Kind};
 use crate::glob::Glob;
-use crate::hand_off::{HandOff, leaves_its_folder};
+use crate::hand_off::HandOff;
 use crate::notice::Notice;
 use crate::packages::{Package, Packages};
 use crate::resolve::{self, Outcome, Resolution, Resolver};
@@ -339,7 +339,7 @@ fn scripted(project: &Project<'_>, entries: &mut Entries) {
 
                     for path in project
                         .resolver
-                        .package_target(package, named)
+                        .script_target(package, named)
                         .into_iter()
                         .flatten()
                     {
@@ -395,15 +395,35 @@ fn configured(project: &Project<'_>, entries: &mut Entries, notices: &mut Vec<No
                     ..source.clone()
                 };
 
-                for glob in declaration
-                    .globs(project.tree, &config.path, notices)
-                    .iter()
-                    .filter_map(|written| Glob::new(written).ok())
-                {
-                    for found in project.files.iter().filter(|file| {
-                        inside(folder, &file.path).is_some_and(|rest| glob.matches(rest))
-                    }) {
-                        entries.add(found.path.clone(), named.clone());
+                // A glob that matches no listed file is mapped back from build output, and one that
+                // matches nothing either way adds nothing, quietly (spec ENTRY-6c).
+                for written in declaration.globs(project.tree, &config.path, folder, notices) {
+                    let Ok(glob) = Glob::new(&written) else {
+                        continue;
+                    };
+                    let mut found: Vec<&str> = project
+                        .files
+                        .iter()
+                        .map(|file| file.path.as_str())
+                        .filter(|path| glob.matches(path))
+                        .collect();
+
+                    if found.is_empty() {
+                        let mapped: Vec<Glob> = mapped_globs(&written, "", project)
+                            .iter()
+                            .filter_map(|mapped| Glob::new(mapped).ok())
+                            .collect();
+
+                        found = project
+                            .files
+                            .iter()
+                            .map(|file| file.path.as_str())
+                            .filter(|path| mapped.iter().any(|glob| glob.matches(path)))
+                            .collect();
+                    }
+
+                    for path in found {
+                        entries.add(path.to_owned(), named.clone());
                     }
                 }
             }
@@ -452,10 +472,16 @@ impl<'d> Declared<'d> {
         }
     }
 
-    /// The globs a configuration file's value gives, from the folder the value is relative to: the
-    /// value where it is a literal and leaves a glob the analyzer reads, and the declaration's
-    /// `default` where it does not.
-    fn globs(&self, tree: &Tree, path: &str, notices: &mut Vec<Notice>) -> Vec<String> {
+    /// The globs a configuration file's value gives, each joined to the folder the value is relative
+    /// to and so from the root: the value where it is a literal and leaves a glob the analyzer reads,
+    /// and the declaration's `default` where it does not.
+    fn globs(
+        &self,
+        tree: &Tree,
+        path: &str,
+        folder: &str,
+        notices: &mut Vec<Notice>,
+    ) -> Vec<String> {
         let stated = tree
             .read(path)
             .ok()
@@ -471,8 +497,8 @@ impl<'d> Declared<'d> {
         for value in &stated {
             let glob = self.joined(value);
 
-            if readable(&glob) {
-                read.push(glob);
+            if let Some(resolved) = readable(&glob).then(|| resolved(folder, &glob)).flatten() {
+                read.push(resolved);
             } else {
                 notices.push(Notice::new(
                     "config-glob-not-read",
@@ -488,7 +514,7 @@ impl<'d> Declared<'d> {
         if read.is_empty() {
             self.default
                 .iter()
-                .map(|value| self.joined(value))
+                .filter_map(|value| resolved(folder, &self.joined(value)))
                 .collect()
         } else {
             read
@@ -496,19 +522,49 @@ impl<'d> Declared<'d> {
     }
 }
 
-/// Whether the analyzer reads a glob a tool's configuration file states: one KEY-5 reads, that is not
-/// absolute, does not step out with `..`, does not begin with `!`, and holds no extended pattern such as
-/// `?(…)` (spec ENTRY-6).
+/// Whether the analyzer reads a glob a tool's configuration file states: one KEY-5 reads, that does not
+/// begin with `!`, and holds no extended pattern such as `?(…)` (spec ENTRY-6). Where it may lead is
+/// `resolved`'s to say.
 fn readable(glob: &str) -> bool {
     let extended = ["?(", "*(", "+(", "@(", "!("]
         .iter()
         .any(|opening| glob.contains(opening));
 
-    !glob.is_empty()
-        && !extended
-        && !glob.starts_with('!')
-        && !leaves_its_folder(glob)
-        && Glob::new(glob).is_ok()
+    !glob.is_empty() && !extended && !glob.starts_with('!') && Glob::new(glob).is_ok()
+}
+
+/// A glob a configuration file states, joined to the folder it is relative to and so from the root, as
+/// the tool reads it: each `.` dropped and each `..` taking off the segment before it (spec ENTRY-6b,
+/// ENTRY-6d). Nothing when the glob is absolute, would leave the root, or holds a `..` after a
+/// wildcard, whose folder cannot be known.
+fn resolved(folder: &str, glob: &str) -> Option<String> {
+    let has_drive = glob.as_bytes().get(1) == Some(&b':');
+
+    if glob.starts_with('/') || has_drive {
+        return None;
+    }
+
+    let mut segments: Vec<&str> = folder
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let mut wild = false;
+
+    for segment in glob.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." if wild => return None,
+            ".." => {
+                segments.pop()?;
+            }
+            _ => {
+                wild |= segment.contains(WILDCARDS);
+                segments.push(segment);
+            }
+        }
+    }
+
+    Some(segments.join("/"))
 }
 
 /// The deepest of the folders yak's detection looked in that holds a path, from the root.
