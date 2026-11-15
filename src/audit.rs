@@ -9,7 +9,6 @@ use std::thread;
 
 use serde_json::{Value, json};
 
-use crate::INTERFACE_VERSION;
 use crate::files;
 use crate::findings::{self, Finding, Location, Rule};
 use crate::git;
@@ -18,6 +17,7 @@ use crate::notice::{self, Notice};
 use crate::reading::{self, Reading, Start};
 use crate::stop::Stop;
 use crate::tree::Tree;
+use crate::{INTERFACE_VERSION, STACK};
 
 /// The key of `partialFingerprints` that holds a finding's fingerprint, with the scheme's version in
 /// it, so that a later scheme can sit beside it (spec REPORT-3).
@@ -68,21 +68,30 @@ pub fn run(hand_off: Option<&Path>, base: Option<&str>) -> Result<String, Stop> 
     let (base_tree, base_listing) = Tree::base(root.clone(), &commit, &mut base_notices)?;
     let working_tree = Tree::working(root);
 
-    // The two sides are read at once (dead-code spec INH-4).
+    // The two sides are read at once, each on a thread with the stack every reading has (dead-code spec
+    // INH-4, LIFE-3).
     let (working, base) = thread::scope(|scope| {
-        let base = scope.spawn(|| {
-            let reading = reading::read(handed.as_ref(), &base_tree, base_listing, base_notices)?;
-            let renamed = git::renamed(base_tree.root(), &commit)?;
+        let base = thread::Builder::new()
+            .stack_size(STACK)
+            .spawn_scoped(scope, || {
+                let reading =
+                    reading::read(handed.as_ref(), &base_tree, base_listing, base_notices)?;
+                let renamed = git::renamed(base_tree.root(), &commit)?;
 
-            Ok::<_, Stop>(Base {
-                commit: commit.clone(),
-                reading,
-                renames: inherit::renames(&renamed.output),
-                renames_cut_short: renamed
-                    .warning
-                    .is_some_and(|warning| warning.contains("rename")),
+                Ok::<_, Stop>(Base {
+                    commit: commit.clone(),
+                    reading,
+                    renames: inherit::renames(&renamed.output),
+                    renames_cut_short: renamed
+                        .warning
+                        .is_some_and(|warning| warning.contains("rename")),
+                })
             })
-        });
+            .map_err(|error| {
+                Stop::new(format!(
+                    "the base cannot be read on a thread of its own ({error})"
+                ))
+            })?;
         let working = reading::read(handed.as_ref(), &working_tree, listing, notices);
         let base = base
             .join()
