@@ -484,6 +484,196 @@ fn a_configuration_file_names_entry_points_by_a_literal_a_folder_or_its_default(
     );
 }
 
+#[test]
+fn a_configuration_files_globs_are_relative_as_the_tool_reads_them_dot_and_dot_dot_included() {
+    let project = Project::new("entries-configured-relative");
+
+    project
+        .write(
+            "apps/book/.storybook/main.ts",
+            "export default {\n\
+               stories: ['../src/**/*.stories.ts', '../../../../far/*.ts', 'docs/**/../*.mdx'],\n\
+             };\n",
+        )
+        .write("apps/book/src/a.stories.ts", "")
+        .write("apps/book/src/deep/b.stories.ts", "")
+        .write(
+            "packages/a/vitest.config.ts",
+            "export default {\n\
+               test: { setupFiles: ['./setup.ts'], globalSetup: ['../../shared.mjs'] },\n\
+             };\n",
+        )
+        .write("packages/a/setup.ts", "")
+        .write("shared.mjs", "")
+        .commit();
+
+    let declarations = json!({
+        "configEntries": [
+            {
+                "file": ".storybook/main.{ts,js}",
+                "property": ["stories"],
+                "value": "globs",
+                "relativeTo": "config",
+                "default": []
+            },
+            {
+                "file": "vitest.config.{ts,js}",
+                "property": ["test", "setupFiles"],
+                "value": "globs",
+                "relativeTo": "config",
+                "default": []
+            },
+            {
+                "file": "vitest.config.{ts,js}",
+                "property": ["test", "globalSetup"],
+                "value": "globs",
+                "relativeTo": "config",
+                "default": []
+            }
+        ]
+    });
+    let file = project.hand_off(
+        &project.root,
+        &[".", "apps/book", "packages/a"],
+        stack(declarations, json!({})),
+    );
+    let document = printed(&project.run(|binary| {
+        binary.args(["--hand-off", &file]);
+    }));
+
+    // `./` names the folder the value is relative to, and a `..` climbs from it while it stays inside
+    // the root (spec ENTRY-6b, ENTRY-6d).
+    assert_eq!(
+        entries(&document),
+        [
+            ("apps/book/.storybook/main.ts", vec![configured(None)]),
+            (
+                "apps/book/src/a.stories.ts",
+                vec![configured(Some("apps/book/.storybook/main.ts"))]
+            ),
+            (
+                "apps/book/src/deep/b.stories.ts",
+                vec![configured(Some("apps/book/.storybook/main.ts"))]
+            ),
+            (
+                "packages/a/setup.ts",
+                vec![configured(Some("packages/a/vitest.config.ts"))]
+            ),
+            ("packages/a/vitest.config.ts", vec![configured(None)]),
+            (
+                "shared.mjs",
+                vec![configured(Some("packages/a/vitest.config.ts"))]
+            ),
+        ]
+    );
+
+    // A glob that would leave the root, and one with a `..` after a wildcard, are passed over.
+    assert_eq!(
+        notices(&document),
+        ["config-glob-not-read", "config-glob-not-read"]
+    );
+    assert_eq!(
+        document["notices"][0]["sentence"],
+        json!(
+            "The glob `../../../../far/*.ts` in apps/book/.storybook/main.ts is not one the analyzer reads, so \
+             it adds no entry point."
+        )
+    );
+}
+
+#[test]
+fn a_configuration_files_glob_of_build_output_names_the_source_it_is_built_from() {
+    let project = Project::new("entries-configured-built");
+
+    project
+        .write("packages/ui/package.json", r#"{ "name": "ui" }"#)
+        .write(
+            "packages/ui/tsconfig.json",
+            r#"{ "compilerOptions": { "rootDir": "src", "outDir": "out" } }"#,
+        )
+        .write(
+            "packages/ui/runner.config.mjs",
+            "export default { files: 'out/**/*.test.js' };\n",
+        )
+        .write("packages/ui/src/a.test.ts", "")
+        .write("packages/ui/src/deep/b.test.ts", "")
+        .write("packages/ui/src/c.ts", "")
+        .commit();
+
+    let declarations = json!({
+        "configEntries": [
+            {
+                "file": "runner.config.{js,mjs}",
+                "property": ["files"],
+                "value": "globs",
+                "relativeTo": "config",
+                "default": []
+            },
+            {
+                "file": "runner.config.{js,mjs}",
+                "property": ["unstated"],
+                "value": "globs",
+                "relativeTo": "config",
+                "default": ["checks/**/*.check.js"]
+            }
+        ]
+    });
+    let file = project.hand_off(
+        &project.root,
+        &[".", "packages/ui"],
+        stack(declarations, json!({})),
+    );
+    let document = printed(&project.run(|binary| {
+        binary.args(["--hand-off", &file]);
+    }));
+
+    // The tests the runner runs once built are their sources, mapped back through the package's
+    // `outDir`; a default that matches nothing adds nothing and says nothing (spec ENTRY-6c).
+    assert_eq!(
+        entries(&document),
+        [
+            ("packages/ui/runner.config.mjs", vec![configured(None)]),
+            (
+                "packages/ui/src/a.test.ts",
+                vec![configured(Some("packages/ui/runner.config.mjs"))]
+            ),
+            (
+                "packages/ui/src/deep/b.test.ts",
+                vec![configured(Some("packages/ui/runner.config.mjs"))]
+            ),
+        ]
+    );
+    assert_eq!(notices(&document), Vec::<&str>::new());
+}
+
+#[test]
+fn a_root_script_that_runs_another_packages_build_output_names_that_packages_source() {
+    let project = Project::new("entries-scripts-elsewhere");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "root", "scripts": { "docs": "node packages/a/out/run.js" } }"#,
+        )
+        .write("packages/a/package.json", r#"{ "name": "a" }"#)
+        .write(
+            "packages/a/tsconfig.json",
+            r#"{ "compilerOptions": { "rootDir": "lib", "outDir": "out" } }"#,
+        )
+        .write("packages/a/lib/run.ts", "")
+        .commit();
+
+    // The word is mapped back by the `outDir` of the package it names, not by the root's, which has
+    // none (spec ENTRY-7a).
+    assert_eq!(
+        entries(&project.graph()),
+        [(
+            "packages/a/lib/run.ts",
+            vec![named("scripts", "package.json")]
+        )]
+    );
+}
+
 /// The uses a document holds that count from an entry point: each with the file whose exports are
 /// used, the export's name, `*` for every export, and the field or declaration that made the entry
 /// point one.
