@@ -1,4 +1,4 @@
-//! The command line: what the binary was asked to do (spec RUN-1, RUN-2).
+//! The command line: what the binary was asked to do (spec RUN-1, RUN-2; dead-code spec CMD-1, CMD-2).
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -18,9 +18,12 @@ const AUDIT_COMMAND: &str = "audit";
 /// The option of `graph` and of `audit` that names the hand-off file.
 const HAND_OFF_OPTION: &str = "--hand-off";
 
+/// The option of `audit` that names the commit to compare with (dead-code spec CMD-1).
+const BASE_OPTION: &str = "--base";
+
 /// What the binary accepts, for the line that refuses anything else.
-const ACCEPTED: &str =
-    "--version, interface, graph [--hand-off <file>], and audit [--hand-off <file>]";
+const ACCEPTED: &str = "--version, interface, graph [--hand-off <file>], and audit [--hand-off <file>] \
+                        [--base <commit>]";
 
 /// One thing the binary can be asked to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -31,8 +34,12 @@ pub enum Command {
     Interface,
     /// Read the project and print what was read, with a hand-off file or without one.
     Graph { hand_off: Option<PathBuf> },
-    /// Read the project and print a report of what was found, with a hand-off file or without one.
-    Audit { hand_off: Option<PathBuf> },
+    /// Read the project and print a report of what was found, with a hand-off file or without one, and
+    /// compared with a base commit or with none.
+    Audit {
+        hand_off: Option<PathBuf>,
+        base: Option<String>,
+    },
 }
 
 /// Reads the arguments after the program's name. The error is the text of the refusal.
@@ -46,19 +53,52 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
         [GRAPH_COMMAND, HAND_OFF_OPTION, _] => Ok(Command::Graph {
             hand_off: Some(PathBuf::from(&args[2])),
         }),
-        [AUDIT_COMMAND] => Ok(Command::Audit { hand_off: None }),
-        [AUDIT_COMMAND, HAND_OFF_OPTION, _] => Ok(Command::Audit {
-            hand_off: Some(PathBuf::from(&args[2])),
-        }),
+        [AUDIT_COMMAND, ..] => audit(args),
         [] => Err(format!("nothing to do; it answers {ACCEPTED}")),
-        _ => {
-            let given = args
-                .iter()
-                .map(|arg| arg.to_string_lossy())
-                .collect::<Vec<_>>()
-                .join(" ");
+        _ => Err(refused(args)),
+    }
+}
 
-            Err(format!("cannot do `{given}`; it answers {ACCEPTED}"))
+/// `audit` and its options, each at most once, in either order. A base that begins with `-`, or holds
+/// a control character, is refused before git sees it (dead-code spec CMD-2).
+fn audit(args: &[OsString]) -> Result<Command, String> {
+    let mut hand_off = None;
+    let mut base = None;
+
+    for pair in args[1..].chunks(2) {
+        let [option, value] = pair else {
+            return Err(refused(args));
+        };
+
+        match option.to_str() {
+            Some(HAND_OFF_OPTION) if hand_off.is_none() => hand_off = Some(PathBuf::from(value)),
+            Some(BASE_OPTION) if base.is_none() => {
+                let named = value.to_string_lossy();
+
+                if named.is_empty() || named.starts_with('-') || named.chars().any(char::is_control)
+                {
+                    return Err(format!(
+                        "the base `{named}` cannot be a commit's name: it is empty, begins with `-` or holds a \
+                         control character, which git would not read as a name; name the commit another way"
+                    ));
+                }
+
+                base = Some(named.into_owned());
+            }
+            _ => return Err(refused(args)),
         }
     }
+
+    Ok(Command::Audit { hand_off, base })
+}
+
+/// The refusal of a command line the binary does not answer.
+fn refused(args: &[OsString]) -> String {
+    let given = args
+        .iter()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    format!("cannot do `{given}`; it answers {ACCEPTED}")
 }

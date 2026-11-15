@@ -2,8 +2,6 @@
 //! package each file belongs to (spec PACK-1 to PACK-6).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::path::Path;
 
 use serde_json::{Map, Value};
 use yaml_rust2::{Yaml, YamlLoader};
@@ -12,6 +10,7 @@ use crate::files::{File, Kind};
 use crate::glob::Glob;
 use crate::notice::Notice;
 use crate::stop::{Fault, Stop};
+use crate::tree::Tree;
 
 /// The workspace's list that pnpm reads, at the root.
 const PNPM_LIST: &str = "pnpm-workspace.yaml";
@@ -70,11 +69,21 @@ pub struct Loaded {
     read: Vec<(String, Map<String, Value>)>,
     /// The workspace's list that pnpm reads, where the list holds one.
     pnpm: Option<Yaml>,
+    /// Whether a file whose field does not have its form is skipped rather than stopping the run, as at
+    /// the base (dead-code spec COMMIT-4).
+    skipping: bool,
 }
 
 /// Reads every `package.json` that makes a package, then the workspace's list. `data` is the files
-/// declared as data, whose `package.json` makes no package (spec KEY-4).
-pub fn load(root: &Path, files: &[File], data: &BTreeSet<String>) -> Result<Loaded, Stop> {
+/// declared as data, whose `package.json` makes no package (spec KEY-4). At the base, a file that
+/// cannot be read is skipped with a notice: a `package.json` makes no package, and the workspace's list
+/// adds no folder (dead-code spec COMMIT-4).
+pub fn load(
+    tree: &Tree,
+    files: &[File],
+    data: &BTreeSet<String>,
+    notices: &mut Vec<Notice>,
+) -> Result<Loaded, Stop> {
     let manifests: Vec<&File> = files
         .iter()
         .filter(|file| file.kind == Kind::Manifest && !data.contains(&file.path))
@@ -85,16 +94,41 @@ pub fn load(root: &Path, files: &[File], data: &BTreeSet<String>) -> Result<Load
     let mut read: Vec<(String, Map<String, Value>)> = Vec::with_capacity(manifests.len());
 
     for manifest in &manifests {
-        read.push((folder_of(&manifest.path), object(root, &manifest.path)?));
+        if let Some(fields) = kept(tree, &manifest.path, object(tree, &manifest.path), notices)? {
+            read.push((folder_of(&manifest.path), fields));
+        }
     }
 
     let pnpm = if files.iter().any(|file| file.path == PNPM_LIST) && !data.contains(PNPM_LIST) {
-        Some(yaml(root)?)
+        kept(tree, PNPM_LIST, yaml(tree), notices)?
     } else {
         None
     };
 
-    Ok(Loaded { read, pnpm })
+    Ok(Loaded {
+        read,
+        pnpm,
+        skipping: tree.is_base(),
+    })
+}
+
+/// What reading a file gave: its content, or at the base, where a file that cannot be read is skipped
+/// with a notice, none (dead-code spec COMMIT-4).
+fn kept<T>(
+    tree: &Tree,
+    file: &str,
+    read: Result<T, Stop>,
+    notices: &mut Vec<Notice>,
+) -> Result<Option<T>, Stop> {
+    match read {
+        Ok(read) => Ok(Some(read)),
+        Err(stop) if tree.is_base() => {
+            notices.push(Notice::skipped(file, &stop));
+
+            Ok(None)
+        }
+        Err(stop) => Err(stop),
+    }
 }
 
 impl Loaded {
@@ -109,6 +143,15 @@ impl Loaded {
     ) -> Result<Packages, Fault> {
         let mut faults = Vec::new();
         let mut names: BTreeMap<&str, Fields> = BTreeMap::new();
+        // At the base, a fault skips its file with a notice rather than stopping the run (dead-code spec
+        // COMMIT-4).
+        let mut fault = |file: &str, stop: Stop| {
+            if self.skipping {
+                notices.push(Notice::skipped(file, &stop));
+            } else {
+                faults.push(Fault::new(file, stop));
+            }
+        };
 
         for (folder, fields) in &self.read {
             let file = manifest_path(folder);
@@ -117,7 +160,7 @@ impl Loaded {
                 Ok(read) => {
                     names.insert(folder, read);
                 }
-                Err(stop) => faults.push(Fault::new(file, stop)),
+                Err(stop) => fault(&file, stop),
             }
         }
 
@@ -127,14 +170,14 @@ impl Loaded {
         if let Some((_, fields)) = self.read.iter().find(|(folder, _)| folder == ".") {
             match workspaces(fields) {
                 Ok(patterns) => sources.push(("package.json", patterns)),
-                Err(stop) => faults.push(Fault::new("package.json", stop)),
+                Err(stop) => fault("package.json", stop),
             }
         }
 
         if let Some(pnpm) = &self.pnpm {
             match pnpm_packages(pnpm) {
                 Ok(patterns) => sources.push((PNPM_LIST, patterns)),
-                Err(stop) => faults.push(Fault::new(PNPM_LIST, stop)),
+                Err(stop) => fault(PNPM_LIST, stop),
             }
         }
 
@@ -147,7 +190,7 @@ impl Loaded {
                     included.extend(include);
                     excluded.extend(exclude);
                 }
-                Err(stop) => faults.push(Fault::new(*file, stop)),
+                Err(stop) => fault(file, stop),
             }
         }
 
@@ -243,22 +286,22 @@ fn manifest_path(folder: &str) -> String {
 }
 
 /// The content of a file, with a byte-order mark at its start passed over.
-fn text(root: &Path, path: &str) -> Result<String, String> {
-    let bytes = fs::read(root.join(path)).map_err(|error| error.to_string())?;
+fn text(tree: &Tree, path: &str) -> Result<String, String> {
+    let bytes = tree.read(path).map_err(|error| error.to_string())?;
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
 
     String::from_utf8(bytes.to_vec()).map_err(|_| "it is not valid UTF-8".to_owned())
 }
 
 /// A `package.json` read as a JSON object (spec PACK-2).
-fn object(root: &Path, path: &str) -> Result<Map<String, Value>, Stop> {
+fn object(tree: &Tree, path: &str) -> Result<Map<String, Value>, Stop> {
     let refused = |why: String| {
         Stop::new(format!(
             "the package.json {path} cannot be read as a JSON object ({why}); fix it, or declare it as data \
              if it is broken on purpose"
         ))
     };
-    let content = text(root, path).map_err(refused)?;
+    let content = text(tree, path).map_err(refused)?;
 
     match serde_json::from_str::<Value>(&content) {
         Ok(Value::Object(fields)) => Ok(fields),
@@ -274,13 +317,13 @@ fn object(root: &Path, path: &str) -> Result<Map<String, Value>, Stop> {
 }
 
 /// The workspace's list that pnpm reads, as YAML (spec PACK-3).
-fn yaml(root: &Path) -> Result<Yaml, Stop> {
+fn yaml(tree: &Tree) -> Result<Yaml, Stop> {
     let refused = |why: String| {
         Stop::new(format!(
             "the workspace's list {PNPM_LIST} cannot be read ({why}); fix it, or declare it as data"
         ))
     };
-    let content = text(root, PNPM_LIST).map_err(refused)?;
+    let content = text(tree, PNPM_LIST).map_err(refused)?;
     let documents =
         YamlLoader::load_from_str(&content).map_err(|error| refused(error.to_string()))?;
 

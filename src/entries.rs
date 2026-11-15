@@ -5,8 +5,6 @@
 //! `internal` declarations, and the configuration files `configEntries` names (spec ENTRY-6, ENTRY-7).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
@@ -18,6 +16,7 @@ use crate::packages::{Package, Packages};
 use crate::resolve::{self, Outcome, Resolution, Resolver};
 use crate::stop::Stop;
 use crate::tools;
+use crate::tree::Tree;
 use crate::tsconfig::Configs;
 
 /// The endings of build output an `entries` glob may end in, a type declaration's first, since `.d.ts`
@@ -102,8 +101,8 @@ impl Entries {
 
 /// What the entry points are read from.
 pub struct Project<'p> {
-    /// The root, from which a configuration file's content is read.
-    pub root: &'p Path,
+    /// The tree a configuration file's content is read from.
+    pub tree: &'p Tree,
     /// The file list.
     pub files: &'p [File],
     /// The packages.
@@ -397,7 +396,7 @@ fn configured(project: &Project<'_>, entries: &mut Entries, notices: &mut Vec<No
                 };
 
                 for glob in declaration
-                    .globs(project.root, &config.path, notices)
+                    .globs(project.tree, &config.path, notices)
                     .iter()
                     .filter_map(|written| Glob::new(written).ok())
                 {
@@ -456,8 +455,9 @@ impl<'d> Declared<'d> {
     /// The globs a configuration file's value gives, from the folder the value is relative to: the
     /// value where it is a literal and leaves a glob the analyzer reads, and the declaration's
     /// `default` where it does not.
-    fn globs(&self, root: &Path, path: &str, notices: &mut Vec<Notice>) -> Vec<String> {
-        let stated = fs::read(root.join(path))
+    fn globs(&self, tree: &Tree, path: &str, notices: &mut Vec<Notice>) -> Vec<String> {
+        let stated = tree
+            .read(path)
             .ok()
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .and_then(|text| {

@@ -89,6 +89,25 @@ pub struct Location {
     pub column: Option<usize>,
 }
 
+/// Whether a finding is new on the branch or the base has it too (spec REPORT-1, INH-1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Baseline {
+    /// The branch made it.
+    New,
+    /// The base has it too: it is inherited.
+    Unchanged,
+}
+
+impl Baseline {
+    /// Its name as SARIF's `baselineState` writes it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Unchanged => "unchanged",
+        }
+    }
+}
+
 /// One finding.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Finding {
@@ -102,6 +121,8 @@ pub struct Finding {
     pub related: Vec<Location>,
     /// The digest that names the same finding on the base and on the branch (spec REPORT-3).
     pub fingerprint: String,
+    /// Whether it is new or inherited, with a base; none without one.
+    pub baseline: Option<Baseline>,
 }
 
 impl Finding {
@@ -113,6 +134,7 @@ impl Finding {
             location,
             related: Vec::new(),
             fingerprint: fingerprint(rule, parts),
+            baseline: None,
         }
     }
 }
@@ -149,11 +171,17 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
     not_reported(reading, &mut notices);
     computed(reading, &mut notices);
 
+    sort(&mut found);
+
+    (found, notices)
+}
+
+/// Puts findings in the report's order: by rule, then path, line and column, then fingerprint (spec
+/// REPORT-1).
+pub fn sort(found: &mut [Finding]) {
     found.sort_by(|a, b| {
         (a.rule, &a.location, &a.fingerprint).cmp(&(b.rule, &b.location, &b.fingerprint))
     });
-
-    (found, notices)
 }
 
 /// Whether the three kinds that depend on entry points are reported for a file: its package's own

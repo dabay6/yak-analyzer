@@ -2,7 +2,8 @@
 //!
 //! It answers its version and its interface version, and reads a project: its hand-off file, its files,
 //! its packages, its scripts' imports and where they lead, its entry points, and which export of which
-//! file is used. `graph` prints what was read, and `audit` prints a report of the findings it shows.
+//! file is used. `graph` prints what was read, and `audit` prints a report of the findings it shows,
+//! compared with a base commit where it is given one.
 
 mod audit;
 mod cli;
@@ -15,6 +16,7 @@ mod glob;
 mod graph;
 mod hand_off;
 mod imports;
+mod inherit;
 mod marks;
 mod notice;
 mod packages;
@@ -24,6 +26,7 @@ mod resolve;
 mod scripts;
 mod stop;
 mod tools;
+mod tree;
 mod tsconfig;
 mod uses;
 
@@ -74,10 +77,10 @@ fn run() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Command::Graph { hand_off }) => {
-            ended(reading::read(hand_off.as_deref()).map(graph::printed))
+            ended(reading::working(hand_off.as_deref()).map(graph::printed))
         }
-        Ok(Command::Audit { hand_off }) => {
-            ended(reading::read(hand_off.as_deref()).map(audit::printed))
+        Ok(Command::Audit { hand_off, base }) => {
+            ended(audit::run(hand_off.as_deref(), base.as_deref()))
         }
         Err(refusal) => {
             eprintln!("{}", stop::line(&refusal));
