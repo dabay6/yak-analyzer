@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.0](https://github.com/dabay6/yak-analyzer/compare/v0.5.0...v0.6.0) (2026-11-15)
+
+
+### Features
+
+* **audit:** add the audit command and its SARIF report ([0a2244c](https://github.com/dabay6/yak-analyzer/commit/0a2244cd330a12033e742234b0dd76c4e4458c7a))
+* **audit:** add the audit command and report the five dead-code kinds ([a0b4dce](https://github.com/dabay6/yak-analyzer/commit/a0b4dcec4e9b86954fc341e2eee666e71991568c))
+* **audit:** report unresolved imports and circular dependencies ([101044e](https://github.com/dabay6/yak-analyzer/commit/101044e14912bcbf7826fc85a103cffdc31c7315))
+* **audit:** report unused files, exports and types ([71fc1be](https://github.com/dabay6/yak-analyzer/commit/71fc1be6d76f6455527772dea0ed1e355a6b2224))
+
 ## [0.5.0](https://github.com/dabay6/yak-analyzer/compare/v0.4.0...v0.5.0) (2026-11-14)
 
 
