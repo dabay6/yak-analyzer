@@ -72,10 +72,15 @@ pub fn run(hand_off: Option<&Path>, base: Option<&str>) -> Result<String, Stop> 
     let (working, base) = thread::scope(|scope| {
         let base = scope.spawn(|| {
             let reading = reading::read(handed.as_ref(), &base_tree, base_listing, base_notices)?;
+            let renamed = git::renamed(base_tree.root(), &commit)?;
 
             Ok::<_, Stop>(Base {
                 commit: commit.clone(),
                 reading,
+                renames: inherit::renames(&renamed.output),
+                renames_cut_short: renamed
+                    .warning
+                    .is_some_and(|warning| warning.contains("rename")),
             })
         });
         let working = reading::read(handed.as_ref(), &working_tree, listing, notices);
@@ -96,7 +101,7 @@ pub fn printed(mut reading: Reading, base: Option<Base>) -> String {
     reading.notices.extend(notices);
 
     if let Some(base) = base {
-        let compared = inherit::mark(&mut found, &base);
+        let compared = inherit::mark(&reading, &mut found, &base);
 
         reading.notices.extend(compared);
         reading

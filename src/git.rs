@@ -1,4 +1,5 @@
-//! Starts git, and only to read (spec RUN-6, RUN-6a, DEP-2; dead-code spec CMD-2, COMMIT-2, LIFE-2).
+//! Starts git, and only to read (spec RUN-6, RUN-6a, DEP-2; dead-code spec CMD-2, COMMIT-2, INH-2,
+//! LIFE-2).
 //!
 //! How git is started was settled by a trial, whose report is in the work item's report folder:
 //! every start gets the settings below and loses the variables by which a caller's environment could
@@ -55,6 +56,10 @@ const REPOSITORY_VARIABLES: [&str; 15] = [
 /// The variable that tells git never to fetch an object a partial clone lacks, set for every start
 /// (dead-code spec COMMIT-2). A git older than `NO_LAZY_FETCH` passes it over.
 const NO_LAZY_FETCH_VARIABLE: &str = "GIT_NO_LAZY_FETCH";
+
+/// How many files git compares when it looks for renames, whatever the user's or the repository's
+/// settings say: git's own default (dead-code spec INH-2).
+pub const RENAME_LIMIT: u32 = 1000;
 
 /// What git printed, and the first line of a warning it gave while succeeding.
 pub struct Answer {
@@ -219,6 +224,27 @@ pub fn older_than(wanted: (u32, u32)) -> Option<String> {
 /// path from the root (dead-code spec COMMIT-2).
 pub fn stored(root: &Path, commit: &str) -> Result<Answer, Stop> {
     read(root, &["ls-tree", "-r", "-z", commit])
+}
+
+/// The files renamed between a commit and the working tree, under the root, as git finds them with its
+/// own rename detection and its default similarity (dead-code spec INH-2).
+pub fn renamed(root: &Path, commit: &str) -> Result<Answer, Stop> {
+    let limit = format!("-l{RENAME_LIMIT}");
+
+    read(
+        root,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--name-status",
+            "-z",
+            "--relative",
+            "-M",
+            &limit,
+            commit,
+            "--",
+        ],
+    )
 }
 
 /// A git that hands out the content of one stored object after another, started once for a whole

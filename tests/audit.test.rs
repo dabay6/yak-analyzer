@@ -1253,3 +1253,118 @@ fn a_partial_clone_reads_its_base_with_a_git_that_never_fetches_and_stops_with_a
         assert!(line.contains("2.44"), "{line}");
     }
 }
+
+#[test]
+fn a_renamed_files_findings_are_inherited_under_its_new_path() {
+    let project = branched(
+        "base-renames",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            ("src/index.ts", "import { kept } from './kept';\nkept();\n"),
+            (
+                "src/kept.ts",
+                "export const kept = (): void => {};\nexport const spare = 1;\n",
+            ),
+            ("src/moved.ts", "export const moved = 1;\n"),
+            ("src/staged.ts", "export const staged = 1;\n"),
+            ("src/copied.ts", "export const copied = 1;\n"),
+        ],
+    );
+
+    // Renamed in a commit, and the import that names it changed with it; and moved to a new folder.
+    fs::create_dir_all(project.root.join("src/lib")).expect("the folder can be made");
+    project.git(&["mv", "src/kept.ts", "src/held.ts"]);
+    project.git(&["mv", "src/moved.ts", "src/lib/moved.ts"]);
+    project
+        .write("src/index.ts", "import { kept } from './held';\nkept();\n")
+        .commit();
+    // Renamed and staged, not committed.
+    project.git(&["mv", "src/staged.ts", "src/staged-now.ts"]);
+    // Removed, and the same content written again as an untracked file, which git cannot pair with it.
+    project.git(&["rm", "--quiet", "src/copied.ts"]);
+    project.write("src/copy.ts", "export const copied = 1;\n");
+
+    let run = audited(&project, &["--base", "main"]);
+
+    // Before fingerprints are compared, each base path git found renamed takes its new path (spec
+    // INH-2, FIX-1 pattern 22).
+    assert_eq!(
+        states(&run),
+        [
+            ("unused-file", "src/copy.ts", None, Some("new")),
+            ("unused-file", "src/lib/moved.ts", None, Some("unchanged")),
+            ("unused-file", "src/staged-now.ts", None, Some("unchanged")),
+            ("unused-export", "src/held.ts", Some(2), Some("unchanged")),
+        ]
+    );
+}
+
+#[test]
+fn a_cycle_the_base_has_is_unchanged_and_one_the_branch_joined_or_grew_is_new() {
+    let project = branched(
+        "base-cycles",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            (
+                "src/index.ts",
+                "import './a';\nimport './c';\nimport './p';\n",
+            ),
+            ("src/a.ts", "import './b';\nexport {};\n"),
+            ("src/b.ts", "import './a';\nexport {};\n"),
+            ("src/c.ts", "import './d';\nexport {};\n"),
+            ("src/d.ts", "import './c';\nexport {};\n"),
+            ("src/p.ts", "import './q';\nexport {};\n"),
+            ("src/q.ts", "import './r';\nexport {};\n"),
+            ("src/r.ts", "import './p';\nexport {};\n"),
+        ],
+    );
+
+    // The branch rewrites a specifier without changing where it leads, has a new file join a cycle,
+    // and adds an import inside another (spec FIX-1 pattern 18).
+    project
+        .write("src/b.ts", "import './a.js';\nexport {};\n")
+        .write("src/d.ts", "import './c';\nimport './x';\nexport {};\n")
+        .write("src/x.ts", "import './c';\nexport {};\n")
+        .write("src/q.ts", "import './r';\nimport './p';\nexport {};\n")
+        .commit();
+
+    let run = audited(&project, &["--base", "main"]);
+    let cycles: Vec<_> = states(&run)
+        .into_iter()
+        .filter(|(rule, ..)| *rule == "circular-dependency")
+        .collect();
+
+    // A cycle is inherited when one set of the base holds all its files and the branch added no edge
+    // between them; otherwise it is new, at the first import that adds one (spec INH-3).
+    assert_eq!(
+        cycles,
+        [
+            (
+                "circular-dependency",
+                "src/a.ts",
+                Some(1),
+                Some("unchanged")
+            ),
+            ("circular-dependency", "src/d.ts", Some(2), Some("new")),
+            ("circular-dependency", "src/q.ts", Some(2), Some("new")),
+        ]
+    );
+    assert_eq!(
+        message(&run, "circular-dependency", "src/d.ts"),
+        "These files import each other in a loop: `src/c.ts` → `src/d.ts` → `src/c.ts`. The loop is part \
+         of a set of 3 files that each reach all the others. The branch added the import of `./x` on line \
+         2 of `src/d.ts`, which leads to `src/x.ts`."
+    );
+    assert_eq!(
+        message(&run, "circular-dependency", "src/q.ts"),
+        "These files import each other in a loop: `src/p.ts` → `src/q.ts` → `src/p.ts`. The loop is part \
+         of a set of 3 files that each reach all the others. The branch added the import of `./p` on line \
+         2 of `src/q.ts`, which leads to `src/p.ts`."
+    );
+}
