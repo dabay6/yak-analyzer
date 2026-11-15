@@ -410,7 +410,7 @@ fn watching(binary: u32) -> Command {
 }
 
 /// How many git processes the binary with the process id given started, and their own, are still
-/// running.
+/// running, leaving out any that have ended and wait to be reaped.
 fn gits_running(binary: u32) -> usize {
     let output = if cfg!(windows) {
         Command::new("powershell")
@@ -427,10 +427,14 @@ fn gits_running(binary: u32) -> usize {
             ])
             .output()
     } else {
+        // A git that has ended is not running, though it is still listed, as a zombie, until it is
+        // reaped: in a container whose first process reaps nothing, it stays one (state `Z`).
         Command::new("sh")
             .args([
                 "-c",
-                &format!("ps -A -o pgid=,comm= | grep -c '^ *{binary} .*git' || true"),
+                &format!(
+                    "ps -A -o pgid=,stat=,comm= | awk '$1 == {binary} && $2 !~ /^Z/ && $3 ~ /git/' | wc -l"
+                ),
             ])
             .output()
     }
