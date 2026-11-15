@@ -59,6 +59,10 @@ path = "tests/pages.test.rs"
 name = "entries"
 path = "tests/entries.test.rs"
 
+[[test]]
+name = "audit"
+path = "tests/audit.test.rs"
+
 [dependencies]
 # Parse scripts into syntax trees, walk them, and tie each reference to the binding it names
 # (`oxc_semantic`, spec USE-1); released together, so pinned together (spec AN-2, DEP-3).
@@ -84,5 +88,6 @@ same-file = "=1.0.6"
 yaml-rust2 = { version = "=0.13.0", default-features = false }
 
 [dev-dependencies]
-# Checks the tests' hand-off files against the copy of yakshaver's schema. Never part of the binary.
+# Checks the tests' hand-off files against the copy of yakshaver's schema, and the reports `audit`
+# prints against the copy of SARIF's (spec FIX-3). Never part of the binary.
 jsonschema = { version = "=0.61.1", default-features = false }

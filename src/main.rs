@@ -1,13 +1,16 @@
 //! `yak-analyzer`: a static analyzer for TypeScript and JavaScript, built for yakshaver.
 //!
-//! It answers its version and its interface version, and reads a project: so far its hand-off file, its
-//! files, its packages, its scripts' imports and where they lead, its entry points, and which export of
-//! which file is used. It reports no findings yet.
+//! It answers its version and its interface version, and reads a project: its hand-off file, its files,
+//! its packages, its scripts' imports and where they lead, its entry points, and which export of which
+//! file is used. `graph` prints what was read, and `audit` prints a report of it, which holds no finding
+//! yet.
 
+mod audit;
 mod cli;
 mod declarations;
 mod entries;
 mod files;
+mod findings;
 mod git;
 mod glob;
 mod graph;
@@ -17,6 +20,7 @@ mod marks;
 mod notice;
 mod packages;
 mod pages;
+mod reading;
 mod resolve;
 mod scripts;
 mod stop;
@@ -30,6 +34,7 @@ use std::panic;
 use std::process::ExitCode;
 
 use cli::Command;
+use stop::Stop;
 
 /// The interface version: what yak and the analyzer must agree on (spec RUN-7).
 const INTERFACE_VERSION: u64 = 1;
@@ -69,22 +74,33 @@ fn run() -> ExitCode {
 
             ExitCode::SUCCESS
         }
-        Ok(Command::Graph { hand_off }) => match graph::read(hand_off.as_deref()) {
-            Ok(document) => {
-                println!("{document}");
-
-                ExitCode::SUCCESS
-            }
-            Err(stopped) => {
-                eprintln!("{}", stopped.line());
-
-                ExitCode::from(stop::STOPPED)
-            }
-        },
+        Ok(Command::Graph { hand_off }) => {
+            ended(reading::read(hand_off.as_deref()).map(graph::printed))
+        }
+        Ok(Command::Audit { hand_off }) => {
+            ended(reading::read(hand_off.as_deref()).map(audit::printed))
+        }
         Err(refusal) => {
             eprintln!("{}", stop::line(&refusal));
 
             ExitCode::from(stop::REFUSED)
+        }
+    }
+}
+
+/// Ends a run that reads a project: the document it made, on standard output, or the one line of a
+/// run that could not go on, on standard error (spec RUN-3, CMD-3).
+fn ended(document: Result<String, Stop>) -> ExitCode {
+    match document {
+        Ok(document) => {
+            println!("{document}");
+
+            ExitCode::SUCCESS
+        }
+        Err(stopped) => {
+            eprintln!("{}", stopped.line());
+
+            ExitCode::from(stop::STOPPED)
         }
     }
 }

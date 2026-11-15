@@ -1,4 +1,5 @@
-//! Starts the built binary and checks its commands and how it refuses (spec RUN-1, RUN-2, RUN-3, RUN-7).
+//! Starts the built binary and checks its commands and how it refuses (spec RUN-1, RUN-2, RUN-3, RUN-7;
+//! dead-code spec CMD-1, CMD-3, CMD-5).
 
 use std::fs;
 use std::path::Path;
@@ -72,14 +73,59 @@ fn graph_without_a_hand_off_file_prints_one_document_and_says_so_in_a_notice() {
 }
 
 #[test]
+fn audit_without_a_hand_off_file_prints_one_sarif_report_and_exits_zero() {
+    // An empty repository holds nothing to find: the report still names the tool and lists the rules.
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-audit");
+    let _ = fs::remove_dir_all(&root);
+
+    fs::create_dir_all(&root).expect("the test's folder can be made");
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&root)
+            .status()
+            .expect("git starts")
+            .success()
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yak-analyzer"))
+        .arg("audit")
+        .current_dir(&root)
+        .output()
+        .expect("the binary starts");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("audit prints JSON");
+    let run = &report["runs"][0];
+    let notifications = &run["invocations"][0]["toolExecutionNotifications"];
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(report["version"], json!("2.1.0"));
+    assert_eq!(report["runs"].as_array().map(Vec::len), Some(1));
+    assert_eq!(run["tool"]["driver"]["name"], json!("yak-analyzer"));
+    assert_eq!(
+        run["tool"]["driver"]["rules"].as_array().map(Vec::len),
+        Some(5)
+    );
+    assert_eq!(run["results"], json!([]));
+    assert_eq!(notifications.as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        notifications[0]["descriptor"]["id"],
+        json!("no-hand-off-file")
+    );
+}
+
+#[test]
 fn refuses_anything_else_with_one_line_on_standard_error() {
-    let cases: [&[&str]; 6] = [
+    // `audit` takes no base yet: reading a commit comes with the plan after this one.
+    let cases: [&[&str]; 8] = [
         &["analyze"],
         &["--version", "extra"],
         &["--help"],
         &["interface", "extra"],
         &["graph", "extra"],
         &["graph", "--base", "main"],
+        &["audit", "extra"],
+        &["audit", "--base", "main"],
     ];
 
     for args in cases {
@@ -92,7 +138,7 @@ fn refuses_anything_else_with_one_line_on_standard_error() {
         assert!(error.starts_with("yak-analyzer: cannot do `"), "{args:?}");
         assert!(error.contains(&args.join(" ")), "{args:?}");
         assert!(
-            error.contains("--version, interface, and graph"),
+            error.contains("--version, interface, graph [--hand-off <file>], and audit"),
             "{args:?}"
         );
     }
@@ -106,7 +152,7 @@ fn refuses_no_argument_at_all_the_same_way() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert_eq!(error.lines().count(), 1);
-    assert!(error.contains("--version, interface, and graph"));
+    assert!(error.contains("--version, interface, graph [--hand-off <file>], and audit"));
 }
 
 #[test]
