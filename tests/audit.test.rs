@@ -601,3 +601,221 @@ fn a_fingerprint_names_a_finding_by_its_parts_and_never_by_its_line() {
     assert_eq!(found(&after)[1], ("unused-export", "src/a.ts", Some(2)));
     assert_eq!(fingerprints(&after), printed);
 }
+
+#[test]
+fn reports_each_import_that_leads_to_no_file_in_any_package() {
+    let project = Project::new("audit-unresolved");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/index.ts", "dependencies": { "left-pad": "1.0.0" } }"#,
+        )
+        .write(
+            "src/index.ts",
+            "import './missing';\nimport 'left-pad';\nimport 'node:fs';\nimport './missing';\n\
+             const name = 'x';\nawait import(name);\n",
+        )
+        .write("src/env.d.ts", "import './nowhere';\n")
+        .write("src/generated/api.ts", "import './nowhere';\n")
+        .write("tools/package.json", r#"{ "name": "tools" }"#)
+        .write("tools/run.ts", "require('./gone');\n")
+        .commit();
+
+    let hand_off = project.hand_off(
+        &project.root,
+        &["."],
+        stack(json!({}), json!({ "generated": ["src/generated/**"] })),
+    );
+    let run = audit(&project, Some(&hand_off));
+
+    // Each import that leads nowhere is one finding at its line, in a package detection looked in or
+    // not; one of a package, a built-in module or a computed specifier is none, and nor is one in a type
+    // declaration file or a generated file. Two of one specifier in one file share a fingerprint (spec
+    // KIND-3, REPORT-3).
+    let unresolved: Vec<_> = found(&run)
+        .into_iter()
+        .filter(|(rule, _, _)| *rule == "unresolved-import")
+        .collect();
+
+    assert_eq!(
+        unresolved,
+        [
+            ("unresolved-import", "src/index.ts", Some(1)),
+            ("unresolved-import", "src/index.ts", Some(4)),
+            ("unresolved-import", "tools/run.ts", Some(1)),
+        ]
+    );
+    assert_eq!(
+        message(&run, "unresolved-import", "tools/run.ts"),
+        "The import of `./gone` leads to no file, no package and no built-in module."
+    );
+
+    let printed = fingerprints(&run);
+    let first = found(&run)
+        .iter()
+        .position(|(rule, _, _)| *rule == "unresolved-import")
+        .expect("an unresolved import");
+
+    assert_eq!(printed[first], printed[first + 1]);
+    assert_ne!(printed[first], printed[first + 2]);
+}
+
+#[test]
+fn reports_each_set_of_files_that_load_each_other_once_over_static_imports_alone() {
+    let project = Project::new("audit-cycles");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/index.ts" }"#,
+        )
+        .write(
+            "src/index.ts",
+            "import './a';\nimport './lazy';\nimport './typed';\nimport './self';\nimport './one';\n",
+        )
+        // A static cycle of three, with a shorter way back from `b`.
+        .write(
+            "src/a.ts",
+            "export const a = 1;\nimport { b } from './b';\nconsole.log(b);\n",
+        )
+        .write(
+            "src/b.ts",
+            "import './c';\nexport { a } from './a';\nexport const b = 2;\n",
+        )
+        .write(
+            "src/c.ts",
+            "const loaded = require('./b');\nconsole.log(loaded);\n",
+        )
+        // A loop closed only by `import()`, or only by imports of types, loads nothing in a loop.
+        .write("src/lazy.ts", "import './lazy-back';\n")
+        .write("src/lazy-back.ts", "await import('./lazy');\n")
+        .write("src/typed.ts", "import './typed-back';\nexport type T = 1;\n")
+        .write(
+            "src/typed-back.ts",
+            "import type { T } from './typed';\nimport { type T as U } from './typed';\n\
+             export type { T } from './typed';\nexport type V = [T, U];\n",
+        )
+        // A file that imports itself.
+        .write("src/self.ts", "import './self';\n")
+        // A loop through a type declaration file is none.
+        .write("src/one.ts", "import './two';\n")
+        .write("src/two.d.ts", "import './one';\n")
+        .commit();
+
+    let run = audit(&project, None);
+    let cycles: Vec<&Value> = run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .filter(|result| result["ruleId"] == json!("circular-dependency"))
+        .collect();
+    let related = |result: &Value| -> Vec<(String, u64)> {
+        result["relatedLocations"]
+            .as_array()
+            .map(|locations| {
+                locations
+                    .iter()
+                    .map(|location| {
+                        let place = &location["physicalLocation"];
+
+                        (
+                            place["artifactLocation"]["uri"]
+                                .as_str()
+                                .expect("a file")
+                                .to_owned(),
+                            place["region"]["startLine"].as_u64().expect("a line"),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    // One finding for each set, at the first import of its first file by path that loads another file
+    // of the set; the set's other files are related, each at its first such import. The message names
+    // the shortest loop through the first file (spec KIND-4, FIX-1 pattern 18).
+    assert_eq!(
+        found(&run)
+            .into_iter()
+            .filter(|(rule, _, _)| *rule == "circular-dependency")
+            .collect::<Vec<_>>(),
+        [
+            ("circular-dependency", "src/a.ts", Some(2)),
+            ("circular-dependency", "src/self.ts", Some(1)),
+        ]
+    );
+    assert_eq!(
+        related(cycles[0]),
+        [("src/b.ts".to_owned(), 1), ("src/c.ts".to_owned(), 1)]
+    );
+    assert_eq!(
+        cycles[0]["message"]["text"],
+        json!(
+            "These files import each other in a loop: `src/a.ts` → `src/b.ts` → `src/a.ts`. The loop is part \
+             of a set of 3 files that each reach all the others."
+        )
+    );
+    assert_eq!(related(cycles[1]), []);
+    assert_eq!(
+        cycles[1]["message"]["text"],
+        json!("These files import each other in a loop: `src/self.ts` → `src/self.ts`.")
+    );
+
+    // An import all of whose names are marked `type` brings in types alone, as `graph` prints it.
+    let document = project.graph();
+    let typed_back = document["files"]
+        .as_array()
+        .expect("a list of files")
+        .iter()
+        .find(|file| file["path"] == json!("src/typed-back.ts"))
+        .expect("the file is listed");
+
+    assert_eq!(
+        typed_back["imports"]
+            .as_array()
+            .expect("a list of imports")
+            .iter()
+            .map(|import| import["typeOnly"].as_bool().expect("a flag"))
+            .collect::<Vec<bool>>(),
+        [true, true, true]
+    );
+}
+
+#[test]
+fn names_ten_files_of_a_long_loop_and_how_many_more() {
+    let project = Project::new("audit-long-cycle");
+
+    project.write(
+        "package.json",
+        r#"{ "name": "app", "main": "./src/m00.ts" }"#,
+    );
+
+    for link in 0..12 {
+        project.write(
+            &format!("src/m{link:02}.ts"),
+            &format!("import './m{:02}';\n", (link + 1) % 12),
+        );
+    }
+
+    project.commit();
+
+    let run = audit(&project, None);
+
+    // A loop of twelve files names the first ten, then how many more, then the first again (spec
+    // KIND-4).
+    assert_eq!(
+        run["results"][0]["message"]["text"],
+        json!(
+            "These files import each other in a loop: `src/m00.ts` → `src/m01.ts` → `src/m02.ts` → \
+             `src/m03.ts` → `src/m04.ts` → `src/m05.ts` → `src/m06.ts` → `src/m07.ts` → `src/m08.ts` → \
+             `src/m09.ts` → 2 more → `src/m00.ts`."
+        )
+    );
+    assert_eq!(
+        run["results"][0]["relatedLocations"]
+            .as_array()
+            .map(Vec::len),
+        Some(11)
+    );
+}

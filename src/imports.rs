@@ -87,7 +87,8 @@ pub struct Import {
     pub specifier: String,
     /// How it is written.
     pub form: Form,
-    /// Whether it brings in types alone: `import type`, `export type`, or a type import.
+    /// Whether it brings in types alone: `import type`, `export type`, a type import, or an `import`
+    /// or `export … from` all of whose names are marked `type`.
     pub type_only: bool,
     /// The line it begins on, counted from one.
     pub line: usize,
@@ -649,10 +650,21 @@ fn is_reference(expression: &Expression<'_>, reference: NodeId) -> bool {
 
 impl<'a> Visit<'a> for Finder<'_, 'a> {
     fn visit_import_declaration(&mut self, declaration: &ImportDeclaration<'a>) {
+        // `import { type A, type B }` brings in types alone, as `import type` does.
+        let types_alone = declaration.specifiers.as_ref().is_some_and(|specifiers| {
+            !specifiers.is_empty()
+                && specifiers.iter().all(|specifier| {
+                    matches!(
+                        specifier,
+                        ImportDeclarationSpecifier::ImportSpecifier(named)
+                            if named.import_kind.is_type()
+                    )
+                })
+        });
         let import = self.found(
             Self::text(&declaration.source),
             Form::Import,
-            declaration.import_kind.is_type(),
+            declaration.import_kind.is_type() || types_alone,
             declaration.span,
         );
 
@@ -672,10 +684,16 @@ impl<'a> Visit<'a> for Finder<'_, 'a> {
     }
 
     fn visit_export_from_declaration(&mut self, declaration: &ExportFromDeclaration<'a>) {
+        // `export { type A, type B } from` passes types alone on, as `export type` does.
+        let types_alone = !declaration.specifiers.is_empty()
+            && declaration
+                .specifiers
+                .iter()
+                .all(|specifier| specifier.export_kind.is_type());
         let import = self.found(
             Self::text(&declaration.source),
             Form::Export,
-            declaration.export_kind.is_type(),
+            declaration.export_kind.is_type() || types_alone,
             declaration.span,
         );
 
