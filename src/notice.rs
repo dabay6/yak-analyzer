@@ -23,16 +23,36 @@ impl Notice {
         }
     }
 
-    /// The notice as it is printed.
+    /// The kind of notice.
+    pub const fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// The file it is about, where there is one.
+    pub fn file(&self) -> Option<&str> {
+        self.file.as_deref()
+    }
+
+    /// What happened, as a sentence.
+    pub fn sentence(&self) -> &str {
+        &self.sentence
+    }
+
+    /// The notice as `graph` prints it.
     fn printed(&self) -> Value {
         json!({ "file": self.file, "kind": self.kind, "sentence": self.sentence })
     }
 }
 
-/// The notices as they are printed: those about no file first, then by file, by kind and by sentence
-/// (spec RUN-8).
-pub fn printed(mut notices: Vec<Notice>) -> Vec<Value> {
+/// The notices in the order they are printed in: those about no file first, then by file, by kind and
+/// by sentence (spec RUN-8).
+pub fn sorted(mut notices: Vec<Notice>) -> Vec<Notice> {
     notices.sort_by(|a, b| (&a.file, a.kind, &a.sentence).cmp(&(&b.file, b.kind, &b.sentence)));
 
-    notices.iter().map(Notice::printed).collect()
+    notices
+}
+
+/// The notices as `graph` prints them, in their order.
+pub fn printed(notices: Vec<Notice>) -> Vec<Value> {
+    sorted(notices).iter().map(Notice::printed).collect()
 }

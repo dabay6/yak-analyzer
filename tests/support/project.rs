@@ -97,15 +97,21 @@ impl Project {
         self
     }
 
-    /// Runs `graph` in the checkout, after the change the test asks for, and returns how it ended.
-    pub fn run(&self, change: impl FnOnce(&mut Command)) -> Output {
+    /// Runs a command of the binary in the checkout, after the change the test asks for, and returns
+    /// how it ended.
+    pub fn start(&self, command: &str, change: impl FnOnce(&mut Command)) -> Output {
         let mut binary = Command::new(env!("CARGO_BIN_EXE_yak-analyzer"));
 
-        binary.arg("graph").current_dir(&self.root);
+        binary.arg(command).current_dir(&self.root);
         alone(&mut binary);
         change(&mut binary);
 
         binary.output().expect("the binary starts")
+    }
+
+    /// Runs `graph` in the checkout, after the change the test asks for, and returns how it ended.
+    pub fn run(&self, change: impl FnOnce(&mut Command)) -> Output {
+        self.start("graph", change)
     }
 
     /// The document `graph` prints for the checkout. The run must succeed and write no line.
@@ -147,7 +153,7 @@ pub fn printed(output: &Output) -> Value {
     );
     assert!(output.stderr.is_empty());
 
-    serde_json::from_slice(&output.stdout).expect("graph prints JSON")
+    serde_json::from_slice(&output.stdout).expect("the binary prints JSON")
 }
 
 /// The one line a stopped run wrote, after checking that it stopped as a stop does.

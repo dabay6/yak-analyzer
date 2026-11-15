@@ -12,11 +12,15 @@ const INTERFACE_COMMAND: &str = "interface";
 /// The command that reads a project and prints what it read.
 const GRAPH_COMMAND: &str = "graph";
 
-/// The option of `graph` that names the hand-off file.
+/// The command that reads a project and prints a report of what it found (spec CMD-1).
+const AUDIT_COMMAND: &str = "audit";
+
+/// The option of `graph` and of `audit` that names the hand-off file.
 const HAND_OFF_OPTION: &str = "--hand-off";
 
 /// What the binary accepts, for the line that refuses anything else.
-const ACCEPTED: &str = "--version, interface, and graph [--hand-off <file>]";
+const ACCEPTED: &str =
+    "--version, interface, graph [--hand-off <file>], and audit [--hand-off <file>]";
 
 /// One thing the binary can be asked to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -27,6 +31,8 @@ pub enum Command {
     Interface,
     /// Read the project and print what was read, with a hand-off file or without one.
     Graph { hand_off: Option<PathBuf> },
+    /// Read the project and print a report of what was found, with a hand-off file or without one.
+    Audit { hand_off: Option<PathBuf> },
 }
 
 /// Reads the arguments after the program's name. The error is the text of the refusal.
@@ -38,6 +44,10 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
         [INTERFACE_COMMAND] => Ok(Command::Interface),
         [GRAPH_COMMAND] => Ok(Command::Graph { hand_off: None }),
         [GRAPH_COMMAND, HAND_OFF_OPTION, _] => Ok(Command::Graph {
+            hand_off: Some(PathBuf::from(&args[2])),
+        }),
+        [AUDIT_COMMAND] => Ok(Command::Audit { hand_off: None }),
+        [AUDIT_COMMAND, HAND_OFF_OPTION, _] => Ok(Command::Audit {
             hand_off: Some(PathBuf::from(&args[2])),
         }),
         [] => Err(format!("nothing to do; it answers {ACCEPTED}")),
