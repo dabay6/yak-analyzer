@@ -14,14 +14,16 @@ test('the README says how to install and run the released binary (spec DOC-1)', 
   assert.ok(readme.includes('npx yak-analyzer --version\n'));
 });
 
-test('its status says what the analyzer reads, and that it reports no findings yet (spec DOC-1)', () => {
-  assert.ok(readme.includes('reports\nno findings yet'));
+test('its status says the analyzer reports the five dead-code kinds, new or inherited (dead-code spec DOC-1)', () => {
+  assert.ok(readme.includes('`yak-analyzer audit` reports the five dead-code kinds'));
+  assert.ok(readme.includes('marks each finding new or unchanged'));
   assert.ok(readme.includes('`yak-analyzer graph` prints what it read'));
-  assert.ok(!readme.includes('analyzes nothing yet'));
+  assert.ok(!readme.includes('no findings yet'));
 });
 
-test('it names the oldest git the analyzer reads a project with (spec DEP-2)', () => {
+test('it names the oldest git the analyzer reads a project with, and a base in a partial clone (spec DEP-2, dead-code COMMIT-2)', () => {
   assert.ok(readme.includes('`git` 2.15 or later on the `PATH`'));
+  assert.ok(readme.includes('a partial clone needs git 2.44 or later'));
 });
 
 test('it says what to remove on a machine that maps the scope to another registry (spec NAME-2a)', () => {
