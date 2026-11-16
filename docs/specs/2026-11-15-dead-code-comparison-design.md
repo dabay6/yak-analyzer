@@ -168,7 +168,10 @@ comparison, the swap and the report folder. Added here:
 - **JDG-3** The live check's judgments carry over (owner: start from the live check's judged lists and
   judge only what is new, plus fallow's side). A finding the analyzer reported in the live check, and
   reports at the pinned commit with the same fingerprint, keeps its judgment, marked as carried with
-  the live check's reason, when nothing it depends on changed between the two commits:
+  the live check's reason, when nothing it depends on changed between the two commits. The live
+  check's judged lists name findings by kind, file and name, not by fingerprint; each is joined to
+  its fingerprint through the live check's last SARIF run of that root, `runs/<root>.final.sarif`
+  (`runs/<root>.branch-final.sarif` for a branch audit), by JDG-2's matching rule. Carried, when:
   - an unused export or type: its file, and every file that imports that file at either commit, as
     `graph` prints the imports;
   - an unresolved import: its file, and the folder or package its specifier points into;
@@ -185,8 +188,15 @@ comparison, the swap and the report folder. Added here:
   the report accounts for 3. The redone counts are the starting list of fallow-only findings.
 - **JDG-5** Set apart and not counted as misses, each listed with its count in a section of its own
   so the owner can read what was set apart:
-  - fallow's kinds outside the five: duplicate exports, unused, unlisted or misplaced dependencies,
-    and any other kind fallow adds (design FIND-12, the stage-1 spec's KIND-5);
+  - the kinds the design spec's FIND-12 puts out of scope: unused class members, unused store
+    members, unused, unlisted or misplaced dependencies, duplicate exports and architecture
+    boundaries (in the live check's fallow output, 96 class members in the larger private repository
+    and 2 store members in bricklog, among others). Each is listed by kind and count, so the owner
+    sees how much unused code of these kinds fallow reports;
+  - any kind fallow reports that neither the five nor FIND-12 names, such as unused enum members or
+    unused component props, is not set apart: it is listed by kind and count, judged on a sample of
+    ten per kind, and brought to the owner as a question of scope, since it may be unused code the
+    design spec never weighed. Session's call;
   - unused files that are not scripts or Vue components, such as CSS, which the stage-1 spec's
     KIND-1 does not report;
   - a cycle closed only by an `import()` or an `import type`, which the design spec's FIND-7 says is
@@ -269,14 +279,17 @@ which fallow reports and the analyzer does not. The owner ruled that a miss (own
     `(await import('./x'))["a"]`;
   - a destructuring with names only, `const { a, b: c } = await import('./x')`, or
     `const { a } = require('./x')`;
-  - a binding that holds the result, `const m = await import('./x')` or `const m = require('./x')`,
+  - a binding that holds the module, `const m = await import('./x')` or `const m = require('./x')`,
     whose every reference is a member read with a name or a literal key, as USE-2 reads a namespace
     import's `ns.name`;
-  - a `.then` callback on the `import()`, whose parameter is used in one of the forms above.
+  - a `.then` callback on the `import()`, whose parameter is a binding used as the third form says,
+    or a destructuring with names only, `.then(({ a }) => …)`;
+  - a binding that holds the promise, `const p = import('./x')`, whose every reference is
+    `(await p)` read in the first or second form, or `p.then(…)` with a callback of the fourth form.
 
-  The result may be awaited where it is written or later: `const p = import('./x')` followed by
-  `(await p).a` is the third form, with `p` the binding and `(await p).a` a member read of it.
-  Session's call for the forms.
+  A member read straight off a promise, `import('./x').a` or `p.a` where `p` holds the promise, is
+  not a read of the module and falls under DYN-2; `.then` on a promise is never a use of an export
+  named `then`. Session's call for the forms.
 - **DYN-2** Any other use of the result uses every export of the target, as USE-2 says today: the
   result passed on, returned, spread, read with a computed key, destructured with a rest element,
   reassigned, or used in a form DYN-1 does not list (owner's decision, session's call on the
@@ -410,10 +423,11 @@ call, on the owner's rule).
 - **DYN-1 counts a use that is not there.** A form read wrongly would hide a true unused export, the
   quiet direction. Each form has a fixture with a used and an unused export, and DYN-2's fall-back is
   the old rule, so no case is worse than stage 1.
-- **DYN-1 drops a use that is there.** An export read in a form DYN-1 takes for a member read but
-  that reads more, such as a member call that passes the module on, would be reported falsely.
-  DYN-2 counts any reference other than a plain member read as using every export, and the rerun of
-  CURE-5 judges every finding a fix adds.
+- **DYN-1 drops a use that is there.** A promise taken for a module, or a module taken for a
+  promise, would count the wrong names: `p.then` as an export named `then`, or `p.a` as a use of
+  `a`. DYN-1 tells the module binding from the promise binding and sends a member read off a
+  promise to DYN-2, which counts every export; fixtures hold both bindings, and the rerun of CURE-5
+  judges every finding a fix adds.
 - **A fix for one repository breaks another.** CURE-5 reruns every root and branch after each fix.
 - **Carried judgments hide a change.** A finding depends on files other than its own: an export on
   its importers, a cycle on its whole set. JDG-3 carries a judgment only where every file the kind
