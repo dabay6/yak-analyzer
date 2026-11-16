@@ -169,7 +169,8 @@ comparison, the swap and the report folder. Added here:
 - **CMP-5** fallow runs with its best-case configuration for each repository (design PROOF-2). The
   session looks for the 2026-11-11 configuration in the report folder the Terms name, on the machine
   it runs on, and asks the owner whether another of their machines holds it; it copies what it finds
-  into this item's report folder. Where it cannot be found, or names
+  into this item's report folder. The live check's report folder does not hold it: the live check
+  ran fallow with each repository's own configuration (JDG-4). Where it cannot be found, or names
   paths that no longer exist at the pinned commit, the session writes or corrects it from the design
   spec's account of that check and the repository's code, and writes each change with its reason
   beside the copy. A fallow finding caused by a stale or rewritten configuration is still judged,
@@ -223,14 +224,18 @@ comparison, the swap and the report folder. Added here:
   repository and the sub-folder, as `bricklog-web` is). A repository's `judged.md` covers all its
   roots and says which root each finding is from. The join uses JDG-2's matching rule. The live check's branch audits are not carried: BRA-1 chooses branches
   afresh. Carried, when none of these changed:
-  - for every finding of a root: any `package.json`, tsconfig, or configuration file a
-    `configEntries` declaration reads, anywhere under the root, since each can change entry points,
-    scripts across packages, `paths`, `imports` or `exports`; and the root's hand-off declarations;
+  - for every finding of a root: in any `package.json` under the root, a field the analyzer reads for
+    entry points or resolution (`name`, `main`, `module`, `types`, `typings`, `bin`, `exports`,
+    `imports`, `scripts`, `workspaces`), not a version or a dependency list, so a release's version
+    bump reopens nothing; any tsconfig, or configuration file a `configEntries` declaration reads,
+    under the root; and the root's hand-off declarations;
   - an unused export or type: its file; every file that imports it, at either commit; and every file
     along a chain of re-exports to or from it (the stage-1 spec's USE-2, USE-2a, USE-3);
   - an unresolved import: its file, and the folder or package its specifier points into;
   - a circular dependency: every file of its set;
-  - an unused file: the file.
+  - an unused file: the file; and every file under the root that holds a computed `import()` or
+    `require()` (the stage-1 spec's ENTRY-10), at either commit, since such a loader can start the
+    file where no import shows it.
 
   Any one of them changing reopens the judgment, and the finding is judged afresh. A carried judgment
   is also reopened when a fix (CURE-3) changes the rule it was judged under. The rule assumes the
@@ -239,7 +244,10 @@ comparison, the swap and the report folder. Added here:
   for what each kind depends on.
 - **JDG-4** The live check's fallow-only counts are redone in full from its fallow output, not taken
   from its report's prose, which left some out: in yakshaver, fallow reported 19 unused files where
-  the report accounts for 3. The redone counts are the starting list of fallow-only findings.
+  the report accounts for 3. The live check ran fallow with each repository's own fallow
+  configuration, or fallow's defaults where it has none (the stage-1 spec's LIVE-4), not the best
+  case, so its list is only a start: it shows the shapes to expect and the size of the work, and the
+  best-case runs of CMP-5 on the pinned commits give the list that is judged.
 - **JDG-5** Set apart and not counted as misses, each listed with its count in a section of its own
   so the owner can read what was set apart:
   - the kinds the design spec's FIND-12 puts out of scope: unused class members, unused store
@@ -251,9 +259,10 @@ comparison, the swap and the report folder. Added here:
     KIND-1 does not report;
   - a cycle closed only by an `import()` or an `import type`, which the design spec's FIND-7 says is
     not a circular dependency because neither can cause the load-order fault the finding warns of;
-  - an unused export of a package's public surface: an export of a file that a package's
-    `package.json` offers (`exports`, `main`, `bin`) in a package not declared internal, which the
-    design spec's FIND-5 counts as used, a rule that spec marks as the owner's. Session's call to
+  - an unused export of a package's public surface: an export of a file a `package.json` names as
+    an entry point, through `main`, `module`, `types`, `typings` or `bin` in any package, or through
+    `exports` in a package not declared internal (the stage-1 spec's ENTRY-1, ENTRY-5 and USE-3),
+    which the design spec's FIND-5 counts as used, a rule that spec marks as the owner's. Session's call to
     apply it here, written beside the owner's decision on misses; the owner has not ruled on it
     against "truly unused is dead code". Since it rests on the hand-written `internal` list, the
     judged list names every package that offers files through `exports` and is not declared internal,
@@ -365,6 +374,11 @@ which fallow reports and the analyzer does not. The owner ruled that a miss (own
   - a binding that holds the promise, `const p = import('./x')`, whose every reference is
     `(await p)` read in the first or second form, or `p.then(…)` with a callback of the fourth form.
 
+  The binding forms hold only for a binding that has at least one reference in code, is not
+  exported, and is not named in a Vue component's template (the stage-1 spec's USE-4). An exported
+  binding, or one a template names, passes the module on and falls under DYN-2; a binding with no
+  reference at all uses nothing, as an unused result does.
+
   A member read straight off a promise, `import('./x').a` or `p.a` where `p` holds the promise, is
   not a read of the module and falls under DYN-2; `.then` on a promise is never a use of an export
   named `then`. Session's call for the forms.
@@ -416,16 +430,19 @@ call, on the owner's rule).
   same folder ENTRY-6 would have matched the file from. Every `configEntries` declaration with
   `options` applies to the scripts of every `package.json` under the root, as a `scriptCommands`
   declaration does (ENTRY-7), since the hand-off file cannot say which packages use a tool (design
-  ENT-4). A named file in no detection folder is read only when `relativeTo` is `"config"`;
-  otherwise it gives the notice below. A word that names no listed file, or a file in no detection
-  folder with `"detection"`, gives a notice naming the script and the word, and adds nothing. A
+  ENT-4). Every file under the root lies in a detection folder, since the root is always the first
+  (the reading spec's HO-2). A word that names no listed file gives a notice naming the script and
+  the word, and adds nothing. A
   named file that is listed but does not parse is treated as ENTRY-6 treats a matched one: it is an
   entry point (CONF-3), read as any file is (the reading spec's PARSE-2), and the declaration's
   `default` stands, since no value could be read.
 - **CONF-3** A configuration file named this way is an entry point, as a matched one is (ENTRY-6),
   whether or not `program` is also in a `scriptCommands` declaration: ENTRY-7 would make the word's
   file an entry point only when it is, and this declaration already says the program reads the
-  file. A file both matched by `file` and named by a script is read once. A fixture holds a script naming
+  file. A file both matched by `file` and named by a script is one entry point; its value is read
+  with the declaration's own `relativeTo` as a matched file, and, when `options.relativeTo` differs,
+  read again with that one as a named file, and the globs of both readings are used, since the tool
+  reads it each way in a different command. Session's call. A fixture holds a script naming
   a second configuration file, by a separate word and by `=`, and one naming a file that does not
   exist (CURE-3).
 
@@ -439,23 +456,27 @@ call, on the owner's rule).
   says this today; the change that fixes the drafts adds to `CONTRIBUTING.md`, under "The commands",
   a paragraph saying what the interface version covers and that a change to any of it raises the
   number. The README's status text is not changed, so the test that holds it (the stage-1 spec's
-  DOC-1) is untouched. On a no-go, nothing is fixed.
+  DOC-1) is untouched. `scripts/contributing.test.mjs`, which holds the guide's other command text,
+  gains a check that the paragraph is there. On a no-go, nothing is fixed.
 - **FREEZE-2** Before they are fixed, the session lists in the judged list each key, shape or rule
   name the comparison found awkward or wrong, with what it would change, and any change the owner
   approves is made first, as an amendment (CURE-4). The list goes to the owner with the judged list,
   before GO-3; a change the owner approves with the go is made after it and before FREEZE-1, and
-  CURE-5's rerun follows it like any fix. Session's call: the comparison is the only test real
+  CURE-5's rerun follows it like any fix; FREEZE-1's drafts end only once that is done, and any
+  finding the rerun changes is added to the judged list and to the record, and told to the owner. Session's call: the comparison is the only test real
   repositories give the keys before they are fixed.
 
 ### The owner's decision
 
 - **GO-1** When the fixes end (BAR-4), a final run of both tools on each repository's current
   default-branch head, made the same way (CMP-3 to CMP-7), checks that nothing has moved under the
-  pinned results (owner). Findings it adds or removes are judged and written in the judged list. It
-  runs once for each repository: an analyzer-only false finding or a miss it turns up is fixed as
-  CURE-1 to CURE-5 say, and the fix is then checked once on that repository's final commit, where
-  the case was found. Anything that second look turns up goes to the owner as BAR-4 writes a case
-  left, and is not fixed in this item. Session's call: the anti-goal on judging that never ends.
+  pinned results (owner). Findings it adds are judged; findings it removes are written down; and a
+  finding both runs report keeps its judgment only as JDG-3 carries one, between the pinned commit
+  and the final one, and is judged afresh otherwise. It runs once for each repository: an
+  analyzer-only false finding or a miss it turns up is fixed as CURE-1 to CURE-5 say, and the fix is
+  then checked once on that repository's final commit, where the case was found. Anything that
+  second look, or that fix's CURE-5 rerun on the pinned commits and branches, turns up goes to the
+  owner as BAR-4 writes a case left, and is not fixed in this item. Session's call: the anti-goal on judging that never ends.
 - **GO-2** The judged list in the report folder holds, for the owner to read (design PROOF-3):
   - at the top, which of BAR-1 to BAR-3 holds, and each case that keeps the analyzer from the
     ceiling, with why;
@@ -540,9 +561,11 @@ call, on the owner's rule).
   judges every finding a fix adds.
 - **A fix for one repository breaks another.** CURE-5 reruns every root and branch after each fix.
 - **Carried judgments hide a change.** A finding depends on files other than its own: an export on
-  its importers, a cycle on its whole set. JDG-3 carries a judgment only where every file the kind
-  depends on is unchanged, and reopens it when the root's hand-off file or the rule it was judged
-  under changes.
+  its importers, a cycle on its whole set, an unused file on any computed loader. JDG-3 carries a
+  judgment only where every file the kind depends on is unchanged, and reopens it when the root's
+  hand-off declarations, an entry-point field of a `package.json`, or the rule it was judged under
+  changes. The cost is more judging where the repositories moved most; version bumps reopen
+  nothing, since only entry-point and resolution fields count.
 - **The keys are fixed too early.** FREEZE-1 waits for the owner's go and FREEZE-2 lists what the
   comparison found awkward first; a later change raises the interface version, which is the design
   spec's way (IF-6).
