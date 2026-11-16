@@ -66,9 +66,16 @@ comparison, the swap and the report folder. Added here:
 - **True** and **false**: a finding is true when the code bears it out under the design spec's
   definition of its kind (design FIND-2 to FIND-7), and false otherwise. **A miss** is a true
   finding fallow reports that the analyzer does not.
-- **fallow's best-case configuration** for a repository is the entry configuration the check of
-  2026-11-11 wrote by hand for fallow (design PROOF-2): globs and paths that tell fallow each
-  repository's entry points.
+- **The check of 2026-11-11** was run by the design spec's work item,
+  `2026-11-10-in-house-code-intelligence-engine` in the yakshaver repository, on the owner's
+  machine; the design spec's Intent gives its findings. **fallow's best-case configuration** for a
+  repository is the entry configuration that check wrote by hand for fallow (design PROOF-2): globs
+  and paths that tell fallow each repository's entry points. Its files would be in that work item's
+  report folder, `yak-reports/2026-11-10-in-house-code-intelligence-engine/` under the git common
+  directory of yakshaver's main checkout; on the machine this spec was written on, that folder does
+  not exist (CMP-5).
+- **The reading spec** is `docs/specs/2026-11-11-reading-a-project-design.md` in this repository,
+  the analyzer's first spec, which the stage-1 spec builds on.
 
 ## Goals, non-goals and anti-goals
 
@@ -131,22 +138,31 @@ comparison, the swap and the report folder. Added here:
   and nothing built, given a hand-off file written by hand (design PROOF-2). The hand-off files start
   as the live check's, one for each root, and change only as CURE-2 allows, each change written in
   the judged list with its reason.
-- **CMP-4** fallow runs on a second worktree of the same pinned commit, with dependencies installed by
-  the repository's own package manager with install scripts turned off, `npm ci --ignore-scripts`
-  or `pnpm install --frozen-lockfile --ignore-scripts`, and nothing built (owner). No install script
-  of any package runs. Both worktrees are made in a temporary folder outside every repository, and
-  removed once the owner has decided (GO-3). Session's call: two worktrees, so the analyzer's never
-  holds `node_modules`, which the stage-1 spec's anti-goals require to change nothing anyway.
+- **CMP-4** fallow runs on a second worktree of the same commit, with dependencies installed by the
+  package manager the repository's lockfile names, with install scripts turned off and from the
+  lockfile alone: `npm ci --ignore-scripts` for `package-lock.json`, `pnpm install
+  --frozen-lockfile --ignore-scripts` for `pnpm-lock.yaml`, and for `yarn.lock` yarn's own way to
+  install from the lockfile alone with scripts off; nothing is built (owner). No install script of any package
+  runs. A repository with no lockfile, or one whose install fails, is run by fallow without
+  dependencies, and the judged list says so beside its counts. This holds for every commit fallow
+  runs on: the pinned commits, each branch audit's commit (BRA-1) and the final run's (GO-1). All
+  worktrees are made in a temporary folder outside every repository, and removed once the owner has
+  decided (GO-3). Session's call: two worktrees, so the analyzer's never holds `node_modules`,
+  which the stage-1 spec's anti-goals require to change nothing anyway.
 - **CMP-5** fallow runs with its best-case configuration for each repository (design PROOF-2). The
-  session finds the 2026-11-11 configuration and copies it into this item's report folder. Where it
-  cannot be found, or names paths that no longer exist at the pinned commit, the session writes or
-  corrects it from the design spec's account of that check and the repository's code, and writes
-  each change with its reason beside the copy. A fallow finding caused by a stale configuration is
-  still judged, since the judgment is of the finding against the code (design PROOF-2).
-- **CMP-6** One fallow version is used for every run: the version installed when the comparison
-  starts, written in the judged list. The recon of 2026-11-16 found fallow 3.39, which has
-  `fallow audit --base <ref>` (BRA-1). fallow's output is taken as JSON, with fallow's own gate
-  switched off or its exit code ignored, since the live check showed fallow exiting 1 on findings.
+  session looks for the 2026-11-11 configuration in the report folder the Terms name, on each of the
+  owner's machines, and copies it into this item's report folder. Where it cannot be found, or names
+  paths that no longer exist at the pinned commit, the session writes or corrects it from the design
+  spec's account of that check and the repository's code, and writes each change with its reason
+  beside the copy. A fallow finding caused by a stale or rewritten configuration is still judged,
+  since the judgment is of the finding against the code (design PROOF-2).
+- **CMP-6** One fallow version is used for every run: 3.39.0, the version the live check ran, as its
+  fallow output records, which has `fallow audit --base <ref>` (BRA-1). It is installed once, at that
+  exact version, into a folder of its own in the temporary folder, and run from there; a fallow a
+  repository's own dependencies install, and one installed on the machine for every project, are
+  not used. Each run asks for JSON (`--format json`); fallow exits 1 when its own gate fails on
+  findings, as the live check saw, so exit 1 with JSON printed is a run that worked, and any other
+  failure stops that run to be looked at. Session's call.
 - **CMP-7** Both tools are run on each root from that root, as the gate runs (design PROOF-2). A
   sub-folder root runs fallow from the sub-folder too, so each pair of counts in the judged list is
   of the same root. The live check set fallow's root counts for bricklog and the smaller private
@@ -169,9 +185,13 @@ comparison, the swap and the report folder. Added here:
   judge only what is new, plus fallow's side). A finding the analyzer reported in the live check, and
   reports at the pinned commit with the same fingerprint, keeps its judgment, marked as carried with
   the live check's reason, when nothing it depends on changed between the two commits. The live
-  check's judged lists name findings by kind, file and name, not by fingerprint; each is joined to
-  its fingerprint through the live check's last SARIF run of that root, `runs/<root>.final.sarif`
-  (`runs/<root>.branch-final.sarif` for a branch audit), by JDG-2's matching rule. Carried, when:
+  check's commit for each repository is in the "Roots and commits" table of its `report.md`. Its
+  judged lists, `<repository>/judged.md`, name findings by kind, file and name, not by fingerprint;
+  each is joined to its fingerprint through the live check's last SARIF run of that root,
+  `runs/<root>.final.sarif`, where `<root>` is the root's folder name in the live check's report
+  folder (a sub-folder root's is the repository's name and the sub-folder's, joined by a hyphen), by
+  JDG-2's matching rule. The live check's branch audits are not carried: BRA-1 chooses branches
+  afresh. Carried, when:
   - an unused export or type: its file, and every file that imports that file at either commit, as
     `graph` prints the imports;
   - an unresolved import: its file, and the folder or package its specifier points into;
@@ -193,10 +213,6 @@ comparison, the swap and the report folder. Added here:
     boundaries (in the live check's fallow output, 96 class members in the larger private repository
     and 2 store members in bricklog, among others). Each is listed by kind and count, so the owner
     sees how much unused code of these kinds fallow reports;
-  - any kind fallow reports that neither the five nor FIND-12 names, such as unused enum members or
-    unused component props, is not set apart: it is listed by kind and count, judged on a sample of
-    ten per kind, and brought to the owner as a question of scope, since it may be unused code the
-    design spec never weighed. Session's call;
   - unused files that are not scripts or Vue components, such as CSS, which the stage-1 spec's
     KIND-1 does not report;
   - a cycle closed only by an `import()` or an `import type`, which the design spec's FIND-7 says is
@@ -208,6 +224,13 @@ comparison, the swap and the report folder. Added here:
 
   Nothing else is set apart. In particular a miss caused by a rule the stage-1 spec chose for safety,
   such as USE-2's for `import()`, is a miss (owner).
+- **JDG-5a** A kind fallow reports that neither the five nor FIND-12 names, such as unused enum members
+  or unused component props, is neither set apart nor counted as a miss yet: whether the analyzer
+  should report it is a question of scope the design spec never weighed. Each such kind is listed by
+  kind and count, ten of its findings (or all, when fewer) are judged true or false, and the kind is
+  brought to the owner with that sample before GO-3. The owner's answer decides it: a kind the owner
+  rules in is a design-spec amendment and new work for a later stage, and its true findings count as
+  misses at GO-2; a kind the owner rules out joins JDG-5. Session's call.
 - **JDG-6** Each judgment names the finding, the tool or tools that report it, true or false, the
   reason in a sentence, and for a false finding or a miss, its cause as a shape the analyzer can be
   fixed against. The judged list is written to the report folder, never committed (design PROOF-3,
@@ -220,8 +243,11 @@ comparison, the swap and the report folder. Added here:
   below the floor.
 - **BAR-2** **The stop** (owner): an analyzer-only false finding with no obvious way to correct it, a
   cause the session cannot fix in the analyzer (CURE-1) without information the analyzer could never
-  have. The session reports each one to the owner when it finds it, with why it sees no fix, and goes
-  on judging the rest.
+  have. It is what the owner named as stopping progress: a case of it left at GO-2 is a reason for
+  no-go that the judged list states at its top. The session does not stop the comparison on finding
+  one: it tells the owner at once, with why it sees no fix, and goes on judging and fixing the rest,
+  so the owner decides with the whole list in front of them (design PROOF-6). Session's call on going
+  on.
 - **BAR-3** **The ceiling** (owner, design PROOF-4): no false finding, shared or not, and no miss. It
   is the target the fixes work towards.
 - **BAR-4** The fixes end when the ceiling holds on the pinned commits, or when every case left is
@@ -235,7 +261,12 @@ comparison, the swap and the report folder. Added here:
   `fallow audit --base <ref>` (design PROOF-2a). The worktree and the base are chosen as the
   stage-1 spec's LIVE-3 chooses them, from merges before the pinned commit; the live check's branch
   is one of them where its merge is still before it. Two per repository at the least (session's
-  call).
+  call). Each branch audit runs on every root of its repository, a sub-folder root included, with
+  that root's hand-off file. fallow's worktree at the branch's commit is installed as CMP-4 says.
+  fallow's audit reports only findings in the files the branch changed, with `introduced` true or
+  false; the analyzer's reports every finding, marked new or unchanged, so the analyzer's are
+  compared only where they lie in a changed file, and its new findings in other files are judged on
+  their own.
 - **BRA-2** The findings each tool marks new are matched as JDG-2 matches findings, and every finding
   marked new by only one tool is judged as JDG-1 judges. So is every finding the analyzer marks
   unchanged in a file the branch changed, since that is where a wrong match would hide (the stage-1
@@ -324,10 +355,15 @@ call, on the owner's rule).
   program, the word after one of `names`, or the value of a word `name=value`, names a configuration
   file. Session's call: ENTRY-7 looks at the first word only because it must know which program runs
   files; here the declaration names the program, so a wrapper in front of it changes nothing. That
-  file, found from the package's folder, is
+  file, found from the folder of the `package.json` whose script it is, is
   read by the declaration as a file its `file` glob matched is, with `relativeTo: "config"` meaning
-  that file's folder and `"detection"` the detection folder that holds the package. A file named so
-  that is not listed, or does not parse, gives a notice naming the script and the word, and adds
+  that file's folder and `"detection"` the deepest detection folder that holds the named file, the
+  same folder ENTRY-6 would have matched the file from. Every `configEntries` declaration with
+  `options` applies to the scripts of every `package.json` under the root, as a `scriptCommands`
+  declaration does (ENTRY-7), since the hand-off file cannot say which packages use a tool (design
+  ENT-4). A named file in no detection folder is read only when `relativeTo` is `"config"`;
+  otherwise it gives the notice below. A file named so that is not listed, does not parse, or lies
+  in no detection folder with `"detection"`, gives a notice naming the script and the word, and adds
   nothing.
 - **CONF-3** A configuration file named this way is an entry point, as a matched one is (ENTRY-6),
   whether or not `program` is also in a `scriptCommands` declaration: ENTRY-7 would make the word's
