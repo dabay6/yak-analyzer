@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/dabay6/yak-analyzer/compare/v0.7.0...v0.7.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **entries:** read a tool's configuration as the tool reads it, and check the named repositories ([9866e16](https://github.com/dabay6/yak-analyzer/commit/9866e167a9123eff40cb1c00a3ff3e9285c268e6))
+* **entries:** read what a tool's configuration names as the tool reads it ([12d3a14](https://github.com/dabay6/yak-analyzer/commit/12d3a14fd832b3b7e45014deeb10ba2eab7e8fb5))
+
 ## [0.7.0](https://github.com/dabay6/yak-analyzer/compare/v0.6.0...v0.7.0) (2026-11-15)
 
 
