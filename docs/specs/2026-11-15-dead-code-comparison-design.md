@@ -165,11 +165,21 @@ comparison, the swap and the report folder. Added here:
   reports in a file the analyzer reports as an unused file counts as shared: the file finding covers
   it (the stage-1 spec's Alternatives). fallow's kinds are mapped to the five by the builder (left to
   the builder). Session's call.
-- **JDG-3** The live check's judgments carry over. A finding of the live check whose file is unchanged
-  between the live check's commit and the pinned commit keeps its judgment, marked as carried, with
-  the live check's reason. Every other finding is judged afresh (owner: start from the live check's
-  judged lists and judge only what is new, plus fallow's side). A carried judgment is reopened when a
-  fix (CURE-3) changes the rule it was judged under.
+- **JDG-3** The live check's judgments carry over (owner: start from the live check's judged lists and
+  judge only what is new, plus fallow's side). A finding the analyzer reported in the live check, and
+  reports at the pinned commit with the same fingerprint, keeps its judgment, marked as carried with
+  the live check's reason, when nothing it depends on changed between the two commits:
+  - an unused export or type: its file, and every file that imports that file at either commit, as
+    `graph` prints the imports;
+  - an unresolved import: its file, and the folder or package its specifier points into;
+  - a circular dependency: every file of its set;
+  - an unused file: the file, and every `package.json`, tsconfig and configuration file its
+    package's entry points are read from, since what would make it reachable is a new import, which
+    would remove the finding, or a new entry point source.
+
+  The hand-off file changing for that root reopens every carried judgment of the root. Every other
+  finding is judged afresh. A carried judgment is also reopened when a fix (CURE-3) changes the rule
+  it was judged under. Session's call for what each kind depends on.
 - **JDG-4** The live check's fallow-only counts are redone in full from its fallow output, not taken
   from its report's prose, which left some out: in yakshaver, fallow reported 19 unused files where
   the report accounts for 3. The redone counts are the starting list of fallow-only findings.
@@ -264,7 +274,8 @@ which fallow reports and the analyzer does not. The owner ruled that a miss (own
     import's `ns.name`;
   - a `.then` callback on the `import()`, whose parameter is used in one of the forms above.
 
-  `await` is optional in each form where the result is awaited later through the same binding.
+  The result may be awaited where it is written or later: `const p = import('./x')` followed by
+  `(await p).a` is the third form, with `p` the binding and `(await p).a` a member read of it.
   Session's call for the forms.
 - **DYN-2** Any other use of the result uses every export of the target, as USE-2 says today: the
   result passed on, returned, spread, read with a computed key, destructured with a rest element,
@@ -292,15 +303,23 @@ call, on the owner's rule).
   holding it in another shape stops the run as ENTRY-6a says. Which option a tool reads its
   configuration file from is a fact of the tool, so a pack states it, as it states `file` (CURE-1,
   design ENT-5).
-- **CONF-2** In a script of a `package.json`, read as the stage-1 spec's ENTRY-7 reads one, a command
-  whose program is the declaration's `program` names a configuration file by the word after one of
-  `names`, or by the value of a word `name=value`. That file, found from the package's folder, is
+- **CONF-2** A script of a `package.json` is cut into commands and words as the stage-1 spec's ENTRY-7
+  cuts it. In a command, the program is the first word, after the leading `NAME=value` words, that
+  is exactly the declaration's `program`; it need not be the command's first word, so
+  `npx vitest --config a.ts`, `pnpm exec vitest -c a.ts` and `cross-env A=1 vitest --config a.ts`
+  all name `vitest`, with no declaration of `npx`, `pnpm` or `cross-env`. Among the words after the
+  program, the word after one of `names`, or the value of a word `name=value`, names a configuration
+  file. Session's call: ENTRY-7 looks at the first word only because it must know which program runs
+  files; here the declaration names the program, so a wrapper in front of it changes nothing. That
+  file, found from the package's folder, is
   read by the declaration as a file its `file` glob matched is, with `relativeTo: "config"` meaning
   that file's folder and `"detection"` the detection folder that holds the package. A file named so
   that is not listed, or does not parse, gives a notice naming the script and the word, and adds
   nothing.
-- **CONF-3** A configuration file named this way is an entry point, as a matched one is (ENTRY-6).
-  A file both matched by `file` and named by a script is read once. A fixture holds a script naming
+- **CONF-3** A configuration file named this way is an entry point, as a matched one is (ENTRY-6),
+  whether or not `program` is also in a `scriptCommands` declaration: ENTRY-7 would make the word's
+  file an entry point only when it is, and this declaration already says the program reads the
+  file. A file both matched by `file` and named by a script is read once. A fixture holds a script naming
   a second configuration file, by a separate word and by `=`, and one naming a file that does not
   exist (CURE-3).
 
@@ -310,8 +329,9 @@ call, on the owner's rule).
   reading spec's KEY-1 and their shapes (the stage-1 spec's ENTRY-6, ENTRY-7 and CONF-1), the rule
   names, the fingerprint scheme, `audit`'s options and the `interface` command's answer are fixed
   under interface version 1 (design STAGE-1, ENT-4; the reading spec's RUN-7). From then a change to
-  one of them raises the interface version (design IF-6). `CONTRIBUTING.md` and the README say so,
-  in place of saying they are drafts. On a no-go, nothing is fixed.
+  one of them raises the interface version (design IF-6). `CONTRIBUTING.md`, under "The commands",
+  says what the interface version covers and that a change to it raises the number; neither it nor
+  the README says so today. On a no-go, nothing is fixed.
 - **FREEZE-2** Before they are fixed, the session lists in the judged list each key, shape or rule
   name the comparison found awkward or wrong, with what it would change, and any change the owner
   approves is made first, as an amendment (CURE-4). Session's call: the comparison is the only test
@@ -321,8 +341,10 @@ call, on the owner's rule).
 
 - **GO-1** When the fixes end (BAR-4), a final run of both tools on each repository's current
   default-branch head, made the same way (CMP-3 to CMP-7), checks that nothing has moved under the
-  pinned results (owner). Findings it adds or removes are judged and written in the judged list; the
-  fixes do not start again unless one of them is an analyzer-only false finding or a miss.
+  pinned results (owner). Findings it adds or removes are judged and written in the judged list. It
+  runs once: an analyzer-only false finding or a miss it turns up is fixed as CURE-1 to CURE-5 say,
+  on the pinned commits, and is not followed by another final run; one it cannot fix goes to the
+  owner as BAR-4 writes a case left. Session's call: the anti-goal on judging that never ends.
 - **GO-2** The judged list in the report folder holds, for the owner to read (design PROOF-3):
   - at the top, which of BAR-1 to BAR-3 holds, and each case that keeps the analyzer from the
     ceiling, with why;
@@ -393,9 +415,10 @@ call, on the owner's rule).
   DYN-2 counts any reference other than a plain member read as using every export, and the rerun of
   CURE-5 judges every finding a fix adds.
 - **A fix for one repository breaks another.** CURE-5 reruns every root and branch after each fix.
-- **Carried judgments hide a change.** JDG-3 carries a judgment only where the file is unchanged, and
-  reopens it when a fix changes the rule it was judged under. A finding whose cause lies in another,
-  changed file, such as an importer, is judged afresh, since its finding's set changes.
+- **Carried judgments hide a change.** A finding depends on files other than its own: an export on
+  its importers, a cycle on its whole set. JDG-3 carries a judgment only where every file the kind
+  depends on is unchanged, and reopens it when the root's hand-off file or the rule it was judged
+  under changes.
 - **The keys are fixed too early.** FREEZE-1 waits for the owner's go and FREEZE-2 lists what the
   comparison found awkward first; a later change raises the interface version, which is the design
   spec's way (IF-6).
