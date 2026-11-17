@@ -1,8 +1,10 @@
 //! The declaration keys the analyzer knows, and the check that it can use every declaration a hand-off
 //! file holds (spec KEY-1, KEY-2, KEY-5).
 //!
-//! The keys are drafts until the design spec's stage 2 ends. This part checks them, the shapes of the two
-//! that describe what a tool does included (spec ENTRY-6a); the parts that read a project use them.
+//! The keys and their shapes are fixed under interface version 1 since stage 2 ended (comparison spec
+//! FREEZE-1): a change to any raises the version. This part checks them, the shapes of the three that
+//! describe what a tool does included (spec ENTRY-6a; comparison spec CI-1); the parts that read a
+//! project use them.
 
 use serde_json::Value;
 
