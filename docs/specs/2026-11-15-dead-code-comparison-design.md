@@ -783,28 +783,36 @@ the fix and its fixtures before CURE-5's rerun.
 
 ### 2026-11-17: A command file's bounds, as built
 
-Plan 3 built CI-3's bounds and, before it merged, an automated security review found two ways past
-them as CI-3 words them: one long text aliased many times copies megabytes for each alias while
-counting one value, and a file of many documents expands each to just under the per-document bound.
-Either lets a workflow on a branch exhaust memory, which is what CI-3's bounds are for. The code was
-hardened under a ruling of plan 3. This amendment's review found a third: the reader keeps a copy of
-each anchored value for its aliases, uncounted, so a chain of anchors nested in one another, with no
-alias at all, copies a number of values that grows with the square of its depth. By CURE-4 a fix
-that changes what an approved spec says is written here, and the owner approved stating the bounds
-as built when ruling on FREEZE-2 (2026-11-17); plan 4 builds the third fix. This amendment changes
-CI-3's sentence on bounds, and nothing else.
+Plan 3 built CI-3's bounds. Before its pull request merged, the automated security review Claude
+Code runs on each commit and push found two ways past them as CI-3 words them: one long text aliased
+many times copies megabytes for each alias while counting one value, and a file of many documents
+expands each to just under the per-document bound. Either lets a workflow on a branch exhaust
+memory, which is what CI-3's bounds are for. Plan 3 hardened the code under a ruling on its Task 1,
+on the work item's record. This amendment's own zoom-out review (its report is in the item's report
+folder) found a third: the reader keeps a copy of each anchored value for its aliases, uncounted, so
+a chain of anchors nested in one another, with no alias at all, copies a number of values that grows
+with the square of its depth. Plan 4 makes the reader share an anchored value with its aliases
+instead; until then it copies. By CURE-4 a fix that changes what an approved spec says is written
+here first. The owner approved stating the bounds as built when ruling on the list FREEZE-2 brought
+(2026-11-17); the bounds are not among what FREEZE-1 fixes under the interface version. This
+amendment changes CI-3's sentence on bounds and its notice's wording, which CI-6 says names the
+bounds, and adds to CI-4's list of fixtures; nothing else.
 
 - **CI-6** Replaces CI-3's "a document that expands to more than 100,000 values once its aliases are
   followed" with: a file whose documents, all together, hold more than 100,000 values, or more than
-  4 MiB of text, once their aliases are followed. A value is a text, a sequence or a mapping, keys
-  included; the text is the bytes of every text among them, keys included; an alias counts the
-  values and the text of the node it names each time it appears. The bound is of the file's content
-  so expanded, not of how the reader holds it: the reader shares an anchored value with each of its
-  aliases rather than copying it, so reading a file costs no more than the bounds allow, however
-  many anchors it has. The 1 MiB bound on the file's own size stands, as do CI-3's other words: the
-  count is kept while the file is read, never after, and such a file adds nothing and gives CI-3's
-  notice, which names the bounds. Fixtures hold a file of two documents each under the value bound
-  and over it together, a file of one long text aliased until it passes the text bound, and a chain
-  of anchors nested 50,000 deep with no alias, which is read, with no notice, and promptly (CURE-3).
-  Session's call: 4 MiB is four times the largest file read and far above any real workflow; sharing
-  removes the copies rather than counting them.
+  4 MiB of text, once their aliases are followed. A value is a scalar, a sequence or a mapping, keys
+  included; every scalar counts as a text, whatever its YAML type, a number, a boolean or a null
+  included, since the reader keeps each as the text it parsed to. The text is the bytes of every
+  scalar's parsed value, keys included. An alias counts the values and the text of the node it names
+  each time it appears. The bound is of the file's content so expanded, not of how the reader holds
+  it: the reader shares an anchored value with each of its aliases rather than copying it, so
+  reading a file costs no more than the bounds allow, however many anchors it has. The 1 MiB bound on
+  the file's own size stands, as do CI-3's other words: the count is kept while the file is read,
+  never after, and such a file adds nothing and gives CI-3's notice, whose sentence names the three
+  bounds (1 MiB, 100,000 values, 4 MiB of text). CI-4's fixtures gain (CURE-3): a file of two
+  documents each under the value bound and over it together; a file of one long text aliased until it
+  passes the text bound; and a compact block sequence of 50,000 levels, `- &a1 - &a2 … x`, each
+  level anchored and none aliased, 50,001 values in all, which is read with no notice and finishes
+  within the test run as the other fixtures do, where a reader that copies anchored values would copy
+  over a billion. Session's call: 4 MiB is four times the 1 MiB bound on a file's size and far above
+  any real workflow; sharing removes the copies rather than counting them.
