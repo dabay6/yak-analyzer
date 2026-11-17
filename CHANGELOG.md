@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/dabay6/yak-analyzer/compare/v0.7.1...v0.8.0) (2026-11-17)
+
+
+### Features
+
+* **uses:** follow what is read off import() and require() ([1062d22](https://github.com/dabay6/yak-analyzer/commit/1062d2265ee063101a3db9db35bd7d89b3f81134))
+* **uses:** follow what is read off import() and require() ([13a6ae2](https://github.com/dabay6/yak-analyzer/commit/13a6ae2abda2edfe8291a450f4f7b7cc0f21af71))
+
 ## [0.7.1](https://github.com/dabay6/yak-analyzer/compare/v0.7.0...v0.7.1) (2026-11-15)
 
 
