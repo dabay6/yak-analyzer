@@ -624,8 +624,8 @@ spec's CONF-1 to CONF-3, which read only a `package.json`'s scripts (CI-2), JDG-
 (JDG-5b) and FREEZE-1's list of shapes (CI-4). Through CURE-4 it is owed to the design spec as an
 amendment of ENT-4's list of keys, which this item records for the design spec's work item, with
 the question that amendment must answer: which stack's pack states `commandFiles`. A CI system is
-not a language stack, and yak detects stacks by marker files; whether the generic pack states it
-under every stack, or a stack is added whose marker is a workflow folder (design DECL-6), is that
+not a language stack, and yak detects stacks by marker files; whether the generic pack (the pack yakshaver
+ships with its stacks for every language, the design spec's SWAP-1) states it under every stack, or a stack is added whose marker is a workflow folder (design DECL-6), is that
 work item's call. In this item's hand-off files, written by hand, it sits in the pack's part beside
 `configEntries`, in the `dead-code-tools` stack: the stack the live check's hand-off files keep for
 the pack's declarations, apart from the repository's (the stage-1 spec's LIVE-2).
@@ -648,7 +648,12 @@ Alternatives considered for the cure:
     folder, as a pack's glob does (the stage-1 spec's ENTRY-4), so
     `.github/workflows/*.{yml,yaml}` from the root's detection folder names a repository's GitHub
     Actions workflows. A file is read once, from the deepest detection folder that holds it, as
-    ENTRY-6 reads a configuration file, and that is the detection folder its commands run from;
+    ENTRY-6 reads a configuration file, and that is the detection folder its commands run from.
+    Only files under the root are read, as for every key: a sub-folder root (CMP-2, CMP-7) holds no
+    workflow of the repository's, so no command file adds an entry point there, as none does when
+    fallow is run from that sub-folder. The glob also matches a `.github/workflows` folder nested in
+    a workspace package, which GitHub never runs; its commands then add entry points that nothing
+    starts, the quiet direction, and no named repository has one (session's call);
   - `commands`: a list of one or more property paths to the commands in such a file, each a list of
     keys in which `*` stands for every key of a mapping and every item of a sequence, as
     `[["jobs", "*", "steps", "*", "run"]]`; each text a path reaches is a command text, and so is
@@ -666,10 +671,14 @@ Alternatives considered for the cure:
   read, and only for this. Session's call: one key that names a file and paths into it states
   GitHub Actions' layout as data; whether it fits other CI systems is not claimed here, since no
   named repository uses one, and a system it does not fit comes back as an amendment.
-- **CI-2** Each command text is cut into commands and words as ENTRY-7 cuts a script, with two
-  additions for text that spans lines: an unquoted `\` just before a line end joins the two lines
-  into one, and any other line end cuts commands as `;` does, so a `run: |` block of several lines
-  is several commands. Each command is then read as ENTRY-7 reads one, and a file it names is an
+- **CI-2** Each command text is cut into commands and words as ENTRY-7 cuts a script, quotes found
+  first, with three additions for text that spans lines: an unquoted `\` just before a line end
+  joins the two lines into one; any other unquoted line end cuts commands as `;` does, so a
+  `run: |` block of several lines is several commands, while a line end inside quotes is part of
+  the quoted text; and an unquoted `#` that begins a word starts a comment, so nothing from it to
+  the line end is read. A step's shell (`shell: pwsh`, `shell: python`) is not read: every command
+  text is cut the same way, which reads `node scripts/a.mjs` alike in sh and PowerShell, and a
+  Python step's words rarely begin with a program that runs files (session's call). Each command is then read as ENTRY-7 reads one, and a file it names is an
   entry point wherever under the root it lies, as a script's is (ENTRY-1): when its first remaining word
   is `node` or a program a `scriptCommands` declaration names, every later word that names a listed
   file, from the command's folder (CI-1's `folder`, else the detection folder), with the reading
@@ -679,7 +688,9 @@ Alternatives considered for the cure:
   (CONF-1) means that folder, the working directory the CI system runs the command in, as it means
   the `package.json`'s folder for a script. So CONF-1 to CONF-3's "a script of a `package.json`"
   reads, from this amendment on, "a script of a `package.json`, or a command of a command file". A word holding `$`, such as `${{ inputs.path }}` or
-  `$RUNNER_TEMP/a.json`, names no file and adds nothing, as ENTRY-7 reads no variables. A program
+  `$RUNNER_TEMP/a.json`, names no file and adds nothing, as ENTRY-7 reads no variables; after one
+  of CONF-1's option names it gives no notice either, since it is not a path the analyzer could
+  have found (session's call). A program
   behind a wrapper ENTRY-7 does not look past, as `npx tsx scripts/a.ts`, starts a file only when
   the wrapper is itself a declared program, as in a script; that limit is ENTRY-7's, and a miss it
   causes in a workflow is judged as it would be in a script. Session's call: the same reading as a
