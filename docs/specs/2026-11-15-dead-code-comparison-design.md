@@ -596,7 +596,7 @@ call, on the owner's rule).
 
 ## Amendments
 
-### 2026-11-17: The commands a CI workflow runs, read as a script's are, and a package no detection folder holds
+### 2026-11-17: The commands a CI workflow runs, read as a script's are
 
 The comparison on the pinned commits (CMP-1 to CMP-7) was run on 2026-11-17; its judged list is in
 the work item's report folder. It found one false finding the analyzer reports and fallow does not,
