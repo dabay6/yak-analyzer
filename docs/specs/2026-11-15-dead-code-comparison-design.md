@@ -806,7 +806,11 @@ root's `pnpm-workspace.yaml` (the reading spec's PACK-3), read through the same 
 and every base commit, with no bound on its size.
 
 CI-6 and CI-7 are the requirements plan 4, this item's fourth plan (GO-1 to GO-3, FREEZE-1,
-FREEZE-2), builds; today the analyzer meets the first two holes only. By CURE-4 a fix that changes what an approved
+FREEZE-2), builds; today the analyzer meets the first two holes only. As FREEZE-2 orders a change
+the owner approves with the go: plan 4 builds CI-6 and CI-7 after GO-3 and before FREEZE-1; CURE-5's
+rerun follows, on every root's final commit (GO-1's, which for three repositories is the pinned one)
+and every branch audit, and any finding it adds or removes is judged, written in the judged list and
+on the record, and told to the owner; FREEZE-1's drafts end only once that is done. By CURE-4 a fix that changes what an approved
 spec says is written here first. The owner approved stating the bounds as built when ruling on the
 list FREEZE-2 brought (2026-11-17); the bounds are not among what FREEZE-1 fixes under the interface
 version. This amendment changes CI-3's sentence on bounds, making them per file and adding
