@@ -796,14 +796,15 @@ CI-3's sentence on bounds, and nothing else.
 
 - **CI-6** Replaces CI-3's "a document that expands to more than 100,000 values once its aliases are
   followed" with: a file whose documents, all together, hold more than 100,000 values, or more than
-  4 MiB of text, counting every copy the reader makes. A value is a text, a sequence or a mapping,
-  keys included; the text is the bytes of every text among them, keys included. An alias counts the
-  values and the text of the node it names each time it appears, and an anchored node counts them
-  again when its copy is kept for its aliases, so every copy is counted before it is made. The
-  1 MiB bound on the file's own size stands, as do CI-3's other words: the count is kept while the
-  file is read, never after, and such a file adds nothing and gives CI-3's notice, which names both
-  bounds. Fixtures hold a file of two documents each under the value bound and over it together, a
-  file of one long text aliased until it passes the text bound, and a file of anchors nested in one
-  another, with no alias, past the value bound once their copies are counted (CURE-3). Session's
-  call: 4 MiB is four times the largest file read, far above any real workflow; counting each kept
-  copy once makes the copies a file can make no more than the bounds.
+  4 MiB of text, once their aliases are followed. A value is a text, a sequence or a mapping, keys
+  included; the text is the bytes of every text among them, keys included; an alias counts the
+  values and the text of the node it names each time it appears. The bound is of the file's content
+  so expanded, not of how the reader holds it: the reader shares an anchored value with each of its
+  aliases rather than copying it, so reading a file costs no more than the bounds allow, however
+  many anchors it has. The 1 MiB bound on the file's own size stands, as do CI-3's other words: the
+  count is kept while the file is read, never after, and such a file adds nothing and gives CI-3's
+  notice, which names the bounds. Fixtures hold a file of two documents each under the value bound
+  and over it together, a file of one long text aliased until it passes the text bound, and a chain
+  of anchors nested 50,000 deep with no alias, which is read, with no notice, and promptly (CURE-3).
+  Session's call: 4 MiB is four times the largest file read and far above any real workflow; sharing
+  removes the copies rather than counting them.
