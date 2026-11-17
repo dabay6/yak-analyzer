@@ -795,7 +795,11 @@ fn a_ci_workflows_commands_start_files_as_a_scripts_do() {
                  d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]\n\
                  e: [*d, *d, *d, *d, *d]\n";
     // One long text aliased a hundred times: few values, but 6 MB of text once the aliases are followed.
-    let wide = format!("a: &a {}\nb: [{}]\n", "x".repeat(60_000), ["*a"; 100].join(", "));
+    let wide = format!(
+        "a: &a {}\nb: [{}]\n",
+        "x".repeat(60_000),
+        ["*a"; 100].join(", ")
+    );
 
     project
         .write(
@@ -863,7 +867,10 @@ jobs:
              h: &h [*g, *g, *g, *g, *g, *g, *g, *g, *g, *g]\n\
              i: [*h, *h, *h, *h, *h, *h, *h, *h, *h, *h]\n",
         )
-        .write(".github/workflows/split.yml", &format!("{split}---\n{split}"))
+        .write(
+            ".github/workflows/split.yml",
+            &format!("{split}---\n{split}"),
+        )
         .write(".github/workflows/wide.yml", &wide)
         .write(
             "packages/web/vitest.e2e.config.ts",
