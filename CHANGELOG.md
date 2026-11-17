@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/dabay6/yak-analyzer/compare/v0.8.0...v0.9.0) (2026-11-17)
+
+
+### Features
+
+* **entries:** read a configuration file a script names by an option ([62850fe](https://github.com/dabay6/yak-analyzer/commit/62850fe8dcebcf8c85d508a0ad78de40fc711edd))
+
 ## [0.8.0](https://github.com/dabay6/yak-analyzer/compare/v0.7.1...v0.8.0) (2026-11-17)
 
 
