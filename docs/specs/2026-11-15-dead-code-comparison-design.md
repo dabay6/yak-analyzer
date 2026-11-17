@@ -780,3 +780,23 @@ The files are read with `yaml-rust2`, the YAML crate the analyzer already pins a
 Left to the builder, for this amendment: the notice kind and wording of CI-3's notice, and where
 the fix falls in plan 3, this item's third plan, which carries the comparison (CMP-1 to CURE-5), with
 the fix and its fixtures before CURE-5's rerun.
+
+### 2026-11-17: A command file's bounds, as built
+
+Plan 3 built CI-3's bounds and, before it merged, an automated security review found two ways past
+them as CI-3 words them: one long text aliased many times copies megabytes for each alias while
+counting one value, and a file of many documents expands each to just under the per-document bound.
+Either lets a workflow on a branch exhaust memory, which is what CI-3's bounds are for. The code was
+hardened under a ruling of plan 3, and the owner approved stating the bounds as built (FREEZE-2,
+2026-11-17). This amendment changes CI-3's sentence on bounds, and nothing else.
+
+- **CI-6** Replaces CI-3's "a document that expands to more than 100,000 values once its aliases are
+  followed" with: a file whose documents, all together, hold more than 100,000 values, or more than
+  4 MiB of text, once their aliases are followed. A value is a text, a sequence or a mapping, keys
+  included; the text is the bytes of every text among them, keys included; an alias counts the
+  values and the text of the node it names each time it appears. The 1 MiB bound on the file's own
+  size stands, as do CI-3's other words: the count is kept while the file is read, never after, and
+  such a file adds nothing and gives CI-3's notice, which names both bounds. Fixtures hold a file of
+  two documents each under the value bound and over it together, and a file of one long text aliased
+  until it passes the text bound (CURE-3). Session's call: 4 MiB is four times the largest file
+  read, far above any real workflow, and bounds the copies a 1 MiB file can make.
