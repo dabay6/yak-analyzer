@@ -863,6 +863,10 @@ Alternatives considered:
 - **CI-7** The reading spec's PACK-3 reads the root's `pnpm-workspace.yaml` through the reader CI-6
   describes, under the same bounds, its first document as today. Past a bound, or with an alias
   inside its own value, the run stops as it does today on a `pnpm-workspace.yaml` that cannot be read,
-  with the line naming the bound. A fixture holds a `pnpm-workspace.yaml` nested past the bound
-  (CURE-3). Session's call: the analyzer reads every YAML file the same way, so no file of a branch
+  with the line naming the bound. CI-7 changes how the file is read, not what its values mean: for
+  it, a plain scalar keeps the YAML type the loader gave it until now, so an empty `packages:`,
+  `packages: ~` and `packages: null` are still an empty list, and a number or a boolean in the list
+  still stops the run as a value of the wrong form (PACK-6); only a command file reads every scalar
+  as a text (CI-6). Fixtures hold a `pnpm-workspace.yaml` nested past the bound, and one whose
+  `packages` is `~`, which still gives no workspace package (CURE-3). Session's call: the analyzer reads every YAML file the same way, so no file of a branch
   can end the run with nothing written.
