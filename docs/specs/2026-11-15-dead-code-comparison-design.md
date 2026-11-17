@@ -686,8 +686,10 @@ Alternatives considered for the cure:
 - **CI-2** Each command text is cut into commands and words as ENTRY-7 cuts a script, with these
   additions for text that spans lines. Quotes and comments are found in one pass from the left: an
   unquoted `#` that begins a word starts a comment, and nothing from it to the line end is read, a
-  quote inside it included; a `#` inside quotes is text. A quote with no closing quote on its own
-  line quotes the rest of that line only, so a stray quote loses at most one line. An unquoted `\`
+  quote inside it included; a `#` inside quotes is text. A quote is closed by the next matching
+  quote anywhere later in the command text, across line ends; a quote with no matching quote in
+  the rest of the text quotes the rest of its own line only, so a stray quote loses at most one
+  line. An unquoted `\`
   just before a line end joins the two lines into one; any other unquoted line end cuts commands as
   `;` does, so a `run: |` block of several lines is several commands, while a line end inside a
   closed quote is part of the quoted text. A step's shell (`shell: pwsh`, `shell: python`) is not read: every command
