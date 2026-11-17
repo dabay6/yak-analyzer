@@ -710,7 +710,10 @@ Alternatives considered for the cure:
   reads, from this amendment on, "a script of a `package.json`, or a command of a command file". A word holding `$`, such as `${{ inputs.path }}` or
   `$RUNNER_TEMP/a.json`, names no file and adds nothing, as ENTRY-7 reads no variables; after one
   of CONF-1's option names it gives no notice either, since it is not a path the analyzer could
-  have found (session's call). A program
+  have found, and this holds for a `package.json` script's command as for a command file's: CONF-2's
+  notice for "a word that names no listed file" is, from this amendment on, for such a word that
+  holds no `$` (session's call: one reading for both, and a variable is never a file the
+  repository could list). A program
   behind a wrapper ENTRY-7 does not look past, as `npx tsx scripts/a.ts`, starts a file only when
   the wrapper is itself a declared program, as in a script; that limit is ENTRY-7's, and a miss it
   causes in a workflow is judged as it would be in a script. Session's call: the same reading as a
