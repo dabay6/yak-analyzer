@@ -665,9 +665,11 @@ Alternatives considered for the cure:
   reads it as CONF-2 reads a script's command, from the same folder, and its `relativeTo: "script"`
   (CONF-1) means that folder, the working directory the CI system runs the command in, as it means
   the `package.json`'s folder for a script. A word holding `$`, such as `${{ inputs.path }}` or
-  `$RUNNER_TEMP/a.json`, names no file and adds nothing, as ENTRY-7 reads no variables. Session's
-  call: the same reading as a script's, so a file is an entry point whether a script or a workflow
-  starts it.
+  `$RUNNER_TEMP/a.json`, names no file and adds nothing, as ENTRY-7 reads no variables. A program
+  behind a wrapper ENTRY-7 does not look past, as `npx tsx scripts/a.ts`, starts a file only when
+  the wrapper is itself a declared program, as in a script; that limit is ENTRY-7's, and a miss it
+  causes in a workflow is judged as it would be in a script. Session's call: the same reading as a
+  script's, so a file is an entry point whether a script or a workflow starts it.
 - **CI-3** A file `file` matches that is not valid YAML, and a value along a `commands` or `folder`
   path that is not of the kind its path expects (a mapping, a sequence, a text), adds nothing and
   never stops the run: a file that does not parse gives one notice naming it, and a value of
@@ -675,7 +677,8 @@ Alternatives considered for the cure:
   `commandFiles` value not of CI-1's shape, an object missing `file` or `commands`, holding another
   field, or with a path that is not a list of texts, stops the run as ENTRY-6a says. Session's call.
 - **CI-4** The reading spec's KEY-1 gains `commandFiles` as a tenth key, a draft until FREEZE-1 like
-  the others, stated by a pack only: a project's `commandFiles` is refused as a project's
+  the others, and CI-1's shape is among the shapes FREEZE-1 fixes, beside ENTRY-6's, ENTRY-7's and
+  CONF-1's. It is stated by a pack only: a project's `commandFiles` is refused as a project's
   `configEntries` is. `graph` names a file a command started as an entry point with the command
   file it came from, as it names a script's (the stage-1 spec's CMD-4). Fixtures hold (CURE-3): a
   workflow whose step runs `node scripts/a.mjs` (an entry point); a `run: |` block of two lines
@@ -692,5 +695,7 @@ Alternatives considered for the cure:
   carried judgment, as JDG-3 already says; on the pinned commits nothing is carried in any case,
   since CURE-2's first change reopened every root. Session's call.
 
-Left to the builder, for this amendment: the notice kind and wording of CI-3's notice; the YAML
-crate; and where the fix falls in plan 3, which carries it with its fixtures before CURE-5's rerun.
+The files are read with `yaml-rust2`, the YAML crate the analyzer already pins and reads
+`pnpm-workspace.yaml` with (session's call: no new dependency).
+
+Left to the builder, for this amendment: the notice kind and wording of CI-3's notice, and where the fix falls in plan 3, which carries it with its fixtures before CURE-5's rerun.
