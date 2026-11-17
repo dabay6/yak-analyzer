@@ -593,3 +593,190 @@ call, on the owner's rule).
   folder.
 - The notice kind and wording of CONF-2's notice, and the field names `graph` uses for DYN-1's uses.
 - Whether a fix the judging turns up needs its own amendment (CURE-4), and its wording.
+
+## Amendments
+
+### 2026-11-17: The commands a CI workflow runs, read as a script's are
+
+The comparison on the pinned commits (CMP-1 to CMP-7) was run on 2026-11-17; its judged list is in
+the work item's report folder. It found one false finding the analyzer reports and fallow does not,
+and no miss once the design spec's AN-4a is applied. AN-4a says that unused files, exports and
+types are reported only in a package whose folder is one yak's stack detection looked in (the
+root's package and the workspace's packages), since no stack, and so no declaration, describes any
+other; the stage-1 spec's ENTRY-9 builds it. From two repository roots, fallow reports the true
+findings of a package each keeps in a sub-folder no workspace lists, and the analyzer reports none of
+them, as AN-4a says; the owner ruled on 2026-11-17 that AN-4a stands and that those findings are set
+apart, left to yakshaver's work item `2026-11-11-stack-detection-in-sub-folders` (JDG-5b). The false
+finding:
+
+- In one named repository, a script under `scripts/` is started only by a step of its GitHub
+  Actions workflow, `run: node scripts/<name>.mjs …`, and by a test that spawns it by path. No
+  `package.json` script names it, so the analyzer reports it unused. fallow 3.39.0 does not report
+  it: its `list --entry-points` gives the file as an entry point from the source "scripts", though
+  no `package.json` script names it, so it reads the workflow's commands as it reads a script's
+  (the judged list records the run).
+
+By CURE-1 the cure is the analyzer's: the workflow is a file in the repository, and the commands in
+it are read the way ENTRY-7 already reads a script. Which files hold commands, and where in them, is
+a fact of the CI system, so a pack states it, as it states a configuration file's name in
+`configEntries` (design ENT-5). The owner chose this cure on 2026-11-17. This amendment changes the
+stage-1 spec's ENTRY-1, whose list of what makes an entry point it extends, and ENTRY-7, which reads
+only `package.json` scripts; the reading spec's KEY-1, whose list of keys it extends and whose
+"all nine" now reads "all ten", and LIST-6, under which a file of the kind "other" is never read
+save `pnpm-workspace.yaml` (CI-1 adds a second exception); and this
+spec's CONF-1 to CONF-3, which read only a `package.json`'s scripts (CI-2), JDG-3 (CI-5), JDG-5
+(JDG-5b) and FREEZE-1's list of shapes (CI-4). The spec's header, its "Amends:" list, is approved
+text and is not rewritten; this list is the record of what the amendment changes. Through CURE-4 it
+is owed to the design spec as an amendment of ENT-4's list of keys, and of AN-3, which says files
+that are not code are never read, which this item records for the design spec's work item, with
+the question that amendment must answer: which stack's pack states `commandFiles`. A CI system is
+not a language stack, and yak detects stacks by marker files; whether the generic pack (the pack yakshaver
+ships with its stacks for every language, the design spec's SWAP-1) states it under every stack, or a stack is added whose marker is a workflow folder (design DECL-6), is that
+work item's call. In this item's hand-off files, written by hand, it sits in the pack's part beside
+`configEntries`, in the `dead-code-tools` stack: the stack the live check's hand-off files keep for
+the pack's declarations, apart from the repository's (the stage-1 spec's LIVE-2).
+
+Alternatives considered for the cure:
+
+- **A repository `entries` declaration naming the script.** No analyzer change. Rejected by CURE-1:
+  the analyzer can read the workflow, so a declaration would state what it could know, and would go
+  stale when the workflow changes.
+- **GitHub Actions' layout built into the analyzer,** as fallow builds it in. Rejected by the design
+  spec's ENT-5: a tool's convention is a declaration wherever one can state it, and the analyzer
+  holds no list of tools.
+- **Reading every YAML file for words that name files.** No declaration. Rejected: a word in a
+  YAML file is not a command unless the CI system runs it, and matching words would make entry
+  points of paths named in any configuration.
+
+- **CI-1** A pack may declare `commandFiles`: a list of objects, one for each kind of file a CI
+  system reads commands from, each with:
+  - `file`: a glob naming the files, which applies in each detection folder, relative to that
+    folder, as a pack's glob does (the stage-1 spec's ENTRY-4), so
+    `.github/workflows/*.{yml,yaml}` from the root's detection folder names a repository's GitHub
+    Actions workflows. A file is read once, from the deepest detection folder that holds it, as
+    ENTRY-6 reads a configuration file, and that is the detection folder its commands run from.
+    Only files under the root are read, as for every key: a sub-folder root (CMP-2, CMP-7) holds no
+    workflow of the repository's, so no command file adds an entry point there. The glob also matches a `.github/workflows` folder nested in
+    a workspace package, which GitHub never runs; its commands then add entry points that nothing
+    starts, the quiet direction, and no named repository has one (session's call);
+  - `commands`: a list of one or more property paths to the commands in such a file, each a list of
+    keys in which `*` stands for every key of a mapping and every item of a sequence, as
+    `[["jobs", "*", "steps", "*", "run"]]`; each text a path reaches is a command text, and so is
+    each text in a sequence a path reaches;
+  - `folder`, optional: a list of one or more property paths to a text naming the folder a command
+    runs in, relative to the detection folder the file was matched from. Each path is tried from
+    the mapping that holds the command, then from each mapping above it on the way to the file's
+    top, nearest first, every path at one mapping before the next mapping up; the first text found
+    is the folder. So `[["working-directory"], ["defaults", "run", "working-directory"]]` finds a
+    GitHub Actions step's own folder, else its job's default, else the workflow's. A value a path
+    reaches that is not a text is passed over, and the search goes on. When no text is found, the
+    command runs in that detection folder.
+
+  `file` is a pack's glob, read and refused as the reading spec's KEY-5 and KEY-2 read and refuse
+  one. A `folder` text is a path written with `/`: a leading `./`, a trailing `/` and each `.`
+  segment say nothing, and each `..` takes off the segment before it, joined to the detection
+  folder, as the stage-1 spec's ENTRY-6b resolves a glob, so `./web`, `web/` and `web` are one
+  folder. One that is absolute, would leave the root, holds `$` (as `${{ matrix.dir }}`) or a
+  backslash, or is empty, names a folder the analyzer cannot know, so the commands under it are not read, and CI-3's notice names the file and
+  the text. The files are read as YAML, which also reads JSON, every document of a file that holds
+  several. Only a file whose name the glob matches is read, and only for this: the second exception
+  to the reading spec's LIST-6. Session's call: one key that names a file and paths into it states
+  GitHub Actions' layout as data; whether it fits other CI systems is not claimed here, since no
+  named repository uses one, and a system it does not fit comes back as an amendment.
+- **CI-2** Each command text is cut into commands and words as ENTRY-7 cuts a script, with these
+  additions for text that spans lines. Quotes and comments are found in one pass from the left: an
+  unquoted `#` that begins a word starts a comment, and nothing from it to the line end is read, a
+  quote inside it included; a `#` inside quotes is text. A quote is closed by the next matching
+  quote anywhere later in the command text, across line ends; a quote with no matching quote in
+  the rest of the text quotes the rest of its own line only, so a stray quote loses at most one
+  line. An unquoted `\`
+  just before a line end joins the two lines into one; any other unquoted line end cuts commands as
+  `;` does, so a `run: |` block of several lines is several commands, while a line end inside a
+  closed quote is part of the quoted text. A step's shell (`shell: pwsh`, `shell: python`) is not read: every command
+  text is cut the same way, which reads `node scripts/a.mjs` alike in sh and PowerShell, and a
+  Python step's words rarely begin with a program that runs files (session's call). So
+  PowerShell's backtick and cmd's `^` are not read as continuing a line, and a word written with
+  backslashes is not a path KEY-5 reads: a file started that way is not an entry point, and its
+  unused-file finding is false; so is one named through a variable, as
+  `node $GITHUB_WORKSPACE/scripts/a.mjs`, since a word holding `$` names no file. That is a known
+  limit, judged as BAR-4 says where it appears; no
+  named repository's workflow has one. Each command is then read as ENTRY-7 reads one, and a file it names is an
+  entry point wherever under the root it lies, as a script's is (ENTRY-1): when its first remaining word
+  is `node` or a program a `scriptCommands` declaration names, every later word that names a listed
+  file, from the command's folder (CI-1's `folder`, else the detection folder), with the reading
+  spec's RES-3 and MAP-1 applied, is an entry point. A `configEntries` declaration with `options`
+  reads it as CONF-2 reads a script's command, from the same folder, and the file it names is an
+  entry point read as CONF-2 and CONF-3 read one a script names; its `relativeTo: "script"`
+  (CONF-1) means that folder, the working directory the CI system runs the command in, as it means
+  the `package.json`'s folder for a script. So CONF-1 to CONF-3's "a script of a `package.json`"
+  reads, from this amendment on, "a script of a `package.json`, or a command of a command file". A word holding `$`, such as `${{ inputs.path }}` or
+  `$RUNNER_TEMP/a.json`, names no file and adds nothing, as ENTRY-7 reads no variables; after one
+  of CONF-1's option names it gives no notice either, since it is not a path the analyzer could
+  have found, and this holds for a `package.json` script's command as for a command file's: CONF-2's
+  notice for "a word that names no listed file" is, from this amendment on, for such a word that
+  holds no `$` (session's call: one reading for both, and a variable is never a file the
+  repository could list). A program
+  behind a wrapper ENTRY-7 does not look past, as `npx tsx scripts/a.ts`, starts a file only when
+  the wrapper is itself a declared program, as in a script; that limit is ENTRY-7's, and a miss it
+  causes in a workflow is judged as it would be in a script. Session's call: the same reading as a
+  script's, so a file is an entry point whether a script or a workflow starts it.
+- **CI-3** A file `file` matches that is not valid YAML, and a value along a `commands` or `folder`
+  path that is not of the kind its path expects (a mapping, a sequence, a text), adds nothing and
+  never stops the run: a file that does not parse gives one notice naming it, and a value of
+  another kind is passed over without one, since a workflow holds steps with no `run`. Reading a
+  file stops at fixed bounds, a file over 1 MiB and a document that expands to more than 100,000
+  values once its aliases are followed, and such a file adds nothing and gives the notice, so a
+  workflow on a branch built to expand without end cannot exhaust memory or hold up the run. The
+  bound is kept while the file is read, never after: the file is read through the YAML crate's
+  event parser, which hands over each value as it is parsed, and an alias counts the values of the
+  node it names each time it appears, so reading stops at the bound before any copy is made
+  (session's call: the crate's document loader copies each alias's value and builds the whole
+  document before it returns, so a count taken afterwards would come too late; real workflows are
+  far below both bounds). A
+  `commandFiles` value not of CI-1's shape, an object missing `file` or `commands`, holding another
+  field, with an empty `commands` or `folder` list, or with a path that is not a list of one or more
+  texts, stops the run as ENTRY-6a says. Session's call.
+- **CI-4** The reading spec's KEY-1 gains `commandFiles` as a tenth key, with the row: key
+  `commandFiles`, value opaque, states "the files a CI system reads commands from, and where in them
+  the commands are". It is a draft until FREEZE-1 like the others, and CI-1's shape is among the shapes FREEZE-1 fixes, beside ENTRY-6's, ENTRY-7's and
+  CONF-1's. It is stated by a pack only: a project's `commandFiles` is refused as a project's
+  `configEntries` is (KEY-2 refuses a project's opaque key). `graph` names a file a command started as an entry point with the command
+  file it came from, as it names a script's (the stage-1 spec's CMD-4). Fixtures hold (CURE-3): a
+  workflow whose step runs `node scripts/a.mjs` (an entry point); a `run: |` block of two lines
+  each starting a file, and one command continued over two lines with `\`; a step with
+  `working-directory` naming a sub-folder, a job whose `defaults.run.working-directory` names one,
+  and a workflow-level `defaults.run.working-directory` under a job with none; a `folder` path that
+  reaches a mapping (passed over, the next one found) and one whose text holds `$` (the step's
+  commands not read, one notice); a word naming no file and one holding `$` (nothing); a `#`
+  comment naming a file (nothing) and a quoted text spanning a line end (one word); a `commands`
+  path that reaches a sequence of texts (each a command); a step with no `run` (nothing, no
+  notice); a workflow that is not valid YAML (one notice), and one small file whose aliases expand past the bound (one notice, and the run ends promptly, which a count taken after loading would not); a file of two YAML documents (both read); a configuration file named by `--config` in a
+  step, read with `relativeTo: "script"` against the step's folder (CONF-2); and each refused
+  shape.
+- **CI-5** JDG-3's first list, the changes that reopen every finding of a root, also holds any file
+  a `commandFiles` declaration reads under the root, beside the configuration files a
+  `configEntries` declaration reads, since a command file starts files as they do. Adding
+  `commandFiles` to the hand-off files changes every root's declarations, which reopens every
+  carried judgment, as JDG-3 already says; on the pinned commits nothing is carried in any case:
+  the first change to the hand-off files the judged list records under CURE-2, `options` added to
+  the vitest and Playwright `configEntries` of every root on 2026-11-17, already changed every
+  root's declarations. Session's call.
+- **JDG-5b** JDG-5's list of what is set apart gains one case: a finding fallow reports in a package
+  whose own folder is not a detection folder, which AN-4a says the analyzer does not report (the
+  reading spec's PACK-4 mark, the stage-1 spec's ENTRY-9). Each such package is listed in JDG-5's section with the root it was run
+  from, its counts by kind, and a sample of its findings judged as JDG-5a judges one; the list says
+  that yakshaver's work item `2026-11-11-stack-detection-in-sub-folders` takes them, and GO-1's
+  final run lists them again as they stand then. The same package run as a root of its own (CMP-2)
+  is compared in full, as any root is. Since this rests on the hand-off file's detection folders,
+  which the session writes by hand (CMP-3), each root's list is the one yak's detection would give,
+  the root and the folders its `workspaces` or `pnpm-workspace.yaml` list (the reading spec's
+  PACK-3), checked against the root's files and written in the judged list beside the packages set
+  apart. This replaces, for this case only, JDG-5's "Nothing else is
+  set apart" (owner, 2026-11-17).
+
+The files are read with `yaml-rust2`, the YAML crate the analyzer already pins and reads
+`pnpm-workspace.yaml` with (session's call: no new dependency).
+
+Left to the builder, for this amendment: the notice kind and wording of CI-3's notice, and where
+the fix falls in plan 3, this item's third plan, which carries the comparison (CMP-1 to CURE-5), with
+the fix and its fixtures before CURE-5's rerun.

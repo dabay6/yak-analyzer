@@ -1,5 +1,5 @@
 //! Hands the built binary declarations and checks which it can use and how it refuses the rest (spec
-//! KEY-1, KEY-2, KEY-5, RUN-4, ENTRY-6a; comparison spec CONF-1).
+//! KEY-1, KEY-2, KEY-5, RUN-4, ENTRY-6a; comparison spec CONF-1, CI-1, CI-3, CI-4).
 
 mod support;
 
@@ -56,7 +56,15 @@ fn uses_every_key_it_knows_in_every_form_a_glob_may_take() {
                 "default": []
             }
         ],
-        "scriptCommands": ["cross-env", "tsx"]
+        "scriptCommands": ["cross-env", "tsx"],
+        "commandFiles": [
+            {
+                "file": ".github/workflows/*.{yml,yaml}",
+                "commands": [["jobs", "*", "steps", "*", "run"]],
+                "folder": [["working-directory"], ["defaults", "run", "working-directory"]]
+            },
+            { "file": ".gitlab-ci.yml", "commands": [["*", "script"], ["*", "before_script"]] }
+        ]
     });
     handed["stacks"][0]["project"] = json!({
         "entries": ["tools/run.ts"],
@@ -86,7 +94,8 @@ fn names_the_stack_the_key_and_who_states_it() {
         ),
         "yak-analyzer: cannot use the declaration `entrypoints` that the pack states for the stack `typescript`: \
          the analyzer knows no such key, only entries, data, generated, internal, cyclomaticLimit, \
-         cognitiveLimit, duplicationMinimum, configEntries, scriptCommands; change it in the pack"
+         cognitiveLimit, duplicationMinimum, configEntries, scriptCommands, commandFiles; change it in the \
+         pack"
     );
     assert_eq!(
         refused(
@@ -267,6 +276,84 @@ fn refuses_a_configuration_or_script_declaration_of_another_shape() {
         let line = refused(&format!("declarations-shape-{index}"), pack, json!({}));
 
         assert!(line.contains(expected), "{line}");
+    }
+}
+
+#[test]
+fn refuses_a_command_file_declaration_a_project_states_or_of_another_shape() {
+    assert_eq!(
+        refused(
+            "declarations-command-files-project",
+            json!({}),
+            json!({ "commandFiles": ["ci.yml"] })
+        ),
+        "yak-analyzer: cannot use the declaration `commandFiles` that the project states for the stack \
+         `typescript`: only a pack may state this key; change it in the project's own declarations"
+    );
+
+    let usable = || json!({ "file": "ci.yml", "commands": [["jobs", "*", "run"]] });
+    let changed = |change: &dyn Fn(&mut Value)| {
+        let mut entry = usable();
+
+        change(&mut entry);
+
+        json!({ "commandFiles": [entry] })
+    };
+    let paths = "must be a list of property paths, one or more, each a list of keys, one or more";
+    let cases: [(Value, String); 10] = [
+        (
+            json!({ "commandFiles": {} }),
+            ": its value must be a list of objects; ".to_owned(),
+        ),
+        (
+            json!({ "commandFiles": [3] }),
+            ": its entry 1 must be an object; ".to_owned(),
+        ),
+        (
+            changed(&|entry| entry["extra"] = json!(1)),
+            ": its entry 1's field `extra` is not one it may hold; ".to_owned(),
+        ),
+        (
+            changed(&|entry| {
+                entry.as_object_mut().expect("an object").remove("commands");
+            }),
+            ": its entry 1's field `commands` is missing; ".to_owned(),
+        ),
+        (
+            changed(&|entry| entry["file"] = json!(4)),
+            ": its entry 1's field `file` must be a glob; ".to_owned(),
+        ),
+        (
+            changed(&|entry| entry["file"] = json!("../ci/*.yml")),
+            ": its entry 1's field `file` cannot be used: the glob `../ci/*.yml` is absolute or steps out"
+                .to_owned(),
+        ),
+        (
+            changed(&|entry| entry["commands"] = json!([])),
+            format!(": its entry 1's field `commands` {paths}; "),
+        ),
+        (
+            changed(&|entry| entry["commands"] = json!([[]])),
+            format!(": its entry 1's field `commands` {paths}; "),
+        ),
+        (
+            changed(&|entry| entry["commands"] = json!(["run"])),
+            format!(": its entry 1's field `commands` {paths}; "),
+        ),
+        (
+            changed(&|entry| entry["folder"] = json!([["dir", 1]])),
+            format!(": its entry 1's field `folder` {paths}; "),
+        ),
+    ];
+
+    for (index, (pack, expected)) in cases.into_iter().enumerate() {
+        let line = refused(
+            &format!("declarations-command-files-{index}"),
+            pack,
+            json!({}),
+        );
+
+        assert!(line.contains(&expected), "{line}");
     }
 }
 

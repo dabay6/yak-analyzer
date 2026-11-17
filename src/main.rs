@@ -7,6 +7,7 @@
 
 mod audit;
 mod cli;
+mod command_files;
 mod declarations;
 mod entries;
 mod files;

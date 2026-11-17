@@ -671,11 +671,11 @@ impl<'p> Resolver<'p> {
         }
     }
 
-    /// The files a word of a package's script names, from the package's folder: the path itself, or the
-    /// source of build output, mapped back by the package the path lies in, which may be another
-    /// (spec ENTRY-7, ENTRY-7a).
-    pub fn script_target(&self, package: &Package, word: &str) -> Option<Vec<String>> {
-        let path = joined(folder_path(&package.folder), word)?;
+    /// The files a word of a command names, from the folder, from the root, the command runs in: the
+    /// path itself, or the source of build output, mapped back by the package the path lies in (spec
+    /// ENTRY-7, ENTRY-7a; comparison spec CI-2).
+    pub fn script_target(&self, folder: &str, word: &str) -> Option<Vec<String>> {
+        let path = joined(folder, word)?;
 
         match self.target(self.package_folder(&path), &path, None) {
             Found::Done(Outcome::Files(files)) => Some(files),

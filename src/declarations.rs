@@ -24,6 +24,9 @@ enum Kind {
     /// The programs whose file arguments in scripts are entry points, which only a pack may state (spec
     /// ENTRY-7).
     ScriptCommands,
+    /// The files a CI system reads commands from, and where in them, which only a pack may state
+    /// (comparison spec CI-1).
+    CommandFiles,
 }
 
 /// The fields an object of `configEntries` may hold, each required but `pattern` and `options` (spec
@@ -42,8 +45,11 @@ const CONFIG_FIELDS: [&str; 7] = [
 /// (spec CONF-1).
 const OPTIONS_FIELDS: [&str; 3] = ["program", "names", "relativeTo"];
 
+/// The fields an object of `commandFiles` may hold, each required but `folder` (comparison spec CI-1).
+const COMMAND_FIELDS: [&str; 3] = ["file", "commands", "folder"];
+
 /// Every key the analyzer knows, with the kind of its value (spec KEY-1).
-const KEYS: [(&str, Kind); 9] = [
+const KEYS: [(&str, Kind); 10] = [
     ("entries", Kind::Globs),
     ("data", Kind::Globs),
     ("generated", Kind::Globs),
@@ -53,6 +59,7 @@ const KEYS: [(&str, Kind); 9] = [
     ("duplicationMinimum", Kind::Number),
     ("configEntries", Kind::ConfigEntries),
     ("scriptCommands", Kind::ScriptCommands),
+    ("commandFiles", Kind::CommandFiles),
 ];
 
 /// Who states a declaration: the hand-off file keeps the two apart.
@@ -127,10 +134,13 @@ fn problem(key: &str, value: &Value, source: Source) -> Option<String> {
             Some(number) if number > 0 => None,
             _ => Some("its value must be a positive whole number".to_owned()),
         },
-        Kind::ConfigEntries | Kind::ScriptCommands if matches!(source, Source::Project) => {
+        Kind::ConfigEntries | Kind::ScriptCommands | Kind::CommandFiles
+            if matches!(source, Source::Project) =>
+        {
             Some("only a pack may state this key".to_owned())
         }
         Kind::ConfigEntries => config_entries_problem(value),
+        Kind::CommandFiles => command_files_problem(value),
         Kind::ScriptCommands => match texts(value) {
             Some(names) => names
                 .iter()
@@ -217,6 +227,66 @@ fn config_entries_problem(value: &Value) -> Option<String> {
                 .and_then(|why| field("default", &format!("cannot be used: {why}"))),
             None => field("default", "must be a list of globs"),
         }
+    })
+}
+
+/// Why a `commandFiles` value cannot be used, or nothing when it can: a list of objects, each with a
+/// `file` glob and its `commands` paths, optionally its `folder` paths, and no other field (comparison
+/// spec CI-1, CI-3).
+fn command_files_problem(value: &Value) -> Option<String> {
+    let Some(list) = value.as_array() else {
+        return Some("its value must be a list of objects".to_owned());
+    };
+
+    list.iter().enumerate().find_map(|(index, entry)| {
+        let number = index + 1;
+        let Some(fields) = entry.as_object() else {
+            return Some(format!("its entry {number} must be an object"));
+        };
+        let field =
+            |name: &str, why: &str| Some(format!("its entry {number}'s field `{name}` {why}"));
+
+        if let Some(unknown) = fields
+            .keys()
+            .find(|key| !COMMAND_FIELDS.contains(&key.as_str()))
+        {
+            return field(unknown, "is not one it may hold");
+        }
+
+        if let Some(missing) = ["file", "commands"]
+            .iter()
+            .find(|name| !fields.contains_key(**name))
+        {
+            return field(missing, "is missing");
+        }
+
+        let Some(glob) = fields["file"].as_str() else {
+            return field("file", "must be a glob");
+        };
+
+        if let Some(why) = glob_problem(glob) {
+            return field("file", &format!("cannot be used: {why}"));
+        }
+
+        ["commands", "folder"]
+            .iter()
+            .find(|name| fields.get(**name).is_some_and(|paths| !is_paths(paths)))
+            .and_then(|name| {
+                field(
+                    name,
+                    "must be a list of property paths, one or more, each a list of keys, one or more",
+                )
+            })
+    })
+}
+
+/// Whether a value is a list of one or more property paths, each a list of one or more keys.
+fn is_paths(value: &Value) -> bool {
+    value.as_array().is_some_and(|paths| {
+        !paths.is_empty()
+            && paths
+                .iter()
+                .all(|path| texts(path).is_some_and(|keys| !keys.is_empty()))
     })
 }
 
