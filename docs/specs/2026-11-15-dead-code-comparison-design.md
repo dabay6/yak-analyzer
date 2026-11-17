@@ -656,8 +656,7 @@ Alternatives considered for the cure:
     Actions workflows. A file is read once, from the deepest detection folder that holds it, as
     ENTRY-6 reads a configuration file, and that is the detection folder its commands run from.
     Only files under the root are read, as for every key: a sub-folder root (CMP-2, CMP-7) holds no
-    workflow of the repository's, so no command file adds an entry point there, as none does when
-    fallow is run from that sub-folder. The glob also matches a `.github/workflows` folder nested in
+    workflow of the repository's, so no command file adds an entry point there. The glob also matches a `.github/workflows` folder nested in
     a workspace package, which GitHub never runs; its commands then add entry points that nothing
     starts, the quiet direction, and no named repository has one (session's call);
   - `commands`: a list of one or more property paths to the commands in such a file, each a list of
@@ -674,25 +673,31 @@ Alternatives considered for the cure:
     command runs in that detection folder.
 
   `file` is a pack's glob, read and refused as the reading spec's KEY-5 and KEY-2 read and refuse
-  one. A `folder` text is read as KEY-5 reads a path; one that is absolute, steps out of the root
-  with `..`, holds `$` (as `${{ matrix.dir }}`), or is not a path KEY-5 reads, names a folder the
-  analyzer cannot know, so the commands under it are not read, and CI-3's notice names the file and
+  one. A `folder` text is a path written with `/`: a leading `./`, a trailing `/` and each `.`
+  segment say nothing, and each `..` takes off the segment before it, joined to the detection
+  folder, as the stage-1 spec's ENTRY-6b resolves a glob, so `./web`, `web/` and `web` are one
+  folder. One that is absolute, would leave the root, holds `$` (as `${{ matrix.dir }}`) or a
+  backslash, or is empty, names a folder the analyzer cannot know, so the commands under it are not read, and CI-3's notice names the file and
   the text. The files are read as YAML, which also reads JSON, every document of a file that holds
   several. Only a file whose name the glob matches is read, and only for this: the second exception
   to the reading spec's LIST-6. Session's call: one key that names a file and paths into it states
   GitHub Actions' layout as data; whether it fits other CI systems is not claimed here, since no
   named repository uses one, and a system it does not fit comes back as an amendment.
-- **CI-2** Each command text is cut into commands and words as ENTRY-7 cuts a script, quotes found
-  first, with three additions for text that spans lines: an unquoted `\` just before a line end
-  joins the two lines into one; any other unquoted line end cuts commands as `;` does, so a
-  `run: |` block of several lines is several commands, while a line end inside quotes is part of
-  the quoted text; and an unquoted `#` that begins a word starts a comment, so nothing from it to
-  the line end is read. A step's shell (`shell: pwsh`, `shell: python`) is not read: every command
+- **CI-2** Each command text is cut into commands and words as ENTRY-7 cuts a script, with these
+  additions for text that spans lines. Quotes and comments are found in one pass from the left: an
+  unquoted `#` that begins a word starts a comment, and nothing from it to the line end is read, a
+  quote inside it included; a `#` inside quotes is text. A quote with no closing quote on its own
+  line quotes the rest of that line only, so a stray quote loses at most one line. An unquoted `\`
+  just before a line end joins the two lines into one; any other unquoted line end cuts commands as
+  `;` does, so a `run: |` block of several lines is several commands, while a line end inside a
+  closed quote is part of the quoted text. A step's shell (`shell: pwsh`, `shell: python`) is not read: every command
   text is cut the same way, which reads `node scripts/a.mjs` alike in sh and PowerShell, and a
   Python step's words rarely begin with a program that runs files (session's call). So
   PowerShell's backtick and cmd's `^` are not read as continuing a line, and a word written with
   backslashes is not a path KEY-5 reads: a file started that way is not an entry point, and its
-  unused-file finding is false. That is a known limit, judged as BAR-4 says where it appears; no
+  unused-file finding is false; so is one named through a variable, as
+  `node $GITHUB_WORKSPACE/scripts/a.mjs`, since a word holding `$` names no file. That is a known
+  limit, judged as BAR-4 says where it appears; no
   named repository's workflow has one. Each command is then read as ENTRY-7 reads one, and a file it names is an
   entry point wherever under the root it lies, as a script's is (ENTRY-1): when its first remaining word
   is `node` or a program a `scriptCommands` declaration names, every later word that names a listed
@@ -716,9 +721,13 @@ Alternatives considered for the cure:
   another kind is passed over without one, since a workflow holds steps with no `run`. Reading a
   file stops at fixed bounds, a file over 1 MiB and a document that expands to more than 100,000
   values once its aliases are followed, and such a file adds nothing and gives the notice, so a
-  workflow on a branch built to expand without end cannot exhaust memory or hold up the run
-  (session's call: the YAML reader copies each alias's value, and real workflows are far below
-  both bounds). A
+  workflow on a branch built to expand without end cannot exhaust memory or hold up the run. The
+  bound is kept while the file is read, never after: the file is read through the YAML crate's
+  event parser, which hands over each value as it is parsed, and an alias counts the values of the
+  node it names each time it appears, so reading stops at the bound before any copy is made
+  (session's call: the crate's document loader copies each alias's value and builds the whole
+  document before it returns, so a count taken afterwards would come too late; real workflows are
+  far below both bounds). A
   `commandFiles` value not of CI-1's shape, an object missing `file` or `commands`, holding another
   field, with an empty `commands` or `folder` list, or with a path that is not a list of one or more
   texts, stops the run as ENTRY-6a says. Session's call.
@@ -736,7 +745,7 @@ Alternatives considered for the cure:
   commands not read, one notice); a word naming no file and one holding `$` (nothing); a `#`
   comment naming a file (nothing) and a quoted text spanning a line end (one word); a `commands`
   path that reaches a sequence of texts (each a command); a step with no `run` (nothing, no
-  notice); a workflow that is not valid YAML (one notice), and one past the alias bound (one
+  notice); a workflow that is not valid YAML (one notice), and one small file whose aliases expand past the bound (one notice, and the run ends promptly, which a count taken after loading would not; one
   notice); a file of two YAML documents (both read); a configuration file named by `--config` in a
   step, read with `relativeTo: "script"` against the step's folder (CONF-2); and each refused
   shape.
@@ -754,7 +763,11 @@ Alternatives considered for the cure:
   from, its counts by kind, and a sample of its findings judged as JDG-5a judges one; the list says
   that yakshaver's work item `2026-11-11-stack-detection-in-sub-folders` takes them, and GO-1's
   final run lists them again as they stand then. The same package run as a root of its own (CMP-2)
-  is compared in full, as any root is. This replaces, for this case only, JDG-5's "Nothing else is
+  is compared in full, as any root is. Since this rests on the hand-off file's detection folders,
+  which the session writes by hand (CMP-3), each root's list is the one yak's detection would give,
+  the root and the folders its `workspaces` or `pnpm-workspace.yaml` list (the reading spec's
+  PACK-3), checked against the root's files and written in the judged list beside the packages set
+  apart. This replaces, for this case only, JDG-5's "Nothing else is
   set apart" (owner, 2026-11-17).
 
 The files are read with `yaml-rust2`, the YAML crate the analyzer already pins and reads
