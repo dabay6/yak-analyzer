@@ -788,38 +788,58 @@ Code runs on each commit and push found two ways past them as CI-3 words them: o
 many times copies megabytes for each alias while counting one value, and a file of many documents
 expands each to just under the per-document bound. Either lets a workflow on a branch exhaust
 memory, which is what CI-3's bounds are for. Plan 3 hardened the code under a ruling on its Task 1,
-on the work item's record. This amendment's own zoom-out review, the first of the four review stages
-every amendment passes (its report is in the item's report folder), found a third. The reader, the
-part of the analyzer that builds a command file's values from the YAML crate's event parser
-(`src/command_files.rs`), keeps a copy of each anchored value for its aliases, uncounted, so a
-chain of anchors nested in one another, with no alias at all, copies a number of values that grows
-with the square of its depth. CI-6 is the requirement plan 4, this item's fourth plan (GO-1 to
-GO-3, FREEZE-1, FREEZE-2), builds: today the analyzer meets the first two holes and still copies
-anchored values, and its third fixture fails until plan 4 makes the reader share them. By CURE-4 a fix that changes what an approved spec says is written
-here first. The owner approved stating the bounds as built when ruling on the list FREEZE-2 brought
-(2026-11-17); the bounds are not among what FREEZE-1 fixes under the interface version. This
-amendment changes CI-3's sentence on bounds and its notice's wording, which CI-6 says names the
-bounds, and adds to CI-4's list of fixtures; nothing else.
+on the work item's record. This amendment's reviews, the four stages every amendment passes (their
+reports are in the item's report folder), found two more in the reader, the part of the analyzer
+that builds a command file's values from the YAML crate's parser (`src/command_files.rs`):
+
+- It keeps a copy of each anchored value for its aliases, uncounted. Anchors nested in one another
+  over a long list, each copied whole, copy far more values than the bounds count: about 100 million
+  for a chain of 1,000 anchors over a list of 98,000 items, a file under 1 MiB.
+- It hands the file to the crate's document loader, which recurses once for each level of nesting
+  and does not stop when the reader's bound is passed. A compact block sequence, `- - - … x`, nests a
+  level in two bytes, so a file under 1 MiB nests about 520,000 levels deep; measured on 2026-11-17,
+  such a file overflowed the reading thread's 256 MiB stack and ended the analyzer with nothing
+  written.
+
+CI-6 is the requirement plan 4, this item's fourth plan (GO-1 to GO-3, FREEZE-1, FREEZE-2), builds;
+today the analyzer meets the first two holes only. By CURE-4 a fix that changes what an approved
+spec says is written here first. The owner approved stating the bounds as built when ruling on the
+list FREEZE-2 brought (2026-11-17); the bounds are not among what FREEZE-1 fixes under the interface
+version. This amendment changes CI-3's sentence on bounds and its notice's wording, and adds to
+CI-4's list of fixtures; nothing else.
+
+Alternatives considered:
+
+- **Count each copy the reader keeps, rather than share.** It would close the copying hole too, but
+  a file would then be refused by how many anchors it uses, a fact of the reader, not of the file.
+- **Run the reader on a thread with a far larger stack.** It would hold 520,000 levels, but the bound
+  would rest on memory reserved for a case no real workflow has, and every deeper parser would need a
+  larger one.
+- **Another YAML crate.** A new dependency to review and pin, for what driving the pinned crate's
+  parser one event at a time already gives.
 
 - **CI-6** Replaces CI-3's "a document that expands to more than 100,000 values once its aliases are
   followed" with: a file whose documents, all together, hold more than 100,000 values, or more than
-  4 MiB of text, once their aliases are followed. A value is a scalar, a sequence or a mapping, keys
-  included; every scalar counts as a text, whatever its YAML type, a number, a boolean or a null
-  included, since the reader keeps each as the text the YAML parser hands over for it, its quotes
-  and escapes resolved. The text is the bytes of every scalar's text so handed over, keys
-  included. An alias counts the values and the text of the node it names
-  each time it appears. The bound is of the file's content so expanded, not of how the reader holds
-  it: the reader shares an anchored value with each of its aliases rather than copying it, so
-  reading a file costs no more than the bounds allow, however many anchors it has. Nesting is
-  bounded too: each level is a value, so no file nests deeper than 100,000 levels, and the threads
-  that read a project have a stack of 256 MiB (the stage-1 spec's LIFE-3), which held 99,000 levels
-  of nesting when measured on 2026-11-17. The 1 MiB bound on
-  the file's own size stands, as do CI-3's other words: the count is kept while the file is read,
-  never after, and such a file adds nothing and gives CI-3's notice, whose sentence names the three
-  bounds (1 MiB, 100,000 values, 4 MiB of text). CI-4's fixtures gain (CURE-3): a file of two
-  documents each under the value bound and over it together; a file of one long text aliased until it
-  passes the text bound; and a compact block sequence of 50,000 levels, `- &a1 - &a2 … x`, each
-  level anchored and none aliased, 50,001 values in all, whose run exits 0 and gives no notice for it,
-  where a reader that copies anchored values would copy over a billion and run out of memory before
-  the run ends. Session's call: 4 MiB is four times the 1 MiB bound on a file's size and far above
-  any real workflow; sharing removes the copies rather than counting them.
+  4 MiB of text, once their aliases are followed, or that nests deeper than 1,000 levels. A value is
+  a scalar, a sequence or a mapping, keys included; every scalar counts as a text, whatever its YAML
+  type, a number, a boolean or a null included, since the reader keeps each as the text the YAML
+  parser hands over for it, its quotes and escapes resolved. The text is the bytes of every
+  scalar's text so handed over, keys included. An alias counts the values and the text of the node
+  it names each time it appears; an alias to a node not yet finished, one that encloses it, makes
+  the file not valid YAML. A level is a sequence or a mapping inside another. The bounds are of the
+  file's content so expanded, not of how the reader holds it, and the reader keeps them in two ways:
+  it takes the parser's events one at a time, never through a loader that recurses, and stops at
+  the first event past a bound, so a file past one gives CI-3's bounds notice even where an error
+  lies further on; and it shares an anchored value with each of its aliases rather than copying it.
+  The 1 MiB bound on the file's own size stands, as do CI-3's other words: the count is kept while
+  the file is read, never after, and such a file adds nothing and gives CI-3's notice, whose sentence
+  names the bounds (1 MiB, 100,000 values, 4 MiB of text, 1,000 levels). CI-4's fixtures gain
+  (CURE-3): a file of two documents each under the value bound and over it together; a file of one
+  long text aliased until it passes the text bound; a compact block sequence 520,000 levels deep,
+  which gives the bounds notice and a run that exits 0; an alias to the anchor that encloses it, which
+  gives the not-valid notice; and a chain of 500 mappings, each anchored, over a flow list of 98,000
+  items, read with no notice, which guards the sharing. That last one is not written to fail first:
+  a reader that copies would exhaust the test machine's memory rather than fail cleanly, so its red
+  run is a measurement recorded with plan 4 instead (CURE-3's order, set aside for this one fixture).
+  Session's call: 4 MiB is four times the 1 MiB bound on a file's size, and 1,000 levels is fifty
+  times the deepest real workflow seen; both are far above any real one.
