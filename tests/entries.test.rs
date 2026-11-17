@@ -787,6 +787,15 @@ fn commanded(file: &str) -> Value {
 #[test]
 fn a_ci_workflows_commands_start_files_as_a_scripts_do() {
     let project = Project::new("entries-command-files");
+    // Two documents of about 68,000 values each once their aliases are followed: each under the bound
+    // alone, over it together.
+    let split = "a: &a [x, x, x, x, x, x, x, x, x, x]\n\
+                 b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\n\
+                 c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]\n\
+                 d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]\n\
+                 e: [*d, *d, *d, *d, *d]\n";
+    // One long text aliased a hundred times: few values, but 6 MB of text once the aliases are followed.
+    let wide = format!("a: &a {}\nb: [{}]\n", "x".repeat(60_000), ["*a"; 100].join(", "));
 
     project
         .write(
@@ -854,6 +863,8 @@ jobs:
              h: &h [*g, *g, *g, *g, *g, *g, *g, *g, *g, *g]\n\
              i: [*h, *h, *h, *h, *h, *h, *h, *h, *h, *h]\n",
         )
+        .write(".github/workflows/split.yml", &format!("{split}---\n{split}"))
+        .write(".github/workflows/wide.yml", &wide)
         .write(
             "packages/web/vitest.e2e.config.ts",
             "export default { test: { include: ['e2e/**/*.e2e.ts'] } };\n",
@@ -948,6 +959,8 @@ jobs:
             (".github/workflows/bomb.yaml", "command-file-not-read"),
             (".github/workflows/broken.yml", "command-file-not-read"),
             (".github/workflows/ci.yml", "command-file-not-read"),
+            (".github/workflows/split.yml", "command-file-not-read"),
+            (".github/workflows/wide.yml", "command-file-not-read"),
         ]
     );
     assert_eq!(

@@ -416,8 +416,8 @@ fn read_commands<'p>(
                     format!("{path} is not valid YAML, so its commands add no entry point.")
                 }
                 Unread::TooLarge => format!(
-                    "{path} is over 1 MiB, or over 100,000 values once its aliases are followed, so its \
-                     commands add no entry point."
+                    "{path} is over 1 MiB, or holds more than 100,000 values or 4 MiB of text once its \
+                     aliases are followed, so its commands add no entry point."
                 ),
             };
 

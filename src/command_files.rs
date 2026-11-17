@@ -8,8 +8,14 @@ use yaml_rust2::parser::{Event, EventReceiver, Parser};
 /// The largest command file the analyzer reads, in bytes (comparison spec CI-3).
 pub const MAX_BYTES: usize = 1024 * 1024;
 
-/// The most values one document may hold once its aliases are followed (comparison spec CI-3).
+/// The most values a command file may hold, all its documents together, once its aliases are followed
+/// (comparison spec CI-3).
 const MAX_VALUES: usize = 100_000;
+
+/// The most text, in bytes, a command file may hold, all its documents together, once its aliases are
+/// followed: an alias of one long text copies all of it, however few values it counts (comparison spec
+/// CI-3).
+const MAX_TEXT: usize = 4 * MAX_BYTES;
 
 /// One value of a command file.
 #[derive(Clone, Debug)]
@@ -27,14 +33,14 @@ pub enum Node {
 pub enum Unread {
     /// It is not valid YAML, or not UTF-8.
     Invalid,
-    /// It is over 1 MiB, or a document of it holds more than 100,000 values once its aliases are
-    /// followed.
+    /// It is over 1 MiB, or holds more than 100,000 values or 4 MiB of text, all its documents
+    /// together, once its aliases are followed.
     TooLarge,
 }
 
-/// Every document of a command file's text. Values are counted as the parser hands them over, and an
-/// alias counts the values of the node it names each time it appears, so reading stops at the bound
-/// before any copy is made (comparison spec CI-3).
+/// Every document of a command file's text. Values and their text are counted as the parser hands them
+/// over, across all the file's documents, and an alias counts the values and text of the node it names
+/// each time it appears, so reading stops at the bounds before any copy is made (comparison spec CI-3).
 pub fn read(text: &str) -> Result<Vec<Node>, Unread> {
     let mut builder = Builder::default();
 
@@ -143,36 +149,61 @@ enum Open {
     },
 }
 
-/// A sequence or a mapping being built, with its anchor and the values it holds so far, itself
+/// What a value weighs against the bounds: the values it holds, itself included, and the bytes of the
+/// texts among them, keys included.
+#[derive(Clone, Copy, Default)]
+struct Weight {
+    values: usize,
+    bytes: usize,
+}
+
+impl Weight {
+    /// A sequence or a mapping alone, before what it holds.
+    const CONTAINER: Self = Self {
+        values: 1,
+        bytes: 0,
+    };
+
+    /// The two weights together.
+    const fn plus(self, other: Self) -> Self {
+        Self {
+            values: self.values.saturating_add(other.values),
+            bytes: self.bytes.saturating_add(other.bytes),
+        }
+    }
+}
+
+/// A sequence or a mapping being built, with its anchor and the weight it holds so far, itself
 /// included.
 struct Frame {
     open: Open,
     anchor: usize,
-    size: usize,
+    size: Weight,
 }
 
-/// Builds the documents from the parser's events, counting values as they come.
+/// Builds the documents from the parser's events, counting what they weigh as they come.
 #[derive(Default)]
 struct Builder {
     documents: Vec<Node>,
     frames: Vec<Frame>,
-    anchors: BTreeMap<usize, (Node, usize)>,
-    counted: usize,
+    anchors: BTreeMap<usize, (Node, Weight)>,
+    counted: Weight,
     over: bool,
 }
 
 impl Builder {
-    /// Counts values against the bound; false once it is passed, after which nothing more is built.
-    fn count(&mut self, values: usize) -> bool {
-        self.counted = self.counted.saturating_add(values);
-        self.over = self.counted > MAX_VALUES;
+    /// Counts a weight against the bounds, across the whole file; false once either is passed, after
+    /// which nothing more is built.
+    fn count(&mut self, weight: Weight) -> bool {
+        self.counted = self.counted.plus(weight);
+        self.over = self.counted.values > MAX_VALUES || self.counted.bytes > MAX_TEXT;
 
         !self.over
     }
 
     /// Puts a finished value where it belongs: under its anchor, then in the sequence or mapping that
     /// holds it, or as a document.
-    fn finish(&mut self, node: Node, size: usize, anchor: usize) {
+    fn finish(&mut self, node: Node, size: Weight, anchor: usize) {
         if anchor > 0 {
             self.anchors.insert(anchor, (node.clone(), size));
         }
@@ -182,7 +213,7 @@ impl Builder {
             return;
         };
 
-        frame.size += size;
+        frame.size = frame.size.plus(size);
 
         match &mut frame.open {
             Open::List(items) => items.push(node),
@@ -207,33 +238,35 @@ impl EventReceiver for Builder {
         }
 
         match event {
-            Event::DocumentStart => {
-                self.counted = 0;
-                self.anchors.clear();
-            }
+            Event::DocumentStart => self.anchors.clear(),
             Event::Scalar(text, _, anchor, _) => {
-                if self.count(1) {
-                    self.finish(Node::Text(text), 1, anchor);
+                let weight = Weight {
+                    values: 1,
+                    bytes: text.len(),
+                };
+
+                if self.count(weight) {
+                    self.finish(Node::Text(text), weight, anchor);
                 }
             }
             Event::SequenceStart(anchor, _) => {
-                if self.count(1) {
+                if self.count(Weight::CONTAINER) {
                     self.frames.push(Frame {
                         open: Open::List(Vec::new()),
                         anchor,
-                        size: 1,
+                        size: Weight::CONTAINER,
                     });
                 }
             }
             Event::MappingStart(anchor, _) => {
-                if self.count(1) {
+                if self.count(Weight::CONTAINER) {
                     self.frames.push(Frame {
                         open: Open::Map {
                             entries: Vec::new(),
                             key: None,
                         },
                         anchor,
-                        size: 1,
+                        size: Weight::CONTAINER,
                     });
                 }
             }
@@ -248,9 +281,11 @@ impl EventReceiver for Builder {
                 }
             }
             Event::Alias(anchor) => {
-                let size = self.anchors.get(&anchor).map_or(0, |(_, size)| *size);
+                let size = self.anchors.get(&anchor).map(|(_, size)| *size);
 
-                if size > 0 && self.count(size) {
+                if let Some(size) = size
+                    && self.count(size)
+                {
                     let node = self.anchors[&anchor].0.clone();
 
                     self.finish(node, size, 0);
