@@ -384,6 +384,46 @@ fn reports_an_export_no_other_file_uses_as_a_value_or_a_type_once_where_it_is_de
 }
 
 #[test]
+fn reports_the_exports_nothing_reads_off_a_file_an_import_call_loads() {
+    let project = Project::new("audit-dynamic-reads");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/cli.ts" }"#,
+        )
+        .write(
+            "src/cli.ts",
+            "export async function run(): Promise<number> {\n\
+             \x20 return (await import('./features/wait.js')).wait();\n\
+             }\n",
+        )
+        .write(
+            "src/features/wait.ts",
+            "export const pollEvery = 1000;\n\
+             export function settle(): number {\n\
+             \x20 return pollEvery;\n\
+             }\n\
+             export async function wait(): Promise<number> {\n\
+             \x20 return settle();\n\
+             }\n",
+        )
+        .commit();
+
+    let run = audit(&project, None);
+
+    // The two exports used only inside their own file are reported, and the one member read off the
+    // `import()` is not (comparison spec DYN-1, DYN-4).
+    assert_eq!(
+        found(&run),
+        [
+            ("unused-export", "src/features/wait.ts", Some(1)),
+            ("unused-export", "src/features/wait.ts", Some(2)),
+        ]
+    );
+}
+
+#[test]
 fn reports_no_file_of_a_kind_that_is_never_an_unused_file() {
     let project = Project::new("audit-never-unused");
 

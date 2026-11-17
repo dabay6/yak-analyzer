@@ -1,7 +1,7 @@
 //! Runs the built binary on made-up projects and checks the imports it finds in each script, the names
 //! each brings in, what a script exports and what it uses of the files it imports, and how it treats a
 //! script it cannot parse (spec PARSE-1, PARSE-2, PARSE-6, IMP-1 to IMP-4, RUN-4; dead-code spec USE-1,
-//! USE-2, USE-2a, FIX-1, FIX-2).
+//! USE-2, USE-2a, FIX-1, FIX-2; comparison spec DYN-1 to DYN-4).
 
 #[path = "support/project.rs"]
 mod project;
@@ -511,7 +511,8 @@ fn reads_the_names_each_import_brings_in_and_the_names_it_passes_on() {
 
     // A default, a named and a namespace import each make a binding; `export … from` makes none and
     // offers the name again; an imported binding exported again is passed on under each name it is
-    // exported by (spec USE-1, USE-2a).
+    // exported by (spec USE-1, USE-2a). A binding that holds what an `import()` or a `require()`
+    // loads is one of its names too, so a template can name it (comparison spec DYN-1).
     assert_eq!(
         names,
         [
@@ -528,8 +529,8 @@ fn reads_the_names_each_import_brings_in_and_the_names_it_passes_on() {
             json!([name("*", None, &["grouped"])]),
             json!([name("*", Some("old"), &[])]),
             json!([name("Deep", None, &[])]),
-            json!([]),
-            json!([]),
+            json!([name("*", Some("lazy"), &[])]),
+            json!([name("*", Some("now"), &[])]),
             json!([
                 name("again", Some("again"), &["onceMore"]),
                 name("twice", Some("twice"), &["twice", "thrice"]),
@@ -700,22 +701,15 @@ fn passes_a_use_on_through_re_exports_to_the_file_that_declares_the_name() {
 }
 
 #[test]
-fn uses_every_export_of_a_file_a_call_loads_and_the_name_a_type_import_reads() {
-    let project = Project::new("imports-loads");
+fn uses_the_name_a_type_import_reads_and_every_export_where_it_reads_none() {
+    let project = Project::new("imports-type-loads");
 
     project
         .write(
             "src/main.ts",
-            "import old = require('./old');\n\
-             const now = require('./now');\n\
-             const later = import('./later');\n\
-             type Picked = import('./types').Picked;\n\
-             type Whole = typeof import('./shapes');\n\
-             console.log(old, now, later);\n",
+            "type Picked = import('./types').Picked;\n\
+             type Whole = typeof import('./shapes');\n",
         )
-        .write("src/old.ts", "export const a = 1;\n")
-        .write("src/now.ts", "export const b = 1;\n")
-        .write("src/later.ts", "export const c = 1;\n")
         .write(
             "src/types.ts",
             "export type Picked = string;\nexport type Left = number;\n",
@@ -725,14 +719,187 @@ fn uses_every_export_of_a_file_a_call_loads_and_the_name_a_type_import_reads() {
 
     let document = project.graph();
 
-    // What is read off the result of `require`, `import()` and `import … = require` is not followed, so
-    // each uses every export; a type import uses the name it reads (spec USE-2).
-    assert_eq!(uses(&document, "src/old.ts"), [("*", "src/main.ts", 1)]);
-    assert_eq!(uses(&document, "src/now.ts"), [("*", "src/main.ts", 2)]);
-    assert_eq!(uses(&document, "src/later.ts"), [("*", "src/main.ts", 3)]);
+    // A type import uses the name it reads, and every export where it reads none (spec USE-2).
     assert_eq!(
         uses(&document, "src/types.ts"),
-        [("Picked", "src/main.ts", 4)]
+        [("Picked", "src/main.ts", 1)]
     );
-    assert_eq!(uses(&document, "src/shapes.ts"), [("*", "src/main.ts", 5)]);
+    assert_eq!(uses(&document, "src/shapes.ts"), [("*", "src/main.ts", 2)]);
+}
+
+#[test]
+fn follows_the_names_read_off_what_an_import_call_or_a_require_loads() {
+    let project = Project::new("imports-dynamic-reads");
+    let three = "export const used = 1;\nexport const also = 2;\nexport const spare = 3;\n";
+
+    project
+        .write(
+            "src/main.ts",
+            "const a = (await import('./member')).used;\n\
+             const b = require('./required').used;\n\
+             const c = (await import('./keyed'))['used'];\n\
+             const { used: d, other = 1, nested: { deep } } = await import('./destructured');\n\
+             const { used: e } = require('./destructured-required');\n\
+             const held = await import('./held');\n\
+             console.log(held.used, held['also']);\n\
+             const old = require('./held-required');\n\
+             console.log(old.used);\n\
+             import('./then').then((loaded) => loaded.used);\n\
+             import('./then-destructured').then(({ used }) => used);\n\
+             const promise = import('./promise');\n\
+             console.log((await promise).used);\n\
+             promise.then(({ also }) => also);\n\
+             const unreferenced = await import('./unreferenced');\n\
+             await import('./side-effect');\n\
+             void require('./side-effect-required');\n\
+             console.log(a, b, c, d, e, other, deep);\n",
+        )
+        .write("src/member.ts", three)
+        .write("src/required.ts", three)
+        .write("src/keyed.ts", three)
+        .write(
+            "src/destructured.ts",
+            "export const used = 1;\nexport const other = 2;\nexport const nested = { deep: 3 };\n\
+             export const deep = 4;\nexport const spare = 5;\n",
+        )
+        .write("src/destructured-required.ts", three)
+        .write("src/held.ts", three)
+        .write("src/held-required.ts", three)
+        .write("src/then.ts", three)
+        .write("src/then-destructured.ts", three)
+        .write("src/promise.ts", three)
+        .write("src/unreferenced.ts", three)
+        .write("src/side-effect.ts", three)
+        .write("src/side-effect-required.ts", three)
+        .commit();
+
+    let document = project.graph();
+    let main = "src/main.ts";
+
+    // A member read by a name or a literal key; a destructuring with names only, whose default values
+    // and nested patterns use only the top-level name; a binding whose every reference reads a member;
+    // a `then` callback; and a binding of the promise that is awaited or given a `then`: each uses only
+    // the names read, each from the line of its read (comparison spec DYN-1, DYN-4).
+    assert_eq!(uses(&document, "src/member.ts"), [("used", main, 1)]);
+    assert_eq!(uses(&document, "src/required.ts"), [("used", main, 2)]);
+    assert_eq!(uses(&document, "src/keyed.ts"), [("used", main, 3)]);
+    assert_eq!(
+        uses(&document, "src/destructured.ts"),
+        [("nested", main, 4), ("other", main, 4), ("used", main, 4)]
+    );
+    assert_eq!(
+        uses(&document, "src/destructured-required.ts"),
+        [("used", main, 5)]
+    );
+    assert_eq!(
+        uses(&document, "src/held.ts"),
+        [("also", main, 7), ("used", main, 7)]
+    );
+    assert_eq!(uses(&document, "src/held-required.ts"), [("used", main, 9)]);
+    assert_eq!(uses(&document, "src/then.ts"), [("used", main, 10)]);
+    assert_eq!(
+        uses(&document, "src/then-destructured.ts"),
+        [("used", main, 11)]
+    );
+    assert_eq!(
+        uses(&document, "src/promise.ts"),
+        [("also", main, 14), ("used", main, 13)]
+    );
+    // A binding nothing refers to, and a result thrown away, use nothing (comparison spec DYN-1,
+    // DYN-2).
+    assert_eq!(uses(&document, "src/unreferenced.ts"), []);
+    assert_eq!(uses(&document, "src/side-effect.ts"), []);
+    assert_eq!(uses(&document, "src/side-effect-required.ts"), []);
+}
+
+#[test]
+fn uses_every_export_where_what_a_call_loads_is_passed_on_or_read_another_way() {
+    let project = Project::new("imports-dynamic-escapes");
+    let two = "export const used = 1;\nexport const spare = 2;\n";
+    let escaped: [(&str, u64); 11] = [
+        ("src/exported.ts", 1),
+        ("src/spread.ts", 2),
+        ("src/computed.ts", 4),
+        ("src/rest.ts", 5),
+        ("src/reassigned.ts", 6),
+        ("src/lazy.ts", 8),
+        ("src/off-promise.ts", 9),
+        ("src/promised.ts", 10),
+        ("src/argument.ts", 12),
+        ("src/named.ts", 13),
+        ("src/handed.ts", 15),
+    ];
+
+    project.write(
+        "src/main.ts",
+        "export const passed = await import('./exported');\n\
+         const spread = { ...(await import('./spread')) };\n\
+         const key = 'used';\n\
+         const computed = (await import('./computed'))[key];\n\
+         const { used, ...rest } = await import('./rest');\n\
+         let reassigned = require('./reassigned');\n\
+         reassigned = {};\n\
+         const lazy = () => import('./lazy');\n\
+         const off = import('./off-promise').used;\n\
+         const promised = import('./promised');\n\
+         console.log(promised.used);\n\
+         register(require('./argument'));\n\
+         const named = await import('./named');\n\
+         export { named };\n\
+         import('./handed').then(handle);\n\
+         console.log(spread, computed, used, rest, lazy, off);\n",
+    );
+
+    for (path, _) in escaped {
+        project.write(path, two);
+    }
+
+    project.commit();
+
+    let document = project.graph();
+
+    // An exported binding, a spread, a computed key, a rest element, a reassigned binding, a result
+    // returned or passed on, a member read straight off a promise, a binding of the promise read in
+    // another way, and a `then` given a callback it can't see: each uses every export, from the line of
+    // the call (comparison spec DYN-2, DYN-4).
+    for (path, line) in escaped {
+        assert_eq!(
+            uses(&document, path),
+            [("*", "src/main.ts", line)],
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn reads_an_import_of_require_as_a_namespace_import_is_read() {
+    let project = Project::new("imports-equals");
+
+    project
+        .write(
+            "src/main.ts",
+            "import whole = require('./whole');\n\
+             import picked = require('./picked');\n\
+             import unused = require('./unreferenced');\n\
+             type Shape = picked.Shape;\n\
+             console.log(whole, picked.used);\n",
+        )
+        .write("src/whole.ts", "export const used = 1;\n")
+        .write(
+            "src/picked.ts",
+            "export const used = 1;\nexport const spare = 2;\nexport type Shape = string;\n",
+        )
+        .write("src/unreferenced.ts", "export const used = 1;\n")
+        .commit();
+
+    let document = project.graph();
+
+    // `x.name` uses `name`, in code or in a type; any other reference uses every export, from its own
+    // line; and a binding nothing refers to uses nothing (comparison spec DYN-3).
+    assert_eq!(uses(&document, "src/whole.ts"), [("*", "src/main.ts", 5)]);
+    assert_eq!(
+        uses(&document, "src/picked.ts"),
+        [("Shape", "src/main.ts", 4), ("used", "src/main.ts", 5)]
+    );
+    assert_eq!(uses(&document, "src/unreferenced.ts"), []);
 }
