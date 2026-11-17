@@ -1,7 +1,7 @@
 //! Runs the built binary on made-up projects and checks the entry points it finds, the source of each,
 //! the packages whose entry points are likely incomplete, the uses an entry point makes of its own
 //! exports, and the files the entry points reach (spec ENTRY-1 to ENTRY-8, USE-3, USE-6, CMD-4, FIX-1,
-//! FIX-2).
+//! FIX-2; comparison spec CONF-1 to CONF-3).
 
 #[path = "support/project.rs"]
 mod project;
@@ -644,6 +644,111 @@ fn a_configuration_files_glob_of_build_output_names_the_source_it_is_built_from(
         ]
     );
     assert_eq!(notices(&document), Vec::<&str>::new());
+}
+
+#[test]
+fn a_configuration_file_a_script_names_by_an_option_is_read_as_a_matched_one_is() {
+    let project = Project::new("entries-configured-option");
+
+    project
+        .write(
+            "package.json",
+            r#"{
+                "name": "root",
+                "private": true,
+                "workspaces": ["packages/*"],
+                "scripts": { "unit": "vitest --config packages/app/vitest.config.ts" }
+            }"#,
+        )
+        .write(
+            "packages/app/package.json",
+            r#"{
+                "name": "app",
+                "scripts": {
+                    "test": "vitest run",
+                    "e2e": "npx vitest --config vitest.e2e.config.ts",
+                    "int": "cross-env CI=1 ./node_modules/.bin/vitest.cmd -c=config/int.config.mjs",
+                    "gone": "vitest --config missing.config.ts"
+                }
+            }"#,
+        )
+        .write(
+            "packages/app/vitest.config.ts",
+            "export default { test: { include: ['test/**/*.unit.ts'] } };\n",
+        )
+        .write(
+            "packages/app/vitest.e2e.config.ts",
+            "export default { test: { include: ['e2e/**/*.e2e.ts'] } };\n",
+        )
+        .write(
+            "packages/app/config/int.config.mjs",
+            "export default { test: { include: ['int/**/*.int.ts'] } };\n",
+        )
+        .write("packages/app/test/a.unit.ts", "")
+        .write("packages/app/e2e/b.e2e.ts", "")
+        .write("packages/app/int/c.int.ts", "")
+        .write("packages/app/config/int/d.int.ts", "")
+        .write("test/e.unit.ts", "")
+        .commit();
+
+    let declarations = json!({
+        "configEntries": [{
+            "file": "vitest.config.{ts,mts}",
+            "property": ["test", "include"],
+            "value": "globs",
+            "relativeTo": "config",
+            "default": ["**/*.test.ts"],
+            "options": { "program": "vitest", "names": ["--config", "-c"], "relativeTo": "script" }
+        }]
+    });
+    let file = project.hand_off(
+        &project.root,
+        &[".", "packages/app"],
+        stack(declarations, json!({})),
+    );
+    let document = printed(&project.run(|binary| {
+        binary.args(["--hand-off", &file]);
+    }));
+
+    // A file a script names after `--config` or `-c=`, behind `npx` or `cross-env`, is an entry point,
+    // and its value is read from the folder of the script's `package.json`, not the file's own. A file
+    // both matched and named is read from its own folder and from the naming script's (comparison spec
+    // CONF-1 to CONF-3).
+    assert_eq!(
+        entries(&document),
+        [
+            ("packages/app/config/int.config.mjs", vec![configured(None)]),
+            (
+                "packages/app/e2e/b.e2e.ts",
+                vec![configured(Some("packages/app/vitest.e2e.config.ts"))]
+            ),
+            (
+                "packages/app/int/c.int.ts",
+                vec![configured(Some("packages/app/config/int.config.mjs"))]
+            ),
+            (
+                "packages/app/test/a.unit.ts",
+                vec![configured(Some("packages/app/vitest.config.ts"))]
+            ),
+            ("packages/app/vitest.config.ts", vec![configured(None)]),
+            ("packages/app/vitest.e2e.config.ts", vec![configured(None)]),
+            (
+                "test/e.unit.ts",
+                vec![configured(Some("packages/app/vitest.config.ts"))]
+            ),
+        ]
+    );
+
+    // A word that names no listed file adds nothing, with a notice (comparison spec CONF-2).
+    assert_eq!(notices(&document), ["script-config-not-listed"]);
+    assert_eq!(
+        document["notices"][0]["sentence"],
+        json!(
+            "The script `vitest --config missing.config.ts` in packages/app/package.json names \
+             `missing.config.ts` after `--config` as a configuration file of `vitest`, and no listed file is \
+             there, so it adds no entry point."
+        )
+    );
 }
 
 #[test]

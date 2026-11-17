@@ -26,15 +26,21 @@ enum Kind {
     ScriptCommands,
 }
 
-/// The fields an object of `configEntries` may hold, each required but `pattern` (spec ENTRY-6).
-const CONFIG_FIELDS: [&str; 6] = [
+/// The fields an object of `configEntries` may hold, each required but `pattern` and `options` (spec
+/// ENTRY-6, CONF-1).
+const CONFIG_FIELDS: [&str; 7] = [
     "file",
     "property",
     "value",
     "pattern",
     "relativeTo",
     "default",
+    "options",
 ];
+
+/// The fields the `options` of a `configEntries` object may hold, each required but `relativeTo`
+/// (spec CONF-1).
+const OPTIONS_FIELDS: [&str; 3] = ["program", "names", "relativeTo"];
 
 /// Every key the analyzer knows, with the kind of its value (spec KEY-1).
 const KEYS: [(&str, Kind); 9] = [
@@ -167,7 +173,7 @@ fn config_entries_problem(value: &Value) -> Option<String> {
 
         if let Some(missing) = CONFIG_FIELDS
             .iter()
-            .find(|name| **name != "pattern" && !fields.contains_key(**name))
+            .find(|name| !matches!(**name, "pattern" | "options") && !fields.contains_key(**name))
         {
             return field(missing, "is missing");
         }
@@ -200,6 +206,10 @@ fn config_entries_problem(value: &Value) -> Option<String> {
             }
         }
 
+        if let Some(why) = fields.get("options").and_then(options_problem) {
+            return field("options", &why);
+        }
+
         match texts(&fields["default"]) {
             Some(globs) => globs
                 .iter()
@@ -208,6 +218,59 @@ fn config_entries_problem(value: &Value) -> Option<String> {
             None => field("default", "must be a list of globs"),
         }
     })
+}
+
+/// Why the `options` of a `configEntries` object cannot be used, or nothing when they can: an object
+/// with the program's name, a list of one or more option names, and, optionally, what a named file's
+/// value is relative to (spec CONF-1).
+fn options_problem(options: &Value) -> Option<String> {
+    let Some(fields) = options.as_object() else {
+        return Some("must be an object".to_owned());
+    };
+
+    if let Some(unknown) = fields
+        .keys()
+        .find(|key| !OPTIONS_FIELDS.contains(&key.as_str()))
+    {
+        return Some(format!("holds `{unknown}`, which it may not"));
+    }
+
+    if !fields
+        .get("program")
+        .and_then(Value::as_str)
+        .is_some_and(is_word)
+    {
+        return Some("must name its `program`, one word with no white space".to_owned());
+    }
+
+    let Some(names) = fields
+        .get("names")
+        .and_then(texts)
+        .filter(|names| !names.is_empty())
+    else {
+        return Some("must list its option `names`, one or more".to_owned());
+    };
+
+    if let Some(name) = names
+        .iter()
+        .find(|name| !is_word(name) || name.contains('='))
+    {
+        return Some(format!(
+            "names the option `{name}`, which is empty or holds white space or `=`"
+        ));
+    }
+
+    match fields.get("relativeTo").map(Value::as_str) {
+        None | Some(Some("config" | "detection" | "script")) => None,
+        Some(_) => {
+            Some("has a `relativeTo` that is not `config`, `detection` or `script`".to_owned())
+        }
+    }
+}
+
+/// Whether a text is one word: not empty, with no white space.
+fn is_word(text: &str) -> bool {
+    !text.is_empty() && !text.contains(char::is_whitespace)
 }
 
 /// The entries of a list of text, or nothing when the value is not one.
