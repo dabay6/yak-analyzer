@@ -17,23 +17,69 @@ const SEPARATORS: [&str; 5] = ["&&", "||", ";", "|", "&"];
 /// and nothing quoted splits; then the script is cut into commands at unquoted `&&`, `||`, `;`, `|` and
 /// `&`, and each command into words at unquoted white space (spec ENTRY-7).
 pub fn commands(script: &str) -> Vec<Vec<String>> {
+    cut(script, false)
+}
+
+/// The commands of a command file's command text, cut as a script's are, with what text that spans
+/// lines adds: an unquoted `#` that begins a word starts a comment to the line's end; an unquoted `\`
+/// just before a line end joins the two lines; any other unquoted line end cuts commands; and a quote is
+/// closed by the next matching quote anywhere later, across line ends, while one with no match quotes
+/// the rest of its own line only (comparison spec CI-2).
+pub fn command_lines(text: &str) -> Vec<Vec<String>> {
+    cut(text, true)
+}
+
+/// The commands of a text, each as its words, quotes removed: read as a script is, or, with `lines`, as
+/// a command file's command text is.
+fn cut(text: &str, lines: bool) -> Vec<Vec<String>> {
     let mut commands = Vec::new();
     let mut words: Vec<String> = Vec::new();
     let mut word = String::new();
     let mut started = false;
     let mut quote: Option<char> = None;
-    let mut rest = script;
+    // Whether the open quote has no match in the rest of the text, and so ends at its line's end.
+    let mut to_line_end = false;
+    let mut rest = text;
 
     while let Some(character) = rest.chars().next() {
         if let Some(open) = quote {
             if character == open {
                 quote = None;
-            } else {
-                word.push(character);
+                rest = &rest[character.len_utf8()..];
+                continue;
             }
 
-            rest = &rest[character.len_utf8()..];
-            continue;
+            if !(to_line_end && character == '\n') {
+                word.push(character);
+                rest = &rest[character.len_utf8()..];
+                continue;
+            }
+
+            // A quote with no match ends at its line's end, which is then read as an unquoted one.
+            quote = None;
+        }
+
+        if lines {
+            if character == '#' && !started {
+                // A comment runs to the line's end; the line end itself is still read.
+                rest = rest.find('\n').map_or("", |end| &rest[end..]);
+                continue;
+            }
+
+            if let Some(after) = rest
+                .strip_prefix("\\\r\n")
+                .or_else(|| rest.strip_prefix("\\\n"))
+            {
+                rest = after;
+                continue;
+            }
+
+            if character == '\n' {
+                end_word(&mut words, &mut word, &mut started);
+                commands.push(std::mem::take(&mut words));
+                rest = &rest[1..];
+                continue;
+            }
         }
 
         if let Some(separator) = SEPARATORS
@@ -50,6 +96,7 @@ pub fn commands(script: &str) -> Vec<Vec<String>> {
             end_word(&mut words, &mut word, &mut started);
         } else if character == '\'' || character == '"' {
             quote = Some(character);
+            to_line_end = lines && !rest[1..].contains(character);
             started = true;
         } else {
             word.push(character);

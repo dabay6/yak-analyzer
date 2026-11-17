@@ -1,7 +1,7 @@
 //! Runs the built binary on made-up projects and checks the entry points it finds, the source of each,
 //! the packages whose entry points are likely incomplete, the uses an entry point makes of its own
 //! exports, and the files the entry points reach (spec ENTRY-1 to ENTRY-8, USE-3, USE-6, CMD-4, FIX-1,
-//! FIX-2; comparison spec CONF-1 to CONF-3).
+//! FIX-2; comparison spec CONF-1 to CONF-3, CI-1 to CI-4).
 
 #[path = "support/project.rs"]
 mod project;
@@ -776,6 +776,186 @@ fn a_root_script_that_runs_another_packages_build_output_names_that_packages_sou
             "packages/a/lib/run.ts",
             vec![named("scripts", "package.json")]
         )]
+    );
+}
+
+/// The source a command file's command gives each file it starts (comparison spec CI-4).
+fn commanded(file: &str) -> Value {
+    json!({ "by": "pack", "file": file, "from": "commandFiles", "stack": "typescript" })
+}
+
+#[test]
+fn a_ci_workflows_commands_start_files_as_a_scripts_do() {
+    let project = Project::new("entries-command-files");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "root", "private": true, "workspaces": ["packages/*"] }"#,
+        )
+        .write("packages/web/package.json", r#"{ "name": "web" }"#)
+        .write(
+            ".github/workflows/ci.yml",
+            r#"on: push
+defaults:
+  run:
+    working-directory: tools
+jobs:
+  build:
+    defaults:
+      run:
+        working-directory: ./packages/web/
+    steps:
+      - uses: actions/checkout@v4
+      - run: node scripts/build.mjs
+      - run: node scripts/mapped.mjs
+        working-directory:
+          - not a text
+      - name: Several
+        working-directory: .
+        run: |
+          node scripts/a.mjs # node scripts/commented.mjs
+          node \
+            scripts/b.mjs --flag
+          echo "the next line is quoted
+          node scripts/hidden.mjs"
+          # don't run the next file
+          node scripts/c.mjs
+          echo it's here
+          node scripts/after.mjs
+          node scripts/missing.mjs $RUNNER_TEMP/x.mjs
+      - run: vitest --config vitest.e2e.config.ts
+        working-directory: packages/web
+      - run: node scripts/never.mjs
+        working-directory: ${{ matrix.dir }}
+  lint:
+    steps:
+      - run:
+          - node list-a.mjs
+          - node list-b.mjs
+      - run: node check.mjs
+"#,
+        )
+        .write(
+            ".github/workflows/two.yml",
+            "jobs:\n  one:\n    steps:\n      - run: node first.mjs\n---\n\
+             jobs:\n  two:\n    steps:\n      - run: node second.mjs\n",
+        )
+        .write(".github/workflows/broken.yml", "jobs: [unclosed\n")
+        .write(
+            ".github/workflows/bomb.yaml",
+            "a: &a [x, x, x, x, x, x, x, x, x, x]\n\
+             b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\n\
+             c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]\n\
+             d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]\n\
+             e: &e [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]\n\
+             f: &f [*e, *e, *e, *e, *e, *e, *e, *e, *e, *e]\n\
+             g: &g [*f, *f, *f, *f, *f, *f, *f, *f, *f, *f]\n\
+             h: &h [*g, *g, *g, *g, *g, *g, *g, *g, *g, *g]\n\
+             i: [*h, *h, *h, *h, *h, *h, *h, *h, *h, *h]\n",
+        )
+        .write(
+            "packages/web/vitest.e2e.config.ts",
+            "export default { test: { include: ['e2e/**/*.e2e.ts'] } };\n",
+        )
+        .write("packages/web/e2e/x.e2e.ts", "")
+        .write("packages/web/scripts/build.mjs", "")
+        .write("packages/web/scripts/mapped.mjs", "")
+        .write("scripts/a.mjs", "")
+        .write("scripts/b.mjs", "")
+        .write("scripts/c.mjs", "")
+        .write("scripts/after.mjs", "")
+        .write("scripts/commented.mjs", "")
+        .write("scripts/hidden.mjs", "")
+        .write("scripts/never.mjs", "")
+        .write("tools/check.mjs", "")
+        .write("tools/list-a.mjs", "")
+        .write("tools/list-b.mjs", "")
+        .write("first.mjs", "")
+        .write("second.mjs", "")
+        .commit();
+
+    let declarations = json!({
+        "commandFiles": [{
+            "file": ".github/workflows/*.{yml,yaml}",
+            "commands": [["jobs", "*", "steps", "*", "run"]],
+            "folder": [["working-directory"], ["defaults", "run", "working-directory"]]
+        }],
+        "configEntries": [{
+            "file": "vitest.config.{ts,mts}",
+            "property": ["test", "include"],
+            "value": "globs",
+            "relativeTo": "config",
+            "default": [],
+            "options": { "program": "vitest", "names": ["--config", "-c"], "relativeTo": "script" }
+        }]
+    });
+    let file = project.hand_off(
+        &project.root,
+        &[".", "packages/web"],
+        stack(declarations, json!({})),
+    );
+    let document = printed(&project.run(|binary| {
+        binary.args(["--hand-off", &file]);
+    }));
+    let ci = commanded(".github/workflows/ci.yml");
+    let two = commanded(".github/workflows/two.yml");
+
+    // Each file a step starts with `node` is an entry point, found from the step's own folder, else its
+    // job's default, else the workflow's; a comment, a quoted text spanning a line end and a word holding
+    // `$` start nothing, a continued line is one command, and a stray quote loses only its own line. A
+    // configuration file named by `--config` in a step is read from the step's folder (comparison spec
+    // CI-1, CI-2).
+    assert_eq!(
+        entries(&document),
+        [
+            ("first.mjs", vec![two.clone()]),
+            (
+                "packages/web/e2e/x.e2e.ts",
+                vec![configured(Some("packages/web/vitest.e2e.config.ts"))]
+            ),
+            ("packages/web/scripts/build.mjs", vec![ci.clone()]),
+            ("packages/web/scripts/mapped.mjs", vec![ci.clone()]),
+            ("packages/web/vitest.e2e.config.ts", vec![configured(None)]),
+            ("scripts/a.mjs", vec![ci.clone()]),
+            ("scripts/after.mjs", vec![ci.clone()]),
+            ("scripts/b.mjs", vec![ci.clone()]),
+            ("scripts/c.mjs", vec![ci.clone()]),
+            ("second.mjs", vec![two]),
+            ("tools/check.mjs", vec![ci.clone()]),
+            ("tools/list-a.mjs", vec![ci.clone()]),
+            ("tools/list-b.mjs", vec![ci]),
+        ]
+    );
+
+    // A file past the bound, one that is not valid YAML, and a folder the analyzer cannot know each give
+    // one notice and add nothing; the run goes on (comparison spec CI-3).
+    let said: Vec<(&str, &str)> = document["notices"]
+        .as_array()
+        .expect("a list of notices")
+        .iter()
+        .map(|notice| {
+            (
+                notice["file"].as_str().expect("a file"),
+                notice["kind"].as_str().expect("a kind"),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        said,
+        [
+            (".github/workflows/bomb.yaml", "command-file-not-read"),
+            (".github/workflows/broken.yml", "command-file-not-read"),
+            (".github/workflows/ci.yml", "command-file-not-read"),
+        ]
+    );
+    assert_eq!(
+        document["notices"][2]["sentence"],
+        json!(
+            "The folder `${{ matrix.dir }}` that a command of .github/workflows/ci.yml runs in is not one the \
+             analyzer can know, so the commands there add no entry point."
+        )
     );
 }
 

@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
 
+use crate::command_files::{self, Node, Unread};
 use crate::files::{File, Kind};
 use crate::glob::Glob;
 use crate::hand_off::HandOff;
@@ -173,9 +174,11 @@ pub fn find(project: &Project<'_>, notices: &mut Vec<Notice>) -> Result<Entries,
         }
     }
 
-    scripted(project, &mut entries);
+    let commands = commands(project, notices);
+
+    scripted(project, &commands, &mut entries);
     declared(project, &mut entries, notices)?;
-    configured(project, &mut entries, notices);
+    configured(project, &commands, &mut entries, notices);
 
     for package in &project.packages.list {
         let fault = if unmapped.contains(&package.folder) {
@@ -299,12 +302,215 @@ fn filled<'p>(pattern: &str, path: &'p str) -> Option<&'p str> {
     }
 }
 
-/// The entry points the scripts of each `package.json` start: a file a word of a command names, from
-/// the folder of that `package.json`, after `node` or a program a `scriptCommands` declaration names,
-/// as RES-3 and MAP-1 find it. Words of the form `NAME=value` before the program are passed over, an
-/// option's own name is never a file, and `--option=value` is tried by its value. A declared program
-/// counts in every package's scripts (spec ENTRY-7).
-fn scripted(project: &Project<'_>, entries: &mut Entries) {
+/// A command the project runs: a command of a `package.json`'s script, or one a CI system's command
+/// file holds, with the folder it runs in, which its words are found from (spec ENTRY-7; comparison
+/// spec CI-2).
+struct Command<'p> {
+    /// Its words, quotes removed.
+    words: Vec<String>,
+    /// The folder, from the root, it runs in: the empty path for the root.
+    folder: String,
+    /// The `package.json` whose script it is, or the command file that holds it.
+    file: String,
+    /// The script's text, for a script's command; none for a command file's.
+    script: Option<&'p str>,
+    /// For a command file's command, the stack whose pack declares the command file.
+    stack: Option<&'p str>,
+}
+
+impl Command<'_> {
+    /// What makes a file the command names an entry point, as `graph` prints it (comparison spec
+    /// CI-4).
+    fn source(&self) -> Source {
+        match self.stack {
+            None => Source::named("scripts", &self.file),
+            Some(stack) => Source {
+                from: "commandFiles",
+                file: Some(self.file.clone()),
+                stack: Some(stack.to_owned()),
+                by: Some("pack"),
+            },
+        }
+    }
+}
+
+/// Every command the project runs: each command of each `package.json`'s scripts, run in that
+/// `package.json`'s folder, then each command of each file a pack's `commandFiles` declaration matches,
+/// read once, from the deepest folder yak's detection looked in that holds it (spec ENTRY-7;
+/// comparison spec CI-1, CI-2).
+fn commands<'p>(project: &Project<'p>, notices: &mut Vec<Notice>) -> Vec<Command<'p>> {
+    let mut found = Vec::new();
+
+    for package in &project.packages.list {
+        for script in &package.scripts {
+            for words in tools::commands(script) {
+                found.push(Command {
+                    words,
+                    folder: folder_path(&package.folder).to_owned(),
+                    file: manifest_path(&package.folder),
+                    script: Some(script.as_str()),
+                    stack: None,
+                });
+            }
+        }
+    }
+
+    let Some(handed) = project.handed else {
+        return found;
+    };
+
+    for stack in &handed.stacks {
+        let declarations = stack.pack.get("commandFiles").and_then(Value::as_array);
+
+        for declaration in declarations
+            .into_iter()
+            .flatten()
+            .filter_map(CommandFiles::of)
+        {
+            for file in project.files {
+                let Some(base) = deepest(&handed.folders, &file.path).filter(|base| {
+                    inside(base, &file.path).is_some_and(|rest| declaration.file.matches(rest))
+                }) else {
+                    continue;
+                };
+
+                read_commands(
+                    project,
+                    &declaration,
+                    (&file.path, base),
+                    &stack.name,
+                    &mut found,
+                    notices,
+                );
+            }
+        }
+    }
+
+    found
+}
+
+/// The commands a command file holds, each at a path the declaration's `commands` gives, run in the
+/// folder its `folder` paths find, else in the detection folder the file was matched from. A file past
+/// the bounds or not valid YAML adds nothing, and nor does a command whose folder the analyzer cannot
+/// know; each gives one notice (comparison spec CI-1 to CI-3).
+fn read_commands<'p>(
+    project: &Project<'p>,
+    declaration: &CommandFiles,
+    (path, base): (&str, &str),
+    stack: &'p str,
+    found: &mut Vec<Command<'p>>,
+    notices: &mut Vec<Notice>,
+) {
+    let read = match project.tree.read(path) {
+        Ok(bytes) if bytes.len() > command_files::MAX_BYTES => Err(Unread::TooLarge),
+        Ok(bytes) => String::from_utf8(bytes)
+            .map_err(|_| Unread::Invalid)
+            .and_then(|text| command_files::read(text.strip_prefix('\u{feff}').unwrap_or(&text))),
+        Err(_) => Err(Unread::Invalid),
+    };
+    let documents = match read {
+        Ok(documents) => documents,
+        Err(why) => {
+            let sentence = match why {
+                Unread::Invalid => {
+                    format!("{path} is not valid YAML, so its commands add no entry point.")
+                }
+                Unread::TooLarge => format!(
+                    "{path} is over 1 MiB, or over 100,000 values once its aliases are followed, so its \
+                     commands add no entry point."
+                ),
+            };
+
+            notify(
+                notices,
+                Notice::new("command-file-not-read", Some(path.to_owned()), sentence),
+            );
+            return;
+        }
+    };
+
+    for document in &documents {
+        for keys in &declaration.commands {
+            for (text, above) in command_files::reached(document, keys) {
+                let Some(folder) = command_folder(declaration, &above, path, base, notices) else {
+                    continue;
+                };
+
+                for words in tools::command_lines(text) {
+                    found.push(Command {
+                        words,
+                        folder: folder.clone(),
+                        file: path.to_owned(),
+                        script: None,
+                        stack: Some(stack),
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// The folder, from the root, a command file's command runs in: the text the declaration's `folder`
+/// paths find, joined to the detection folder, else the detection folder itself. Nothing, with a
+/// notice, where the text names a folder the analyzer cannot know (comparison spec CI-1).
+fn command_folder(
+    declaration: &CommandFiles,
+    above: &[&Node],
+    path: &str,
+    base: &str,
+    notices: &mut Vec<Notice>,
+) -> Option<String> {
+    let Some(written) = declaration
+        .folder
+        .as_deref()
+        .and_then(|paths| command_files::folder(above, paths))
+    else {
+        return Some(base.to_owned());
+    };
+    let folder = run_folder(base, written);
+
+    if folder.is_none() {
+        notify(
+            notices,
+            Notice::new(
+                "command-file-not-read",
+                Some(path.to_owned()),
+                format!(
+                    "The folder `{written}` that a command of {path} runs in is not one the analyzer can \
+                     know, so the commands there add no entry point."
+                ),
+            ),
+        );
+    }
+
+    folder
+}
+
+/// The folder, from the root, a command file's folder text names, joined to the detection folder: a
+/// leading `./`, a trailing `/` and each `.` say nothing, and each `..` takes off the segment before
+/// it. Nothing where the text is empty, holds `$` or a backslash, is absolute, or would leave the root
+/// (comparison spec CI-1).
+fn run_folder(base: &str, written: &str) -> Option<String> {
+    if written.is_empty() || written.contains(['$', '\\']) {
+        return None;
+    }
+
+    resolved(base, written)
+}
+
+/// Adds a notice unless the run already has the same one, as a file two declarations match would give.
+fn notify(notices: &mut Vec<Notice>, notice: Notice) {
+    if !notices.contains(&notice) {
+        notices.push(notice);
+    }
+}
+
+/// The entry points the project's commands start: a file a word of a command names, from the folder
+/// the command runs in, after `node` or a program a `scriptCommands` declaration names, as RES-3 and
+/// MAP-1 find it. Words of the form `NAME=value` before the program are passed over, an option's own
+/// name is never a file, `--option=value` is tried by its value, and a word holding `$` names no file.
+/// A declared program counts in every command (spec ENTRY-7; comparison spec CI-2).
+fn scripted(project: &Project<'_>, commands: &[Command<'_>], entries: &mut Entries) {
     let mut programs: BTreeSet<&str> = BTreeSet::from(["node"]);
 
     if let Some(handed) = project.handed {
@@ -313,40 +519,37 @@ fn scripted(project: &Project<'_>, entries: &mut Entries) {
         }
     }
 
-    for package in &project.packages.list {
-        let manifest = manifest_path(&package.folder);
+    for command in commands {
+        let mut words = command
+            .words
+            .iter()
+            .skip_while(|word| tools::is_assignment(word));
 
-        for script in &package.scripts {
-            for command in tools::commands(script) {
-                let mut words = command.iter().skip_while(|word| tools::is_assignment(word));
+        if !words
+            .next()
+            .is_some_and(|program| programs.contains(program.as_str()))
+        {
+            continue;
+        }
 
-                if !words
-                    .next()
-                    .is_some_and(|program| programs.contains(program.as_str()))
-                {
-                    continue;
-                }
+        for word in words {
+            let named = match word.split_once('=') {
+                Some((option, value)) if option.starts_with("--") => value,
+                _ if word.starts_with('-') => continue,
+                _ => word.as_str(),
+            };
 
-                for word in words {
-                    let named = match word.split_once('=') {
-                        Some((option, value)) if option.starts_with("--") => value,
-                        _ if word.starts_with('-') => continue,
-                        _ => word.as_str(),
-                    };
+            if named.is_empty() || named.contains('$') {
+                continue;
+            }
 
-                    if named.is_empty() {
-                        continue;
-                    }
-
-                    for path in project
-                        .resolver
-                        .script_target(package, named)
-                        .into_iter()
-                        .flatten()
-                    {
-                        entries.add(path, Source::named("scripts", &manifest));
-                    }
-                }
+            for path in project
+                .resolver
+                .script_target(&command.folder, named)
+                .into_iter()
+                .flatten()
+            {
+                entries.add(path, command.source());
             }
         }
     }
@@ -357,9 +560,14 @@ fn scripted(project: &Project<'_>, entries: &mut Entries) {
 /// and each one a script names after an option the declaration's `options` lists; and the files each
 /// one's value names, read as a literal where it is one and the declaration's `default` where it is
 /// not. A file both matched and named is read from each folder its value is relative to. A glob of the
-/// file's that the analyzer does not read is passed over with a notice, and so is a word of a script
-/// that names no listed file (spec ENTRY-6, CONF-1 to CONF-3).
-fn configured(project: &Project<'_>, entries: &mut Entries, notices: &mut Vec<Notice>) {
+/// file's that the analyzer does not read is passed over with a notice, and so is a word of a command
+/// that names no listed file (spec ENTRY-6; comparison spec CONF-1 to CONF-3, CI-2).
+fn configured(
+    project: &Project<'_>,
+    commands: &[Command<'_>],
+    entries: &mut Entries,
+    notices: &mut Vec<Notice>,
+) {
     let Some(handed) = project.handed else {
         return;
     };
@@ -402,7 +610,7 @@ fn configured(project: &Project<'_>, entries: &mut Entries, notices: &mut Vec<No
             if let Some(options) = &declaration.options {
                 let relative_to = options.relative_to.unwrap_or(declaration.relative_to);
 
-                for (script, path) in named_configs(project, options, &listed, &mut missing) {
+                for (script, path) in named_configs(commands, options, &listed, &mut missing) {
                     let detection = deepest(&handed.folders, &path).unwrap_or("");
                     let folder = relative(relative_to, &path, detection, script).to_owned();
 
@@ -493,39 +701,41 @@ fn relative<'f>(
     }
 }
 
-/// The configuration files the scripts of every `package.json` name after one of a declaration's
-/// options, each with the folder, from the root, of the `package.json` whose script names it, which the
-/// word is found from. A word that names no listed file is kept in `missing`, by its `package.json`,
-/// with the sentence of its notice (spec CONF-2).
-fn named_configs<'p>(
-    project: &Project<'p>,
+/// The configuration files the project's commands name after one of a declaration's options, each with
+/// the folder, from the root, the command runs in, which the word is found from. A word that names no
+/// listed file is kept in `missing`, by the `package.json` or command file it comes from, with the
+/// sentence of its notice; a word holding `$` names no file and gives none (comparison spec CONF-2,
+/// CI-2).
+fn named_configs<'c>(
+    commands: &'c [Command<'_>],
     options: &Options<'_>,
     listed: &BTreeSet<&str>,
     missing: &mut BTreeSet<(String, String)>,
-) -> Vec<(&'p str, String)> {
+) -> Vec<(&'c str, String)> {
     let mut named = Vec::new();
 
-    for package in &project.packages.list {
-        let folder = folder_path(&package.folder);
-        let manifest = manifest_path(&package.folder);
+    for command in commands {
+        for (option, value) in options.values(&command.words) {
+            if value.contains('$') {
+                continue;
+            }
 
-        for script in &package.scripts {
-            for command in tools::commands(script) {
-                for (option, value) in options.values(&command) {
-                    match resolved(folder, value).filter(|path| listed.contains(path.as_str())) {
-                        Some(path) => named.push((folder, path)),
-                        None => {
-                            missing.insert((
-                                manifest.clone(),
-                                format!(
-                                    "The script `{script}` in {manifest} names `{value}` after `{option}` as \
-                                     a configuration file of `{}`, and no listed file is there, so it adds no \
-                                     entry point.",
-                                    options.program
-                                ),
-                            ));
-                        }
-                    }
+            match resolved(&command.folder, value).filter(|path| listed.contains(path.as_str())) {
+                Some(path) => named.push((command.folder.as_str(), path)),
+                None => {
+                    let naming = match command.script {
+                        Some(script) => format!("The script `{script}` in {}", command.file),
+                        None => format!("A command in {}", command.file),
+                    };
+
+                    missing.insert((
+                        command.file.clone(),
+                        format!(
+                            "{naming} names `{value}` after `{option}` as a configuration file of `{}`, and \
+                             no listed file is there, so it adds no entry point.",
+                            options.program
+                        ),
+                    ));
                 }
             }
         }
@@ -695,6 +905,43 @@ impl<'d> Declared<'d> {
             read
         }
     }
+}
+
+/// One `commandFiles` declaration, read. Its shape was checked when the hand-off file was read
+/// (comparison spec CI-3), so a declaration of another shape is passed over.
+struct CommandFiles {
+    /// The command files, from each folder yak's detection looked in.
+    file: Glob,
+    /// The property paths to the commands in such a file.
+    commands: Vec<Vec<String>>,
+    /// The property paths to the folder a command runs in, where the declaration states them.
+    folder: Option<Vec<Vec<String>>>,
+}
+
+impl CommandFiles {
+    /// The declaration, where it has its shape.
+    fn of(declaration: &Value) -> Option<Self> {
+        Some(Self {
+            file: Glob::new(declaration.get("file")?.as_str()?).ok()?,
+            commands: property_paths(declaration.get("commands")),
+            folder: declaration
+                .get("folder")
+                .map(|value| property_paths(Some(value))),
+        })
+    }
+}
+
+/// The property paths a declaration's field holds, each a list of keys.
+fn property_paths(value: Option<&Value>) -> Vec<Vec<String>> {
+    value
+        .and_then(Value::as_array)
+        .map(|paths| {
+            paths
+                .iter()
+                .map(|path| texts(Some(path)).into_iter().map(str::to_owned).collect())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Whether the analyzer reads a glob a tool's configuration file states: one KEY-5 reads, that does not
