@@ -801,12 +801,19 @@ that builds a command file's values from the YAML crate's parser (`src/command_f
   such a file overflowed the reading thread's 256 MiB stack and ended the analyzer with nothing
   written.
 
-CI-6 is the requirement plan 4, this item's fourth plan (GO-1 to GO-3, FREEZE-1, FREEZE-2), builds;
-today the analyzer meets the first two holes only. By CURE-4 a fix that changes what an approved
+The second review found the same two holes in the one other YAML file the analyzer reads: the
+root's `pnpm-workspace.yaml` (the reading spec's PACK-3), read through the same loader on every root
+and every base commit, with no bound on its size.
+
+CI-6 and CI-7 are the requirements plan 4, this item's fourth plan (GO-1 to GO-3, FREEZE-1,
+FREEZE-2), builds; today the analyzer meets the first two holes only. By CURE-4 a fix that changes what an approved
 spec says is written here first. The owner approved stating the bounds as built when ruling on the
 list FREEZE-2 brought (2026-11-17); the bounds are not among what FREEZE-1 fixes under the interface
-version. This amendment changes CI-3's sentence on bounds and its notice's wording, and adds to
-CI-4's list of fixtures; nothing else.
+version. This amendment changes CI-3's sentence on bounds, making them per file and adding
+the text and nesting bounds; CI-3's notice, which must now name the bounds (the rest of its wording
+stays the builder's, as the first amendment left it), and wins over a parse error found later in the
+file; the reading of an alias inside the value it names; CI-4's list of fixtures; and, by CI-7, how
+the reading spec's PACK-3 reads `pnpm-workspace.yaml`. Nothing else.
 
 Alternatives considered:
 
@@ -820,26 +827,42 @@ Alternatives considered:
 
 - **CI-6** Replaces CI-3's "a document that expands to more than 100,000 values once its aliases are
   followed" with: a file whose documents, all together, hold more than 100,000 values, or more than
-  4 MiB of text, once their aliases are followed, or that nests deeper than 1,000 levels. A value is
+  4 MiB of text, once their aliases are followed, or that nests deeper than 1,000 levels once they
+  are followed. A value is
   a scalar, a sequence or a mapping, keys included; every scalar counts as a text, whatever its YAML
   type, a number, a boolean or a null included, since the reader keeps each as the text the YAML
   parser hands over for it, its quotes and escapes resolved. The text is the bytes of every
   scalar's text so handed over, keys included. An alias counts the values and the text of the node
-  it names each time it appears; an alias to a node not yet finished, one that encloses it, makes
-  the file not valid YAML. A level is a sequence or a mapping inside another. The bounds are of the
+  it names each time it appears. An alias inside the value it names, which YAML allows, is not
+  followed: the reader refuses such a file, its choice, with CI-3's notice saying so, since that
+  value has no end. A level is a sequence or a mapping on the path from a document's top: the top
+  value, when it is one, is level 1, each one inside it one level more, and an alias stands for the
+  levels of the node it names where the alias stands. The reader no longer recurses, but finding
+  commands and folders walks the values it built, and that walk does recurse once per level: the
+  nesting bound is what keeps it, and the dropping of the values, within the reading thread's
+  stack. The bounds are of the
   file's content so expanded, not of how the reader holds it, and the reader keeps them in two ways:
   it takes the parser's events one at a time, never through a loader that recurses, and stops at
   the first event past a bound, so a file past one gives CI-3's bounds notice even where an error
   lies further on; and it shares an anchored value with each of its aliases rather than copying it.
   The 1 MiB bound on the file's own size stands, as do CI-3's other words: the count is kept while
   the file is read, never after, and such a file adds nothing and gives CI-3's notice, whose sentence
-  names the bounds (1 MiB, 100,000 values, 4 MiB of text, 1,000 levels). CI-4's fixtures gain
+  names the bounds (1 MiB, 100,000 values, 4 MiB of text, 1,000 levels), or, for an alias inside
+  its own value, says that. CI-4's fixtures gain
   (CURE-3): a file of two documents each under the value bound and over it together; a file of one
   long text aliased until it passes the text bound; a compact block sequence 520,000 levels deep,
   which gives the bounds notice and a run that exits 0; an alias to the anchor that encloses it, which
-  gives the not-valid notice; and a chain of 500 mappings, each anchored, over a flow list of 98,000
+  gives the notice saying so; a file past the value bound whose syntax breaks after that point,
+  which gives the bounds notice, not the not-valid one; and a chain of 500 mappings, each anchored, over a flow list of 98,000
   items, read with no notice, which guards the sharing. That last one is not written to fail first:
   a reader that copies would exhaust the test machine's memory rather than fail cleanly, so its red
   run is a measurement recorded with plan 4 instead (CURE-3's order, set aside for this one fixture).
-  Session's call: 4 MiB is four times the 1 MiB bound on a file's size, and 1,000 levels is fifty
-  times the deepest real workflow seen; both are far above any real one.
+  Session's call: 4 MiB is four times the 1 MiB bound on a file's size, and 1,000 levels is two
+  hundred times the depth GitHub Actions reads to a step's command (`jobs`, a job, `steps`, a step,
+  `run`: five levels); both leave room for any file a CI system reads.
+- **CI-7** The reading spec's PACK-3 reads the root's `pnpm-workspace.yaml` through the reader CI-6
+  describes, under the same bounds, its first document as today. Past a bound, or with an alias
+  inside its own value, the run stops as it does today on a `pnpm-workspace.yaml` that cannot be read,
+  with the line naming the bound. A fixture holds a `pnpm-workspace.yaml` nested past the bound
+  (CURE-3). Session's call: the analyzer reads every YAML file the same way, so no file of a branch
+  can end the run with nothing written.
