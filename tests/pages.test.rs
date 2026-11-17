@@ -1,7 +1,7 @@
 //! Runs the built binary on made-up projects and checks the imports it finds in Vue components, MDX
 //! documents and HTML pages, where a page's scripts lead, and the bindings a component's template and a
 //! document's text use (spec PARSE-2 to PARSE-5, IMP-1, RES-7, CFG-2, FIX-2, FIX-4; dead-code spec
-//! USE-4, USE-5, FIX-1).
+//! USE-4, USE-5, FIX-1; comparison spec DYN-1).
 
 #[path = "support/project.rs"]
 mod project;
@@ -411,6 +411,44 @@ fn a_vue_template_uses_the_bindings_it_names() {
     assert_eq!(
         uses(&document, "src/App.vue"),
         [("label", "src/App.vue", 4)]
+    );
+}
+
+#[test]
+fn a_vue_template_that_names_a_binding_of_an_import_call_uses_every_export() {
+    let project = Project::new("pages-vue-dynamic");
+
+    project
+        .write(
+            "src/App.vue",
+            "<template>\n\
+             \x20 <p>{{ texts.title }}</p>\n\
+             </template>\n\
+             <script setup lang=\"ts\">\n\
+             const texts = await import('./texts');\n\
+             const quiet = await import('./quiet');\n\
+             console.log(quiet.used);\n\
+             </script>\n",
+        )
+        .write(
+            "src/texts.ts",
+            "export const title = 't';\nexport const spare = 1;\n",
+        )
+        .write(
+            "src/quiet.ts",
+            "export const used = 1;\nexport const spare = 2;\n",
+        )
+        .commit();
+
+    let document = project.graph();
+
+    // A binding that holds what an `import()` loads passes the module on where the template names it,
+    // so every export is used, from the template's line; one the template doesn't name uses only what
+    // its references read (comparison spec DYN-1, dead-code spec USE-4).
+    assert_eq!(uses(&document, "src/texts.ts"), [("*", "src/App.vue", 2)]);
+    assert_eq!(
+        uses(&document, "src/quiet.ts"),
+        [("used", "src/App.vue", 7)]
     );
 }
 

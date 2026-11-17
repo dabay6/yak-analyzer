@@ -1,6 +1,6 @@
 //! What an import is, and what a script's names are: parsing a script and finding every import in it,
 //! the names each brings in, what the script exports, and what of each import's target it uses (spec
-//! PARSE-1 to PARSE-4, IMP-1 to IMP-4, USE-1, USE-2).
+//! PARSE-1 to PARSE-4, IMP-1 to IMP-4, USE-1, USE-2; comparison spec DYN-1 to DYN-3).
 
 use oxc_allocator::Allocator;
 use oxc_ast::AstKind;
@@ -8,8 +8,8 @@ use oxc_ast::ast::{
     Argument, BindingIdentifier, BindingPattern, CallExpression, Declaration, ExportAllDeclaration,
     ExportDefaultDeclarationKind, ExportFromDeclaration, Expression, ImportDeclaration,
     ImportDeclarationSpecifier, ImportExpression, JSXMemberExpressionObject, ModuleExportName,
-    Program, Statement, StringLiteral, TSImportEqualsDeclaration, TSImportType,
-    TSImportTypeQualifier, TSModuleReference, TSTypeName,
+    ObjectPattern, Program, Statement, StringLiteral, TSImportEqualsDeclaration, TSImportType,
+    TSImportTypeQualifier, TSModuleReference, TSTypeName, UnaryOperator, VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -244,12 +244,14 @@ fn parse(text: &str, source_type: SourceType, component: bool) -> Result<Read, B
         imports: Vec::new(),
         computed: 0,
         bound: Vec::new(),
+        loads: Vec::new(),
     };
 
     finder.visit_program(&parsed.program);
 
     let exports = finder.exports(&parsed.program);
 
+    finder.followed();
     finder.used();
 
     Ok(Read {
@@ -310,6 +312,23 @@ struct Finder<'s, 'a> {
     /// The binding each name of an import makes: its symbol, and the places of the import and of the
     /// name in their lists.
     bound: Vec<(SymbolId, usize, usize)>,
+    /// Each `import()` and `require()` with a literal: its place in the list of imports, its node, and
+    /// whether its result is a promise of the module, as an `import()`'s is, rather than the module
+    /// (spec DYN-1).
+    loads: Vec<(usize, NodeId, bool)>,
+}
+
+/// What the uses of what an `import()` or a `require()` loads read off it (spec DYN-1, DYN-2).
+#[derive(Default)]
+struct Reads {
+    /// Each export read by its name, with the offset of the read.
+    names: Vec<(String, u32)>,
+    /// Whether a use passes the result on, or reads it in a way that can't be followed, so that it
+    /// uses every export.
+    every: bool,
+    /// The bindings that hold the module or its promise, which a Vue component's template may name
+    /// (spec USE-4).
+    bindings: Vec<String>,
 }
 
 impl<'a> Finder<'_, 'a> {
@@ -572,18 +591,14 @@ impl<'a> Finder<'_, 'a> {
     }
 
     /// Records what each import's bindings are used for: a named or default binding uses its export
-    /// where the script refers to it, in code or in a type; a namespace's binding uses the member read
-    /// off it, and every export where it is referred to in any other way (spec USE-2).
+    /// where the script refers to it, in code or in a type; a namespace's binding, and the binding of
+    /// `import name = require('…')`, uses the member read off it, and every export where it is referred
+    /// to in any other way (spec USE-2, DYN-3).
     fn used(&mut self) {
         let scoping = self.semantic.scoping();
         let nodes = self.semantic.nodes();
 
         for (symbol, import, name) in self.bound.clone() {
-            // `import name = require('…')` uses every export already, whatever is read off the name.
-            if self.imports[import].form == Form::ImportEquals {
-                continue;
-            }
-
             let imported = self.imports[import].names[name].name.clone();
             let mut uses: Vec<Used> = Vec::new();
 
@@ -610,6 +625,242 @@ impl<'a> Finder<'_, 'a> {
 
             self.imports[import].uses.extend(uses);
         }
+    }
+
+    /// Records what each literal `import()` and `require()` uses of its target: the exports read off
+    /// its result where every use of it is a form DYN-1 lists, each from the line of its first read;
+    /// nothing where the result is not used; and every export, from the line of the call, otherwise
+    /// (spec DYN-1, DYN-2). A binding of the module or of its promise is recorded as a name of the
+    /// import, so a template that names it uses every export (spec USE-4).
+    fn followed(&mut self) {
+        for (import, node, promise) in std::mem::take(&mut self.loads) {
+            let mut reads = Reads::default();
+
+            if promise {
+                self.promise_at(node, &mut reads);
+            } else {
+                self.module_at(node, &mut reads);
+            }
+
+            for binding in reads.bindings {
+                self.imports[import].names.push(Name {
+                    name: EVERY.to_owned(),
+                    local: Some(binding),
+                    exported: Vec::new(),
+                });
+            }
+
+            if reads.every {
+                self.uses_every(import);
+                continue;
+            }
+
+            for (name, offset) in reads.names {
+                let line = self.lines.at(offset);
+                let uses = &mut self.imports[import].uses;
+
+                if uses
+                    .iter()
+                    .all(|earlier| earlier.name.as_deref() != Some(name.as_str()))
+                {
+                    uses.push(Used {
+                        name: Some(name),
+                        line,
+                    });
+                }
+            }
+        }
+    }
+
+    /// What uses the value of the node given: the place of the node that holds it, past any
+    /// parentheses around it, and that node's parent, by its id and its kind.
+    fn user(&self, node: NodeId) -> (Span, NodeId, AstKind<'a>) {
+        let nodes = self.semantic.nodes();
+        let mut at = node;
+
+        loop {
+            let parent = nodes.parent_id(at);
+
+            match nodes.kind(parent) {
+                AstKind::ParenthesizedExpression(_) => at = parent,
+                kind => return (nodes.kind(at).span(), parent, kind),
+            }
+        }
+    }
+
+    /// Follows the result of an `import()`, a promise of the module: awaited or given a `then`, held
+    /// by a binding, or thrown away (spec DYN-1, DYN-2).
+    fn promise_at(&self, node: NodeId, reads: &mut Reads) {
+        if self.promised(node, reads) {
+            return;
+        }
+
+        match self.user(node) {
+            (_, declarator, AstKind::VariableDeclarator(variable)) => {
+                self.bound(variable, declarator, true, reads);
+            }
+            (_, _, kind) if discarded(kind) => {}
+            _ => reads.every = true,
+        }
+    }
+
+    /// Follows a promise of the module where the node given is awaited or given a `then`, and says
+    /// whether it is. A member read straight off the promise is neither (spec DYN-1).
+    fn promised(&self, node: NodeId, reads: &mut Reads) -> bool {
+        match self.user(node) {
+            (_, awaited, AstKind::AwaitExpression(_)) => self.module_at(awaited, reads),
+            (span, member, AstKind::StaticMemberExpression(then))
+                if then.object.span() == span && then.property.name == "then" =>
+            {
+                match self.user(member) {
+                    (callee, _, AstKind::CallExpression(call)) if call.callee.span() == callee => {
+                        self.callback(call.arguments.first(), reads);
+                    }
+                    _ => reads.every = true,
+                }
+            }
+            _ => return false,
+        }
+
+        true
+    }
+
+    /// Follows the module itself, the result of a `require()` or of an awaited `import()`: a member
+    /// read by a name or a literal key, a binding, or thrown away (spec DYN-1, DYN-2).
+    fn module_at(&self, node: NodeId, reads: &mut Reads) {
+        match self.user(node) {
+            (span, _, AstKind::StaticMemberExpression(member)) if member.object.span() == span => {
+                reads
+                    .names
+                    .push((member.property.name.to_string(), member.property.span.start));
+            }
+            (span, _, AstKind::ComputedMemberExpression(member))
+                if member.object.span() == span =>
+            {
+                match Self::literal(&member.expression) {
+                    Some(name) => reads.names.push((name, member.expression.span().start)),
+                    None => reads.every = true,
+                }
+            }
+            (_, declarator, AstKind::VariableDeclarator(variable)) => {
+                self.bound(variable, declarator, false, reads);
+            }
+            (_, _, kind) if discarded(kind) => {}
+            _ => reads.every = true,
+        }
+    }
+
+    /// Follows a declaration's binding of the result: a name that holds the module or its promise, and
+    /// is not exported; or, for the module, a destructuring (spec DYN-1, DYN-2).
+    fn bound(
+        &self,
+        variable: &VariableDeclarator<'a>,
+        declarator: NodeId,
+        promise: bool,
+        reads: &mut Reads,
+    ) {
+        match &variable.id {
+            BindingPattern::BindingIdentifier(identifier) => {
+                let nodes = self.semantic.nodes();
+                let exported = matches!(
+                    nodes.parent_kind(nodes.parent_id(declarator)),
+                    AstKind::ExportDeclaration(_)
+                );
+
+                if exported {
+                    reads.every = true;
+                    return;
+                }
+
+                reads.bindings.push(identifier.name.to_string());
+                self.held(identifier, promise, reads);
+            }
+            BindingPattern::ObjectPattern(object) if !promise => Self::destructured(object, reads),
+            _ => reads.every = true,
+        }
+    }
+
+    /// Follows every reference of a binding: of the module, each must read a member by a name or a
+    /// literal key; of its promise, each must await it or give it a `then`. Any other reference passes
+    /// it on, and uses every export (spec DYN-1, DYN-2).
+    fn held(&self, identifier: &BindingIdentifier<'a>, promise: bool, reads: &mut Reads) {
+        let nodes = self.semantic.nodes();
+
+        for reference in self
+            .semantic
+            .scoping()
+            .get_resolved_references(identifier.symbol_id())
+        {
+            let node = reference.node_id();
+            let followed = if promise {
+                self.promised(node, reads)
+            } else {
+                match member(nodes.parent_kind(node), node) {
+                    Some(name) => {
+                        reads.names.push((name, nodes.kind(node).span().start));
+                        true
+                    }
+                    None => false,
+                }
+            };
+
+            if !followed {
+                reads.every = true;
+            }
+        }
+    }
+
+    /// Follows the callback a `then` on a promise of the module is given, when it is a function
+    /// written in place: its first parameter holds the module, as a name or as a destructuring (spec
+    /// DYN-1).
+    fn callback(&self, argument: Option<&Argument<'a>>, reads: &mut Reads) {
+        let parameters = match argument.and_then(Argument::as_expression) {
+            Some(Expression::ArrowFunctionExpression(arrow)) => &arrow.params,
+            Some(Expression::FunctionExpression(function)) => &function.params,
+            _ => {
+                reads.every = true;
+                return;
+            }
+        };
+
+        match parameters.items.first().map(|parameter| &parameter.pattern) {
+            Some(BindingPattern::BindingIdentifier(identifier)) => {
+                self.held(identifier, false, reads);
+            }
+            Some(BindingPattern::ObjectPattern(object)) => Self::destructured(object, reads),
+            Some(_) => reads.every = true,
+            None if parameters.rest.is_some() => reads.every = true,
+            None => {}
+        }
+    }
+
+    /// Records the names a destructuring of the module reads: each key at its top, whatever its value's
+    /// pattern or default. A rest element, or a key that is not a name or a literal, uses every export
+    /// (spec DYN-1, DYN-2).
+    fn destructured(object: &ObjectPattern<'_>, reads: &mut Reads) {
+        if object.rest.is_some() {
+            reads.every = true;
+            return;
+        }
+
+        for property in &object.properties {
+            match property.key.static_name() {
+                Some(name) => reads
+                    .names
+                    .push((name.display().to_string(), property.key.span().start)),
+                None => reads.every = true,
+            }
+        }
+    }
+}
+
+/// Whether a node of this kind throws away the value it holds: a statement of its own, or `void`
+/// (spec DYN-2).
+fn discarded(kind: AstKind<'_>) -> bool {
+    match kind {
+        AstKind::ExpressionStatement(_) => true,
+        AstKind::UnaryExpression(unary) => unary.operator == UnaryOperator::Void,
+        _ => false,
     }
 }
 
@@ -738,7 +989,6 @@ impl<'a> Visit<'a> for Finder<'_, 'a> {
             );
 
             self.brings(import, EVERY.to_owned(), Some(&declaration.id), None);
-            self.uses_every(import);
         }
 
         walk::walk_ts_import_equals_declaration(self, declaration);
@@ -749,7 +999,7 @@ impl<'a> Visit<'a> for Finder<'_, 'a> {
             Some(specifier) => {
                 let import = self.found(specifier, Form::Dynamic, false, expression.span);
 
-                self.uses_every(import);
+                self.loads.push((import, expression.node_id.get(), true));
             }
             None => self.computed += 1,
         }
@@ -770,7 +1020,7 @@ impl<'a> Visit<'a> for Finder<'_, 'a> {
                 Some(specifier) => {
                     let import = self.found(specifier, Form::Require, false, call.span);
 
-                    self.uses_every(import);
+                    self.loads.push((import, call.node_id.get(), false));
                 }
                 None => self.computed += 1,
             }
