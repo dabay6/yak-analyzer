@@ -745,8 +745,7 @@ Alternatives considered for the cure:
   commands not read, one notice); a word naming no file and one holding `$` (nothing); a `#`
   comment naming a file (nothing) and a quoted text spanning a line end (one word); a `commands`
   path that reaches a sequence of texts (each a command); a step with no `run` (nothing, no
-  notice); a workflow that is not valid YAML (one notice), and one small file whose aliases expand past the bound (one notice, and the run ends promptly, which a count taken after loading would not; one
-  notice); a file of two YAML documents (both read); a configuration file named by `--config` in a
+  notice); a workflow that is not valid YAML (one notice), and one small file whose aliases expand past the bound (one notice, and the run ends promptly, which a count taken after loading would not); a file of two YAML documents (both read); a configuration file named by `--config` in a
   step, read with `relativeTo: "script"` against the step's folder (CONF-2); and each refused
   shape.
 - **CI-5** JDG-3's first list, the changes that reopen every finding of a root, also holds any file
