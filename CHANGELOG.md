@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/dabay6/yak-analyzer/compare/v0.9.0...v0.10.0) (2026-11-17)
+
+
+### Features
+
+* **entries:** read the commands a CI workflow runs as a script's ([cc609ea](https://github.com/dabay6/yak-analyzer/commit/cc609eaf9b0d402009137a374111d9a1b8fb8af2))
+
 ## [0.9.0](https://github.com/dabay6/yak-analyzer/compare/v0.8.0...v0.9.0) (2026-11-17)
 
 
