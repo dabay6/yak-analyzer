@@ -788,11 +788,14 @@ Code runs on each commit and push found two ways past them as CI-3 words them: o
 many times copies megabytes for each alias while counting one value, and a file of many documents
 expands each to just under the per-document bound. Either lets a workflow on a branch exhaust
 memory, which is what CI-3's bounds are for. Plan 3 hardened the code under a ruling on its Task 1,
-on the work item's record. This amendment's own zoom-out review (its report is in the item's report
-folder) found a third: the reader keeps a copy of each anchored value for its aliases, uncounted, so
-a chain of anchors nested in one another, with no alias at all, copies a number of values that grows
-with the square of its depth. Plan 4 makes the reader share an anchored value with its aliases
-instead; until then it copies. By CURE-4 a fix that changes what an approved spec says is written
+on the work item's record. This amendment's own zoom-out review, the first of the four review stages
+every amendment passes (its report is in the item's report folder), found a third. The reader, the
+part of the analyzer that builds a command file's values from the YAML crate's event parser
+(`src/command_files.rs`), keeps a copy of each anchored value for its aliases, uncounted, so a
+chain of anchors nested in one another, with no alias at all, copies a number of values that grows
+with the square of its depth. CI-6 is the requirement plan 4, this item's fourth plan (GO-1 to
+GO-3, FREEZE-1, FREEZE-2), builds: today the analyzer meets the first two holes and still copies
+anchored values, and its third fixture fails until plan 4 makes the reader share them. By CURE-4 a fix that changes what an approved spec says is written
 here first. The owner approved stating the bounds as built when ruling on the list FREEZE-2 brought
 (2026-11-17); the bounds are not among what FREEZE-1 fixes under the interface version. This
 amendment changes CI-3's sentence on bounds and its notice's wording, which CI-6 says names the
@@ -802,17 +805,21 @@ bounds, and adds to CI-4's list of fixtures; nothing else.
   followed" with: a file whose documents, all together, hold more than 100,000 values, or more than
   4 MiB of text, once their aliases are followed. A value is a scalar, a sequence or a mapping, keys
   included; every scalar counts as a text, whatever its YAML type, a number, a boolean or a null
-  included, since the reader keeps each as the text it parsed to. The text is the bytes of every
-  scalar's parsed value, keys included. An alias counts the values and the text of the node it names
+  included, since the reader keeps each as the text the YAML parser hands over for it, its quotes
+  and escapes resolved. The text is the bytes of every scalar's text so handed over, keys
+  included. An alias counts the values and the text of the node it names
   each time it appears. The bound is of the file's content so expanded, not of how the reader holds
   it: the reader shares an anchored value with each of its aliases rather than copying it, so
-  reading a file costs no more than the bounds allow, however many anchors it has. The 1 MiB bound on
+  reading a file costs no more than the bounds allow, however many anchors it has. Nesting is
+  bounded too: each level is a value, so no file nests deeper than 100,000 levels, and the threads
+  that read a project have a stack of 256 MiB (the stage-1 spec's LIFE-3), which held 99,000 levels
+  of nesting when measured on 2026-11-17. The 1 MiB bound on
   the file's own size stands, as do CI-3's other words: the count is kept while the file is read,
   never after, and such a file adds nothing and gives CI-3's notice, whose sentence names the three
   bounds (1 MiB, 100,000 values, 4 MiB of text). CI-4's fixtures gain (CURE-3): a file of two
   documents each under the value bound and over it together; a file of one long text aliased until it
   passes the text bound; and a compact block sequence of 50,000 levels, `- &a1 - &a2 … x`, each
-  level anchored and none aliased, 50,001 values in all, which is read with no notice and finishes
-  within the test run as the other fixtures do, where a reader that copies anchored values would copy
-  over a billion. Session's call: 4 MiB is four times the 1 MiB bound on a file's size and far above
+  level anchored and none aliased, 50,001 values in all, whose run exits 0 and gives no notice for it,
+  where a reader that copies anchored values would copy over a billion and run out of memory before
+  the run ends. Session's call: 4 MiB is four times the 1 MiB bound on a file's size and far above
   any real workflow; sharing removes the copies rather than counting them.
