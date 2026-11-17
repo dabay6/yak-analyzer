@@ -1,5 +1,5 @@
 //! Hands the built binary declarations and checks which it can use and how it refuses the rest (spec
-//! KEY-1, KEY-2, KEY-5, RUN-4, ENTRY-6a).
+//! KEY-1, KEY-2, KEY-5, RUN-4, ENTRY-6a; comparison spec CONF-1).
 
 mod support;
 
@@ -44,7 +44,8 @@ fn uses_every_key_it_knows_in_every_form_a_glob_may_take() {
                 "property": ["test", "include"],
                 "value": "globs",
                 "relativeTo": "config",
-                "default": ["**/*.test.ts"]
+                "default": ["**/*.test.ts"],
+                "options": { "program": "runner", "names": ["--config", "-c"], "relativeTo": "script" }
             },
             {
                 "file": "**/runner.config.{js,ts}",
@@ -168,7 +169,7 @@ fn refuses_a_configuration_or_script_declaration_of_another_shape() {
 
         json!({ "configEntries": [entry] })
     };
-    let cases: [(Value, &str); 14] = [
+    let cases: [(Value, &str); 20] = [
         (
             json!({ "configEntries": {} }),
             ": its value must be a list of objects; ",
@@ -218,6 +219,39 @@ fn refuses_a_configuration_or_script_declaration_of_another_shape() {
         (
             changed(&|entry| entry["default"] = json!(["../x/*.js"])),
             ": its entry 1's field `default` cannot be used: the glob `../x/*.js` is absolute or steps out",
+        ),
+        (
+            changed(&|entry| entry["options"] = json!(3)),
+            ": its entry 1's field `options` must be an object; ",
+        ),
+        (
+            changed(&|entry| {
+                entry["options"] = json!({ "program": "runner", "names": ["-c"], "extra": 1 });
+            }),
+            ": its entry 1's field `options` holds `extra`, which it may not; ",
+        ),
+        (
+            changed(&|entry| entry["options"] = json!({ "names": ["-c"] })),
+            ": its entry 1's field `options` must name its `program`, one word with no white space; ",
+        ),
+        (
+            changed(&|entry| entry["options"] = json!({ "program": "runner", "names": [] })),
+            ": its entry 1's field `options` must list its option `names`, one or more; ",
+        ),
+        (
+            changed(&|entry| {
+                entry["options"] = json!({ "program": "runner", "names": ["--config x"] });
+            }),
+            ": its entry 1's field `options` names the option `--config x`, which is empty or holds white \
+             space or `=`; ",
+        ),
+        (
+            changed(&|entry| {
+                entry["options"] =
+                    json!({ "program": "runner", "names": ["-c"], "relativeTo": "package" });
+            }),
+            ": its entry 1's field `options` has a `relativeTo` that is not `config`, `detection` or \
+             `script`; ",
         ),
         (
             json!({ "scriptCommands": "node" }),

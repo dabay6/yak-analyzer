@@ -8,7 +8,7 @@ use crate::stop::Stop;
 pub const SKIPPED: &str = "file-skipped";
 
 /// Something a person should know about a run that went on.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Notice {
     /// The kind of notice, a fixed name.
     kind: &'static str,

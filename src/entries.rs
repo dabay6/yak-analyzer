@@ -2,7 +2,8 @@
 //! source that made it one (spec ENTRY-1 to ENTRY-5, ENTRY-8).
 //!
 //! They come from the project's standard files, the scripts of each `package.json`, the `entries` and
-//! `internal` declarations, and the configuration files `configEntries` names (spec ENTRY-6, ENTRY-7).
+//! `internal` declarations, and the configuration files `configEntries` names, by their names or by the
+//! option a script gives them after (spec ENTRY-6, ENTRY-7; comparison spec CONF-1 to CONF-3).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -353,13 +354,21 @@ fn scripted(project: &Project<'_>, entries: &mut Entries) {
 
 /// The entry points the `configEntries` declarations of the packs name: each configuration file a
 /// declaration's `file` matches, once, from the deepest folder yak's detection looked in that holds it,
-/// and the files its value names, read as a literal where it is one and the declaration's `default`
-/// where it is not. A glob of the file's that the analyzer does not read is passed over with a notice
-/// (spec ENTRY-6).
+/// and each one a script names after an option the declaration's `options` lists; and the files each
+/// one's value names, read as a literal where it is one and the declaration's `default` where it is
+/// not. A file both matched and named is read from each folder its value is relative to. A glob of the
+/// file's that the analyzer does not read is passed over with a notice, and so is a word of a script
+/// that names no listed file (spec ENTRY-6, CONF-1 to CONF-3).
 fn configured(project: &Project<'_>, entries: &mut Entries, notices: &mut Vec<Notice>) {
     let Some(handed) = project.handed else {
         return;
     };
+    let listed: BTreeSet<&str> = project
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
+    let mut missing = BTreeSet::new();
 
     for stack in &handed.stacks {
         let Some(declarations) = stack.pack.get("configEntries").and_then(Value::as_array) else {
@@ -373,62 +382,167 @@ fn configured(project: &Project<'_>, entries: &mut Entries, notices: &mut Vec<No
         };
 
         for declaration in declarations.iter().filter_map(Declared::of) {
+            // Each configuration file the declaration reads, with each folder its value is read from.
+            let mut readings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
             for config in project.files {
                 let Some(base) = deepest(&handed.folders, &config.path).filter(|base| {
                     inside(base, &config.path).is_some_and(|rest| declaration.file.matches(rest))
                 }) else {
                     continue;
                 };
+                let folder = relative(declaration.relative_to, &config.path, base, base).to_owned();
 
-                entries.add(config.path.clone(), source.clone());
+                readings
+                    .entry(config.path.clone())
+                    .or_default()
+                    .insert(folder);
+            }
 
-                let folder = if declaration.relative_to == "config" {
-                    config
-                        .path
-                        .rsplit_once('/')
-                        .map_or("", |(folder, _)| folder)
-                } else {
-                    base
-                };
+            if let Some(options) = &declaration.options {
+                let relative_to = options.relative_to.unwrap_or(declaration.relative_to);
+
+                for (script, path) in named_configs(project, options, &listed, &mut missing) {
+                    let detection = deepest(&handed.folders, &path).unwrap_or("");
+                    let folder = relative(relative_to, &path, detection, script).to_owned();
+
+                    readings.entry(path).or_default().insert(folder);
+                }
+            }
+
+            for (config, folders) in &readings {
                 let named = Source {
-                    file: Some(config.path.clone()),
+                    file: Some(config.clone()),
                     ..source.clone()
                 };
+                let mut said: Vec<Notice> = Vec::new();
 
-                // A glob that matches no listed file is mapped back from build output, and one that
-                // matches nothing either way adds nothing, quietly (spec ENTRY-6c).
-                for written in declaration.globs(project.tree, &config.path, folder, notices) {
-                    let Ok(glob) = Glob::new(&written) else {
-                        continue;
-                    };
-                    let mut found: Vec<&str> = project
-                        .files
-                        .iter()
-                        .map(|file| file.path.as_str())
-                        .filter(|path| glob.matches(path))
-                        .collect();
+                entries.add(config.clone(), source.clone());
 
-                    if found.is_empty() {
-                        let mapped: Vec<Glob> = mapped_globs(&written, "", project)
-                            .iter()
-                            .filter_map(|mapped| Glob::new(mapped).ok())
-                            .collect();
+                for folder in folders {
+                    let mut read = Vec::new();
 
-                        found = project
-                            .files
-                            .iter()
-                            .map(|file| file.path.as_str())
-                            .filter(|path| mapped.iter().any(|glob| glob.matches(path)))
-                            .collect();
+                    for written in declaration.globs(project.tree, config, folder, &mut read) {
+                        for path in matching(project, &written) {
+                            entries.add(path.to_owned(), named.clone());
+                        }
                     }
 
-                    for path in found {
-                        entries.add(path.to_owned(), named.clone());
+                    // A glob passed over from two folders is said once.
+                    for notice in read {
+                        if !said.contains(&notice) {
+                            said.push(notice);
+                        }
+                    }
+                }
+
+                notices.extend(said);
+            }
+        }
+    }
+
+    notices.extend(missing.into_iter().map(|(manifest, sentence)| {
+        Notice::new("script-config-not-listed", Some(manifest), sentence)
+    }));
+}
+
+/// The listed files a glob of a configuration file's value matches, from the root: as written, or,
+/// where it matches none, mapped back from build output; nothing where it matches neither, quietly
+/// (spec ENTRY-6c).
+fn matching<'p>(project: &Project<'p>, written: &str) -> Vec<&'p str> {
+    let Ok(glob) = Glob::new(written) else {
+        return Vec::new();
+    };
+    let found: Vec<&str> = project
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .filter(|path| glob.matches(path))
+        .collect();
+
+    if !found.is_empty() {
+        return found;
+    }
+
+    let mapped: Vec<Glob> = mapped_globs(written, "", project)
+        .iter()
+        .filter_map(|mapped| Glob::new(mapped).ok())
+        .collect();
+
+    project
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .filter(|path| mapped.iter().any(|glob| glob.matches(path)))
+        .collect()
+}
+
+/// The folder, from the root, a configuration file's value is relative to: the file's own for
+/// `config`, that of the `package.json` whose script named the file for `script`, and the detection
+/// folder given for `detection` (spec ENTRY-6, CONF-1).
+fn relative<'f>(
+    relative_to: &str,
+    config: &'f str,
+    detection: &'f str,
+    script: &'f str,
+) -> &'f str {
+    match relative_to {
+        "config" => config.rsplit_once('/').map_or("", |(folder, _)| folder),
+        "script" => script,
+        _ => detection,
+    }
+}
+
+/// The configuration files the scripts of every `package.json` name after one of a declaration's
+/// options, each with the folder, from the root, of the `package.json` whose script names it, which the
+/// word is found from. A word that names no listed file is kept in `missing`, by its `package.json`,
+/// with the sentence of its notice (spec CONF-2).
+fn named_configs<'p>(
+    project: &Project<'p>,
+    options: &Options<'_>,
+    listed: &BTreeSet<&str>,
+    missing: &mut BTreeSet<(String, String)>,
+) -> Vec<(&'p str, String)> {
+    let mut named = Vec::new();
+
+    for package in &project.packages.list {
+        let folder = folder_path(&package.folder);
+        let manifest = manifest_path(&package.folder);
+
+        for script in &package.scripts {
+            for command in tools::commands(script) {
+                for (option, value) in options.values(&command) {
+                    match resolved(folder, value).filter(|path| listed.contains(path.as_str())) {
+                        Some(path) => named.push((folder, path)),
+                        None => {
+                            missing.insert((
+                                manifest.clone(),
+                                format!(
+                                    "The script `{script}` in {manifest} names `{value}` after `{option}` as \
+                                     a configuration file of `{}`, and no listed file is there, so it adds no \
+                                     entry point.",
+                                    options.program
+                                ),
+                            ));
+                        }
                     }
                 }
             }
         }
     }
+
+    named
+}
+
+/// A word of a command as a program's name: its last path segment, with a `.cmd`, `.exe` or `.ps1`
+/// ending dropped (spec CONF-2).
+fn program_name(word: &str) -> &str {
+    let last = word.rsplit(['/', '\\']).next().unwrap_or(word);
+
+    [".cmd", ".exe", ".ps1"]
+        .iter()
+        .find_map(|ending| last.strip_suffix(ending))
+        .unwrap_or(last)
 }
 
 /// One `configEntries` declaration, read. Its shape was checked when the hand-off file was read (spec
@@ -446,6 +560,66 @@ struct Declared<'d> {
     relative_to: &'d str,
     /// The globs used where the file states no value the analyzer reads.
     default: Vec<&'d str>,
+    /// The options a script names the configuration file after, where the declaration states them
+    /// (spec CONF-1).
+    options: Option<Options<'d>>,
+}
+
+/// The `options` of a `configEntries` declaration: the program whose scripts name a configuration file,
+/// the options that name it, and what its value is relative to where that differs from the
+/// declaration's own (spec CONF-1).
+struct Options<'d> {
+    /// The program, by its name.
+    program: &'d str,
+    /// The option names, each given before its value or as `<name>=value`.
+    names: Vec<&'d str>,
+    /// What a named file's value is relative to, `config`, `detection` or `script`; none for the
+    /// declaration's own.
+    relative_to: Option<&'d str>,
+}
+
+impl<'d> Options<'d> {
+    /// The options, where they have their shape.
+    fn of(options: &'d Value) -> Option<Self> {
+        Some(Self {
+            program: options.get("program")?.as_str()?,
+            names: texts(options.get("names")),
+            relative_to: options.get("relativeTo").and_then(Value::as_str),
+        })
+    }
+
+    /// Whether a word is one of the option names.
+    fn names(&self, word: &str) -> bool {
+        self.names.contains(&word)
+    }
+
+    /// The values a command gives the options, each with the option that gave it: among the words after
+    /// the command's first word that is the program, the word after one of the option names, and the
+    /// value of a word `<name>=value`, each time an option is given (spec CONF-2).
+    fn values<'c>(&self, command: &'c [String]) -> Vec<(&'c str, &'c str)> {
+        let Some(start) = command
+            .iter()
+            .position(|word| program_name(word) == self.program)
+        else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        let mut words = command[start + 1..].iter();
+
+        while let Some(word) = words.next() {
+            if self.names(word) {
+                if let Some(value) = words.next() {
+                    found.push((word.as_str(), value.as_str()));
+                }
+            } else if let Some((name, value)) = word.split_once('=')
+                && self.names(name)
+            {
+                found.push((name, value));
+            }
+        }
+
+        found
+    }
 }
 
 impl<'d> Declared<'d> {
@@ -461,6 +635,7 @@ impl<'d> Declared<'d> {
             pattern: declaration.get("pattern").and_then(Value::as_str),
             relative_to: declaration.get("relativeTo")?.as_str()?,
             default: texts(declaration.get("default")),
+            options: declaration.get("options").and_then(Options::of),
         })
     }
 
