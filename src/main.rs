@@ -31,6 +31,7 @@ mod tools;
 mod tree;
 mod tsconfig;
 mod uses;
+mod yaml;
 
 use std::env;
 use std::ffi::OsString;

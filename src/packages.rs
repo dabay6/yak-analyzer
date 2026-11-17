@@ -2,15 +2,16 @@
 //! package each file belongs to (spec PACK-1 to PACK-6).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use serde_json::{Map, Value};
-use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::files::{File, Kind};
 use crate::glob::Glob;
 use crate::notice::Notice;
 use crate::stop::{Fault, Stop};
 use crate::tree::Tree;
+use crate::yaml::{self, Node, Unread};
 
 /// The workspace's list that pnpm reads, at the root.
 const PNPM_LIST: &str = "pnpm-workspace.yaml";
@@ -68,7 +69,7 @@ pub struct Loaded {
     /// Each `package.json` by the folder it lies in, in the order of the list.
     read: Vec<(String, Map<String, Value>)>,
     /// The workspace's list that pnpm reads, where the list holds one.
-    pnpm: Option<Yaml>,
+    pnpm: Option<Rc<Node>>,
     /// Whether a file whose field does not have its form is skipped rather than stopping the run, as at
     /// the base (dead-code spec COMMIT-4).
     skipping: bool,
@@ -316,18 +317,31 @@ fn object(tree: &Tree, path: &str) -> Result<Map<String, Value>, Stop> {
     }
 }
 
-/// The workspace's list that pnpm reads, as YAML (spec PACK-3).
-fn yaml(tree: &Tree) -> Result<Yaml, Stop> {
+/// The workspace's list that pnpm reads, its first document, read within the YAML bounds; an empty
+/// file is a null (spec PACK-3; comparison spec CI-7).
+fn yaml(tree: &Tree) -> Result<Rc<Node>, Stop> {
     let refused = |why: String| {
         Stop::new(format!(
             "the workspace's list {PNPM_LIST} cannot be read ({why}); fix it, or declare it as data"
         ))
     };
     let content = text(tree, PNPM_LIST).map_err(refused)?;
-    let documents =
-        YamlLoader::load_from_str(&content).map_err(|error| refused(error.to_string()))?;
+    let documents = yaml::read(&content).map_err(|unread| {
+        refused(match unread {
+            Unread::Invalid(why) => why,
+            Unread::TooLarge => {
+                "it is over 1 MiB, or holds more than 100,000 values, 4 MiB of text or \
+                                 1,000 levels of nesting once its aliases are followed"
+                    .to_owned()
+            }
+            Unread::SelfAlias => "it holds an alias inside the value it names".to_owned(),
+        })
+    })?;
 
-    Ok(documents.into_iter().next().unwrap_or(Yaml::Null))
+    Ok(documents
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| Rc::new(Node::Plain(String::new()))))
 }
 
 /// The stop for a field that holds a value of a form it does not have (spec PACK-6).
@@ -513,12 +527,17 @@ fn workspaces(fields: &Map<String, Value>) -> Result<Vec<String>, Stop> {
         .collect()
 }
 
-/// The globs of pnpm's `packages`.
-fn pnpm_packages(document: &Yaml) -> Result<Vec<String>, Stop> {
+/// The globs of pnpm's `packages`: none where the document or `packages` is a null or `packages` is
+/// absent, the last `packages` where the mapping holds two (spec PACK-3; comparison spec CI-7).
+fn pnpm_packages(document: &Node) -> Result<Vec<String>, Stop> {
     let form = "a list of globs";
     let packages = match document {
-        Yaml::Null => return Ok(Vec::new()),
-        Yaml::Hash(_) => &document["packages"],
+        Node::Map(entries) => entries
+            .iter()
+            .rev()
+            .find(|(key, _)| key == "packages")
+            .map(|(_, value)| &**value),
+        node if is_null(node) => return Ok(Vec::new()),
         _ => {
             return Err(misshapen(
                 "packages",
@@ -529,18 +548,58 @@ fn pnpm_packages(document: &Yaml) -> Result<Vec<String>, Stop> {
     };
 
     match packages {
-        Yaml::BadValue | Yaml::Null => Ok(Vec::new()),
-        Yaml::Array(list) => list
+        None => Ok(Vec::new()),
+        Some(node) if is_null(node) => Ok(Vec::new()),
+        Some(Node::List(list)) => list
             .iter()
             .map(|entry| {
-                entry
-                    .as_str()
+                glob_text(entry)
                     .map(str::to_owned)
                     .ok_or_else(|| misshapen("packages", PNPM_LIST, form))
             })
             .collect(),
-        _ => Err(misshapen("packages", PNPM_LIST, form)),
+        Some(_) => Err(misshapen("packages", PNPM_LIST, form)),
     }
+}
+
+/// Whether a value is a null as YAML reads one: a plain scalar that is empty, `~` or `null`, as the
+/// YAML loader read it (comparison spec CI-7).
+fn is_null(node: &Node) -> bool {
+    matches!(node, Node::Plain(text) if matches!(text.as_str(), "" | "~" | "null"))
+}
+
+/// The text of a value that YAML reads as a text: a quoted scalar, or a plain one that is not a null, a
+/// boolean or a number as the YAML loader read them (comparison spec CI-7).
+fn glob_text(node: &Node) -> Option<&str> {
+    match node {
+        Node::Quoted(text) => Some(text),
+        Node::Plain(text) if !typed(text) => Some(text),
+        _ => None,
+    }
+}
+
+/// Whether the YAML loader read a plain scalar as a null, a boolean or a number rather than a text.
+fn typed(plain: &str) -> bool {
+    let radix = |digits: Option<&str>, radix: u32| {
+        digits.is_some_and(|digits| i64::from_str_radix(digits, radix).is_ok())
+    };
+    let special = [
+        ".inf", ".Inf", ".INF", "+.inf", "+.Inf", "+.INF", "-.inf", "-.Inf", "-.INF", ".nan",
+        ".NaN", ".NAN",
+    ];
+
+    radix(plain.strip_prefix("0x"), 16)
+        || radix(plain.strip_prefix("0o"), 8)
+        || plain
+            .strip_prefix('+')
+            .is_some_and(|number| number.parse::<i64>().is_ok())
+        || matches!(
+            plain,
+            "" | "~" | "null" | "true" | "True" | "TRUE" | "false" | "False" | "FALSE"
+        )
+        || plain.parse::<i64>().is_ok()
+        || special.contains(&plain)
+        || (plain.bytes().any(|byte| byte.is_ascii_digit()) && plain.parse::<f64>().is_ok())
 }
 
 /// The workspace's globs, read: those that include folders, and those, written with `!`, that take

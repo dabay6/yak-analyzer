@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
 
-use crate::command_files::{self, Node, Unread};
+use crate::command_files;
 use crate::files::{File, Kind};
 use crate::glob::Glob;
 use crate::hand_off::HandOff;
@@ -20,6 +20,7 @@ use crate::stop::Stop;
 use crate::tools;
 use crate::tree::Tree;
 use crate::tsconfig::Configs;
+use crate::yaml::{self, Node, Unread};
 
 /// The endings of build output an `entries` glob may end in, a type declaration's first, since `.d.ts`
 /// also ends in `.ts` (spec ENTRY-3).
@@ -402,22 +403,27 @@ fn read_commands<'p>(
     notices: &mut Vec<Notice>,
 ) {
     let read = match project.tree.read(path) {
-        Ok(bytes) if bytes.len() > command_files::MAX_BYTES => Err(Unread::TooLarge),
+        Ok(bytes) if bytes.len() > yaml::MAX_BYTES => Err(Unread::TooLarge),
         Ok(bytes) => String::from_utf8(bytes)
-            .map_err(|_| Unread::Invalid)
-            .and_then(|text| command_files::read(text.strip_prefix('\u{feff}').unwrap_or(&text))),
-        Err(_) => Err(Unread::Invalid),
+            .map_err(|_| Unread::Invalid("it is not valid UTF-8".to_owned()))
+            .and_then(|text| yaml::read(text.strip_prefix('\u{feff}').unwrap_or(&text))),
+        Err(error) => Err(Unread::Invalid(error.to_string())),
     };
     let documents = match read {
         Ok(documents) => documents,
         Err(why) => {
             let sentence = match why {
-                Unread::Invalid => {
+                Unread::Invalid(_) => {
                     format!("{path} is not valid YAML, so its commands add no entry point.")
                 }
                 Unread::TooLarge => format!(
-                    "{path} is over 1 MiB, or holds more than 100,000 values or 4 MiB of text once its \
-                     aliases are followed, so its commands add no entry point."
+                    "{path} is over 1 MiB, or holds more than 100,000 values, 4 MiB of text or 1,000 \
+                     levels of nesting once its aliases are followed, so its commands add no entry \
+                     point."
+                ),
+                Unread::SelfAlias => format!(
+                    "{path} holds an alias inside the value it names, which the analyzer does not \
+                     follow, so its commands add no entry point."
                 ),
             };
 
