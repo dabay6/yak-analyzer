@@ -97,4 +97,4 @@ yaml-rust2 = { version = "=0.13.0", default-features = false }
 [dev-dependencies]
 # Checks the tests' hand-off files against the copy of yakshaver's schema, and the reports `audit`
 # prints against the copy of SARIF's (spec FIX-3). Never part of the binary.
-jsonschema = { version = "=0.61.1", default-features = false }
+jsonschema = { version = "=0.61.2", default-features = false }
