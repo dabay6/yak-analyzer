@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/dabay6/yak-analyzer/compare/v0.10.0...v0.11.0) (2026-11-18)
+
+
+### Features
+
+* go decision, bounded YAML reading and interface version 1's keys ([05cb7cc](https://github.com/dabay6/yak-analyzer/commit/05cb7ccc594a99f98df417d3c8db6db3d0fb2852))
+
 ## [0.10.0](https://github.com/dabay6/yak-analyzer/compare/v0.9.0...v0.10.0) (2026-11-17)
 
 
