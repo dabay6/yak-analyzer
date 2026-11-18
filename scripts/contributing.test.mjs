@@ -40,6 +40,19 @@ test('the guide names the commands, and says how a fixture is written and run (s
   }
 });
 
+test('the guide says what interface version 1 covers, and that a change to it raises the number (comparison spec FREEZE-1)', () => {
+  for (const said of [
+    'Interface version 1 covers',
+    '`entries`, `data`, `generated`, `internal`',
+    '`configEntries`, `scriptCommands` and `commandFiles`',
+    '`unused-file`, `unused-export`, `unused-type`,\n`unresolved-import` and `circular-dependency`',
+    '`yakAnalyzer/v1`',
+    'A change to any of them raises\nthe interface version',
+  ]) {
+    assert.ok(guide.replaceAll('\r\n', '\n').includes(said), said);
+  }
+});
+
 test("the gates it names run the scripts' tests as well as the launcher's (spec GATE-2)", () => {
   assert.ok(guide.includes('node --test "npm/**/*.test.mjs" "scripts/**/*.test.mjs"'));
 });

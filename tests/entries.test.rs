@@ -979,6 +979,93 @@ jobs:
     );
 }
 
+#[test]
+fn a_command_file_nested_deep_aliasing_itself_or_past_a_bound_before_an_error_adds_nothing() {
+    let project = Project::new("entries-command-bounds");
+    // A chain of 500 anchored mappings over a list of 98,000 items: within every bound, but a reader
+    // that copied each anchored value would copy about 49 million values.
+    let mut chain = String::new();
+
+    for level in 0..500 {
+        chain.push_str(&format!("{}k{level}: &a{level}\n", " ".repeat(level)));
+    }
+
+    chain.push_str(&format!(
+        "{}k500: [{}]\n",
+        " ".repeat(500),
+        ["x"; 98_000].join(", ")
+    ));
+
+    project
+        .write("package.json", r#"{ "name": "root" }"#)
+        .write(
+            ".github/workflows/deep.yml",
+            &format!("{}x\n", "- ".repeat(520_000)),
+        )
+        .write(
+            ".github/workflows/late.yml",
+            "a: &a [x, x, x, x, x, x, x, x, x, x]\n\
+             b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\n\
+             c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]\n\
+             d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]\n\
+             e: &e [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]\n\
+             z: [unclosed\n",
+        )
+        .write(".github/workflows/self.yml", "a: &a [x, *a]\n")
+        .write(".github/workflows/chain.yml", &chain)
+        .commit();
+
+    let declarations = json!({
+        "commandFiles": [{
+            "file": ".github/workflows/*.yml",
+            "commands": [["jobs", "*", "steps", "*", "run"]]
+        }]
+    });
+    let file = project.hand_off(&project.root, &["."], stack(declarations, json!({})));
+    let document = printed(&project.run(|binary| {
+        binary.args(["--hand-off", &file]);
+    }));
+    let said: Vec<(&str, &str)> = document["notices"]
+        .as_array()
+        .expect("a list of notices")
+        .iter()
+        .map(|notice| {
+            (
+                notice["file"].as_str().expect("a file"),
+                notice["sentence"].as_str().expect("a sentence"),
+            )
+        })
+        .collect();
+    let past = |file: &str| {
+        format!(
+            "{file} is over 1 MiB, or holds more than 100,000 values, 4 MiB of text or 1,000 levels of \
+             nesting once its aliases are followed, so its commands add no entry point."
+        )
+    };
+
+    // Nesting past 1,000 levels, and a value bound passed before a later error, give the bounds notice;
+    // an alias inside its own value gives its own; the chain within the bounds gives none, and the run
+    // ends with its document written (comparison spec CI-6).
+    assert_eq!(
+        said,
+        [
+            (
+                ".github/workflows/deep.yml",
+                past(".github/workflows/deep.yml").as_str()
+            ),
+            (
+                ".github/workflows/late.yml",
+                past(".github/workflows/late.yml").as_str()
+            ),
+            (
+                ".github/workflows/self.yml",
+                ".github/workflows/self.yml holds an alias inside the value it names, which the analyzer \
+                 does not follow, so its commands add no entry point."
+            ),
+        ]
+    );
+}
+
 /// The uses a document holds that count from an entry point: each with the file whose exports are
 /// used, the export's name, `*` for every export, and the field or declaration that made the entry
 /// point one.
