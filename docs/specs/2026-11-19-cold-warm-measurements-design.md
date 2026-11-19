@@ -138,7 +138,9 @@ Terms:
 - **TIME-3** The line is only written on a run that succeeded. A run that stops still writes
   exactly its one line, as RUN-3 says, and nothing else. This is the one change to RUN-3. It is safe
   because yak reads standard error only when a run fails (design IF-3), and a failed run never has
-  the line, even if a user's environment sets the variable and yak passes it on.
+  the line, even if a user's environment sets the variable and yak passes it on. On a run that
+  succeeded, the launcher passes standard error through, so a user who sets the variable sees the
+  line in their terminal, which is what setting it asks for.
 - **TIME-4** With the variable set or not, standard output, the exit code, the files read and the
   git commands run are identical. TEST-1 checks standard output and the exit code. A reviewer checks
   the files read and the git commands in the code: the clocks wrap the existing calls and never
@@ -171,21 +173,29 @@ Terms:
 - **MEAS-1** `scripts/measure.mjs` takes a folder as its one argument, runs `graph` there with
   `YAK_ANALYZER_TIMINGS=1`, and reads the timing line of each run. `--exe <path>` names the
   executable; without it, the script uses `BUILT` from `scripts/lib/run.mjs`, the release build. It
-  uses Node alone, as the other scripts do, and `fail` from the same file for stopping. It passes no
-  hand-off file, so `handOff` is always 0: the stages this item asks about (listing, reading,
-  parsing) read the same files with a hand-off file or without one. Session's call.
+  uses Node alone, as the other scripts do, and `fail` from the same file for stopping.
+  `--hand-off <file>` is passed on to every timed `graph` run. A hand-off file changes which files
+  are read and parsed (the `data` declarations keep files from being parsed, `src/marks.rs`), so a
+  run without one is not the run yak makes. TAKE-1 passes one; the stand-in on CI is measured
+  without one, since it declares nothing.
 - **MEAS-2** It takes, in this order: on Linux with `--drop-caches`, the emptying of the file cache
   (MEAS-4); then a warm-up: one untimed `graph` run on a tiny project the script writes into a new
-  temporary folder (a git repository holding a `package.json`, a `tsconfig.json` and two
-  TypeScript files that import each other). That run goes through every stage, so it loads nearly
+  temporary folder (`git init`, then a `package.json`, a `tsconfig.json` and two TypeScript files
+  that import each other, left untracked, which `graph` lists, so no commit and no git identity are
+  needed). That run goes through every stage, so it loads nearly
   all the analyzer's and git's code from disk, and it starts the executable for the first time. The
   cold run that follows carries the project's files and git's reading of the repository, and
   neither a first start nor the loading of program code. Then: one cold run;
   10 warm runs; then a first start
   (a copy of the executable in a new temporary folder, outside the folder measured, timed on its
-  first `graph` run, with the files cached). Session's call on the counts.
+  first `graph` run, with the files cached). Session's call on the counts. Nothing touches the
+  measured folder before the cold run: the folder's commit hash and its `git status --porcelain`
+  (MEAS-3) are read after the cold run, so git doesn't warm the index first. The temporary folders
+  (the warm-up project and the executable's copy) are removed when the script ends, also when it
+  stops on a failure or is interrupted.
 - **MEAS-3** It prints, for each kind of run and each stage, the median and the lowest and highest
-  values, as a table for a person and, with `--json`, as one JSON document. It also prints the
+  values, as a table for a person or, with `--json`, as one JSON document in place of the table. It
+  also prints the
   wall-clock time it measured around each run, so that process start, which no stage covers,
   shows as wall-clock time minus `total`, and `other` as TIME-2 defines it. The JSON document holds
   every run (its kind, its wall-clock time and its timing line), the platform, the SHA-256 hash of
@@ -201,7 +211,7 @@ Terms:
   don't, the script stops with a line naming the difference, so Linux and Windows numbers are never
   pooled. With no cold runs among the files, the cold columns read "none". It adds one more
   column per stage: the cold median minus the warm median, which is how much of a cold run's time
-  that stage adds. The CI job's rounds and the Windows restarts are combined this way. Session's
+  that stage adds. Only runs labeled cold fill it, never runs labeled "first run, cache unknown". The CI job's rounds and the Windows restarts are combined this way. Session's
   call: one way of combining for both platforms, since the Windows cold runs come from separate
   invocations, one after each restart.
 - **MEAS-4** The cold run: on Linux, with `--drop-caches`, the script empties the file cache first
@@ -256,7 +266,11 @@ Terms:
 
 - **TAKE-1** On the owner's Windows machine: yakshaver and at least one other local repository of
   similar size, each with at least two cold runs, each taken as the first run on that repository
-  after a restart of the machine, passed with `--cold --json`. After the restart, the script is the
+  after a restart of the machine, passed with `--cold --json` and `--hand-off` with a hand-off file
+  for that repository (one yak writes, or one written by hand as the dead-code item's LIVE-2 does).
+  Before the first restart, the script is run once on each repository with the same arguments and
+  without `--cold`, to check `graph` reads it without stopping, so no restart is spent on a run that
+  stops. The analyzer is not rebuilt between restarts. After the restart, the script is the
   first thing run, before an editor, a terminal whose prompt runs `git status`, or anything else
   opens either repository, and neither repository changes between restarts. One restart may serve
   both repositories, since running the script on one doesn't read the other's files. Each repository's runs are then
@@ -309,6 +323,12 @@ Terms:
   repository before the script does: an editor reopening it, a shell prompt running `git status`,
   the Windows Search indexer. TAKE-1 has the script run first, takes two cold runs for each
   repository, and the report says how far apart they were.
+- **On Windows, a cold `scriptsRead` mixes two costs.** Defender scans a file the first time it is
+  opened after a restart, so a cold read on Windows is the disk and the scan together, and the
+  switch can't tell them apart. Separating them would need a round with the repository excluded
+  from Defender, which needs admin rights and is the owner's to allow (escalated; see the record).
+  Until then the report names both as the cold cost on Windows, and Linux, with no such scan, shows
+  the disk alone.
 - **On CI, emptying the cache may not make reads cold.** The runner is a virtual machine; the host
   or the storage beneath it may cache what the virtual machine reads, so `drop_caches` may make
   reads only partly cold. TAKE-3 checks the cold runs against the warm ones, and says so when there
