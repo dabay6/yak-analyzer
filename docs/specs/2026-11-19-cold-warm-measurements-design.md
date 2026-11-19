@@ -63,7 +63,10 @@ Terms:
   the analyzer's speed is measured on the owner's Windows machine, with its own time split from what
   yak and the launcher add. CACHE-1 says a cache between runs is built only if that measurement
   calls for one. IF-3 says yak reads the analyzer's standard error only when a run fails, and relays
-  its first line.
+  its first line. IDs given with "dead-code" before them (INH-4, LIVE-5) are
+  `docs/specs/2026-11-13-dead-code-findings-design.md`'s; RUN-3 and RUN-6a, which have nothing before
+  them, are `docs/specs/2026-11-11-reading-a-project-design.md`'s. RUN-6a fixes how git is started:
+  no locks, no file-system monitor, no untracked cache.
 - **A cold run** is a run with the project's files not in the operating system's file cache. **A
   warm run** is the same run again straight after, with them cached.
 - **A first start** is the first run of an executable file that has never run, which Windows
@@ -114,7 +117,10 @@ Terms:
   (`src/cli.rs`) and yak's interface has no room for a new option.
 - **TIME-2** The stages of the reading, in the order `graph::read` takes them, and their keys:
   `handOff` (reading and checking the hand-off file; 0 without one), `files` (listing the files
-  through git, `files::list`), `marks`, `packages` (the `package.json` files), `tsconfig`,
+  through git, `files::list`; on a cold run this includes git reading its index and the repository's
+  folders from disk, though not loading git's program, which MEAS-2 loads first), `marks` (applying
+  the hand-off file's `data` and `generated` declarations to the file list, `marks::apply`; near 0
+  without a hand-off file), `packages` (the `package.json` files), `tsconfig`,
   `scriptsRead` (the time spent in `fs::read` of each script, summed over the files) and
   `scriptsParse` (for each file, the time from `fs::read` returning to the end of that file's
   parsing and finding of imports, summed over the files),
@@ -126,8 +132,8 @@ Terms:
   combining two faults) fall into no stage; the script shows them as `other`, which is `total` minus
   the sum of every stage and `print` (MEAS-3).
 - **TIME-2a** Two more keys are measured outside the reading: `print` (writing the formatted
-  document to standard output) and `total` (from the start of the command in `src/main.rs` to the
-  end of printing). So the clock for `print` and `total` lives in `src/main.rs`, and `graph::read`
+  document to standard output) and `total` (from the first line of `run` in `src/main.rs`, before
+  the arguments are parsed, to the end of printing). So the clock for `print` and `total` lives in `src/main.rs`, and `graph::read`
   hands back its stage times beside the document it returns.
 - **TIME-3** The line is only written on a run that succeeded. A run that stops still writes
   exactly its one line, as RUN-3 says, and nothing else. This is the one change to RUN-3. It is safe
@@ -161,8 +167,11 @@ Terms:
   uses Node alone, as the other scripts do, and `fail` from the same file for stopping. It passes no
   hand-off file, so `handOff` is always 0: the stages this item asks about (listing, reading,
   parsing) read the same files with a hand-off file or without one. Session's call.
-- **MEAS-2** It takes, in this order: one `--version` run of the executable, untimed, so that a
-  first start never lands in the cold run; one cold run (MEAS-4); 10 warm runs; then a first start
+- **MEAS-2** It takes, in this order: on Linux with `--drop-caches`, the emptying of the file cache
+  (MEAS-4); then one `--version` run of the executable and one `git --version`, both untimed, so
+  that the cold run carries neither a first start nor the loading of the analyzer's and git's own
+  programs from disk, only the project's files and git's reading of the repository; one cold run;
+  10 warm runs; then a first start
   (a copy of the executable in a new temporary folder, outside the folder measured, timed on its
   first `graph` run, with the files cached). Session's call on the counts.
 - **MEAS-3** It prints, for each kind of run and each stage, the median and the lowest and highest
@@ -174,7 +183,10 @@ Terms:
 - **MEAS-3a** With `--combine <file> <file>...`, the script reads JSON documents that earlier runs
   of it wrote (`--json`) and prints the same table over all their runs together. Each kind of run is
   pooled across the files: the cold runs of three rounds give a median of three. A run labeled
-  "first run, cache unknown" is never pooled with cold runs; it stays a kind of its own. It adds one more
+  "first run, cache unknown" is never pooled with cold runs; it stays a kind of its own. The files
+  must agree on the platform, the executable's version and the measured folder's commit; when they
+  don't, the script stops with a line naming the difference, so Linux and Windows numbers are never
+  pooled. With no cold runs among the files, the cold columns read "none". It adds one more
   column per stage: the cold median minus the warm median, which is how much of a cold run's time
   that stage adds. The CI job's rounds and the Windows restarts are combined this way. Session's
   call: one way of combining for both platforms, since the Windows cold runs come from separate
@@ -191,7 +203,9 @@ Terms:
 - **MEAS-5** A broken run is never averaged in. A run that exits other than 0 stops the script,
   through `fail`, with the analyzer's own stop line. A run that exits 0 but writes no timing line
   stops it with a line of the script's own saying that no timing line came, and that the
-  executable may be older than the switch.
+  executable may be older than the switch. The script needs a built executable: when the one it
+  would use is missing, or its untimed `--version` fails, it stops with a line naming
+  `cargo build --release` as the fix.
 - **MEAS-6** The script's own logic (reading the timing lines, the medians, the labels) has tests
   in `scripts/`, run by the gates' `node --test` command.
 
@@ -212,12 +226,14 @@ Terms:
   push or a pull request, on `ubuntu-24.04`, the Linux runner `ci.yml` already uses. Session's call: Linux is the platform least like the
   owner's Windows machine, and the only one of the CI runners where the file cache can be emptied
   on purpose.
-- **JOB-2** It builds the release executable, checks out the stand-in (GEN-1), and runs the script
+- **JOB-2** It sets up Rust and Node as the `target` job in `ci.yml` does (rustup with the version
+  `rust-toolchain.toml` names; `actions/setup-node`, pinned the same way), builds with
+  `cargo build --release --locked`, checks out the stand-in (GEN-1), and runs the script
   with `--drop-caches --json`, three times over, each with its own cold run, then combines the
   three with `--combine` (MEAS-3a). Session's call: three cold runs, because a single one says
   nothing about noise.
-- **JOB-3** It writes the combined table to the job's summary and keeps the JSON documents as an
-  artifact.
+- **JOB-3** It appends the combined table to the file `$GITHUB_STEP_SUMMARY` names, which GitHub
+  shows as the job's summary, and keeps the JSON documents with `actions/upload-artifact`.
 - **JOB-4** Once yakshaver is public, measuring it here is one more checkout step. That isn't built
   here.
 
@@ -225,7 +241,8 @@ Terms:
 
 - **TAKE-1** On the owner's Windows machine: yakshaver and at least one other local repository of
   similar size, each with at least two cold runs, each taken as the first run on that repository
-  after a restart of the machine, passed with `--cold --json`. Each repository's runs are then
+  after a restart of the machine, passed with `--cold --json`. One restart may serve both
+  repositories, since running the script on one doesn't read the other's files. Each repository's runs are then
   combined with `--combine` (MEAS-3a). Session's call: a restart is the only way to empty the cache
   without admin tools.
 - **TAKE-2** On Linux: the CI job of JOB-1, run once.
