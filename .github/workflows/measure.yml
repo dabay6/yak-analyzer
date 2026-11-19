@@ -10,8 +10,8 @@ permissions:
 jobs:
   measure:
     name: Measure cold against warm runs
-    # Straight on the runner, with no container: emptying the file cache, sudo and an ordinary user all need it
-    # (spec JOB-1, MEAS-4).
+    # Straight on the runner, never in a container, since emptying the file cache, sudo and an ordinary user all
+    # need it (spec JOB-1, MEAS-4).
     runs-on: ubuntu-24.04
     defaults:
       run:
