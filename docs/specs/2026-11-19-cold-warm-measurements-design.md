@@ -97,14 +97,14 @@ Terms:
   through git, `files::list`), `marks`, `packages` (the `package.json` files), `tsconfig`,
   `scriptsRead` (the time spent in `fs::read` of each script, summed over the files) and
   `scriptsParse` (the rest of `scripts::read`: parsing and finding imports, summed the same way),
-  `resolve`, `entries`. Reading and parsing are kept apart because which of the two takes a cold
+  `resolve`, `entries`, and `build` (building the output document and formatting it as text, which
+  `graph::read` does before it returns). Reading and parsing are kept apart because which of the two takes a cold
   run's time is the question this item asks. Each is measured with `std::time::Instant`.
   `scripts::read` reads one file after another, so the two sums add up to its wall-clock time.
-- **TIME-2a** Two more keys are measured outside the reading: `print` (building and formatting the
-  output document, and writing it to standard output) and `total` (from the start of the command in
-  `src/main.rs` to the end of printing). So the clock for `print` and `total` lives in `src/main.rs`,
-  and `graph::read` hands back its stage times beside the document it returns. A cold run's extra
-  time per stage is read as the cold median minus the warm median for that stage (MEAS-3).
+- **TIME-2a** Two more keys are measured outside the reading: `print` (writing the formatted
+  document to standard output) and `total` (from the start of the command in `src/main.rs` to the
+  end of printing). So the clock for `print` and `total` lives in `src/main.rs`, and `graph::read`
+  hands back its stage times beside the document it returns.
 - **TIME-3** The line is only written on a run that succeeded. A run that stops still writes
   exactly its one line, as RUN-3 says, and nothing else. This is the one change to RUN-3. It is safe
   because yak reads standard error only when a run fails (design IF-3), and a failed run never has
@@ -142,13 +142,22 @@ Terms:
   values, as a table for a person and, with `--json`, as one JSON document. It also prints the
   wall-clock time it measured around each run, so that process start, which no stage covers,
   shows as wall-clock time minus `total`.
+- **MEAS-3a** With `--combine <file> <file>...`, the script reads JSON documents that earlier runs
+  of it wrote (`--json`) and prints the same table over all their runs together. Each kind of run is
+  pooled across the files: the cold runs of three rounds give a median of three. It adds one more
+  column per stage: the cold median minus the warm median, which is how much of a cold run's time
+  that stage adds. The CI job's rounds and the Windows restarts are combined this way. Session's
+  call: one way of combining for both platforms, since the Windows cold runs come from separate
+  invocations, one after each restart.
 - **MEAS-4** The cold run: on Linux, with `--drop-caches`, the script empties the file cache first
   (`sync; echo 3 > /proc/sys/vm/drop_caches`, which needs root). Elsewhere, and without the option,
   it can't empty the cache. With `--cold`, it labels the first run as cold on the caller's word;
   without either option, it labels it "first run, cache unknown". Session's call: the script never
   needs admin rights on Windows.
-- **MEAS-5** A run that exits other than 0, or writes no timing line, stops the script with the
-  analyzer's own stop line, so a broken run is never averaged in.
+- **MEAS-5** A broken run is never averaged in. A run that exits other than 0 stops the script,
+  through `fail`, with the analyzer's own stop line. A run that exits 0 but writes no timing line
+  stops it with a line of the script's own saying that no timing line came, and that the
+  executable may be older than the switch.
 - **MEAS-6** The script's own logic (reading the timing lines, the medians, the labels) has tests
   in `scripts/`, run by the gates' `node --test` command.
 
@@ -170,9 +179,11 @@ Terms:
   owner's Windows machine, and the only one of the CI runners where the file cache can be emptied
   on purpose.
 - **JOB-2** It builds the release executable, checks out the stand-in (GEN-1), and runs the script
-  with `--drop-caches`, three times over, each with its own cold run. Session's call: three cold
-  runs, because a single one says nothing about noise.
-- **JOB-3** It writes the script's table to the job's summary and keeps the JSON as an artifact.
+  with `--drop-caches --json`, three times over, each with its own cold run, then combines the
+  three with `--combine` (MEAS-3a). Session's call: three cold runs, because a single one says
+  nothing about noise.
+- **JOB-3** It writes the combined table to the job's summary and keeps the JSON documents as an
+  artifact.
 - **JOB-4** Once yakshaver is public, measuring it here is one more checkout step. That isn't built
   here.
 
@@ -180,8 +191,9 @@ Terms:
 
 - **TAKE-1** On the owner's Windows machine: yakshaver and at least one other local repository of
   similar size, each with at least two cold runs, each taken as the first run on that repository
-  after a restart of the machine, passed with `--cold`. Session's call: a restart is the only way to
-  empty the cache without admin tools.
+  after a restart of the machine, passed with `--cold --json`. Each repository's runs are then
+  combined with `--combine` (MEAS-3a). Session's call: a restart is the only way to empty the cache
+  without admin tools.
 - **TAKE-2** On Linux: the CI job of JOB-1, run once.
 - **TAKE-3** The numbers and the conclusion go into a report in the report folder. It names only
   yakshaver among the repositories; any other is described by its size alone. The headline numbers
