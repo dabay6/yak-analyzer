@@ -201,13 +201,14 @@ Terms:
   every run (its kind, its wall-clock time and its timing line), the platform, the SHA-256 hash of
   the executable's file (two builds of one version differ there, which `--version` can't show), the
   folder measured, that folder's commit hash, and whether it had uncommitted changes (from
-  `git status --porcelain`). Its exact layout is the builder's.
+  `git status --porcelain`), and the text of `--label <text>` when one was given (TAKE-1a). Its
+  exact layout is the builder's.
 - **MEAS-3a** With `--combine <file> <file>...`, the script reads JSON documents that earlier runs
   of it wrote (`--json`) and prints the same table over all their runs together. Each kind of run is
   pooled across the files: the cold runs of three rounds give a median of three. A run labeled
   "first run, cache unknown" is never pooled with cold runs; it stays a kind of its own. The files
-  must agree on the platform, the executable's hash, the measured folder's commit and whether it
-  had uncommitted changes; when they
+  must agree on the platform, the executable's hash, the measured folder's commit, whether it had
+  uncommitted changes, and the label; when they
   don't, the script stops with a line naming the difference, so Linux and Windows numbers are never
   pooled. With no cold runs among the files, the cold columns read "none". It adds one more
   column per stage: the cold median minus the warm median, which is how much of a cold run's time
@@ -276,6 +277,12 @@ Terms:
   both repositories, since running the script on one doesn't read the other's files. Each repository's runs are then
   combined with `--combine` (MEAS-3a). Session's call: a restart is the only way to empty the cache
   without admin tools.
+- **TAKE-1a** On the same machine, one more cold round for each repository, taken as TAKE-1 says,
+  with that repository's folder excluded from Microsoft Defender's real-time scanning for the round
+  (owner): the exclusion is added with admin rights before the restart and removed straight after
+  the run. The script is run with `--label defender-excluded`. The cold median of TAKE-1 minus this
+  round's cold time, per stage, is what Defender's scanning adds; this round's cold time minus the
+  warm median is the disk's cost.
 - **TAKE-2** On Linux: the CI job of JOB-1, run once.
 - **TAKE-3** The numbers and the conclusion go into a report in the report folder. It names only
   yakshaver among the repositories; any other is described by its size alone. The headline numbers
@@ -325,10 +332,9 @@ Terms:
   repository, and the report says how far apart they were.
 - **On Windows, a cold `scriptsRead` mixes two costs.** Defender scans a file the first time it is
   opened after a restart, so a cold read on Windows is the disk and the scan together, and the
-  switch can't tell them apart. Separating them would need a round with the repository excluded
-  from Defender, which needs admin rights and is the owner's to allow (escalated; see the record).
-  Until then the report names both as the cold cost on Windows, and Linux, with no such scan, shows
-  the disk alone.
+  switch can't tell them apart. TAKE-1a separates them with one round per repository excluded from
+  Defender (owner). The exclusion is removed straight after the run, so the machine is unprotected
+  for that folder only for one restart and one run.
 - **On CI, emptying the cache may not make reads cold.** The runner is a virtual machine; the host
   or the storage beneath it may cache what the virtual machine reads, so `drop_caches` may make
   reads only partly cold. TAKE-3 checks the cold runs against the warm ones, and says so when there
