@@ -19,14 +19,17 @@ mod pages;
 mod resolve;
 mod scripts;
 mod stop;
+mod timings;
 mod tsconfig;
 
 use std::env;
 use std::ffi::OsString;
 use std::panic;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use cli::Command;
+use timings::Stages;
 
 /// The interface version: what yak and the analyzer must agree on (spec RUN-7).
 const INTERFACE_VERSION: u64 = 1;
@@ -50,6 +53,9 @@ fn main() -> ExitCode {
 
 /// Does what the command line asks.
 fn run() -> ExitCode {
+    // When the timings are asked for, the whole run is timed from here, before the arguments are read
+    // (spec TIME-2a).
+    let started = timings::asked().then(Instant::now);
     let args: Vec<OsString> = env::args_os().skip(1).collect();
 
     match cli::parse(&args) {
@@ -66,18 +72,27 @@ fn run() -> ExitCode {
 
             ExitCode::SUCCESS
         }
-        Ok(Command::Graph { hand_off }) => match graph::read(hand_off.as_deref()) {
-            Ok(document) => {
-                println!("{document}");
+        Ok(Command::Graph { hand_off }) => {
+            let mut stages = Stages::new(started.is_some());
 
-                ExitCode::SUCCESS
-            }
-            Err(stopped) => {
-                eprintln!("{}", stopped.line());
+            match graph::read(hand_off.as_deref(), &mut stages) {
+                Ok(document) => {
+                    stages.time("print", || println!("{document}"));
 
-                ExitCode::from(stop::STOPPED)
+                    // Only a run that succeeded writes the line (spec TIME-3).
+                    if let Some(started) = started {
+                        timings::write(&timings::line(&stages, started.elapsed()));
+                    }
+
+                    ExitCode::SUCCESS
+                }
+                Err(stopped) => {
+                    eprintln!("{}", stopped.line());
+
+                    ExitCode::from(stop::STOPPED)
+                }
             }
-        },
+        }
         Err(refusal) => {
             eprintln!("{}", stop::line(&refusal));
 

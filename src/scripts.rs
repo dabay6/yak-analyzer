@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind};
 use std::path::Path;
 
 use crate::files::{File, Kind};
@@ -12,6 +12,7 @@ use crate::imports::{self, Broken, Read};
 use crate::notice::Notice;
 use crate::pages::{self, Skipped};
 use crate::stop::Stop;
+use crate::timings::Stages;
 
 /// What reading the scripts found.
 #[derive(Debug, Default)]
@@ -32,12 +33,14 @@ enum Unread {
 
 /// Reads every script, type declaration file, Vue component, MDX document and HTML page in the list
 /// that is not data, in the order of the list. A tracked file that cannot be read stops the run; an
-/// untracked one is skipped with a notice (spec PARSE-2).
+/// untracked one is skipped with a notice (spec PARSE-2). The time spent reading from disk and the
+/// time spent parsing go into the stages given apart, each summed over the files (spec TIME-2).
 pub fn read(
     root: &Path,
     files: &[File],
     data: &BTreeSet<String>,
     notices: &mut Vec<Notice>,
+    stages: &mut Stages,
 ) -> Result<Scripts, Stop> {
     let mut scripts = Scripts::default();
 
@@ -46,7 +49,9 @@ pub fn read(
             continue;
         }
 
-        match one(root, file) {
+        let bytes = stages.time("scriptsRead", || fs::read(root.join(&file.path)));
+
+        match stages.time("scriptsParse", || one(file, bytes)) {
             Ok((read, skipped)) => {
                 notices.extend(
                     skipped
@@ -111,10 +116,10 @@ fn passed_over(path: &str, skipped: Skipped) -> Notice {
     }
 }
 
-/// Reads one file and finds its imports, with what its reader passed over.
-fn one(root: &Path, file: &File) -> Result<(Read, Vec<Skipped>), Unread> {
+/// Finds the imports of one file from what reading it from disk gave, with what its reader passed over.
+fn one(file: &File, bytes: io::Result<Vec<u8>>) -> Result<(Read, Vec<Skipped>), Unread> {
     let path = file.path.as_str();
-    let bytes = fs::read(root.join(path)).map_err(|error| match error.kind() {
+    let bytes = bytes.map_err(|error| match error.kind() {
         ErrorKind::NotFound => Unread::Gone,
         _ => Unread::Broken(format!("cannot be read ({error})")),
     })?;

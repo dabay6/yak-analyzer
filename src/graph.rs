@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use crate::declarations;
 use crate::entries::{self, Entries};
 use crate::files::{self, File};
-use crate::hand_off;
+use crate::hand_off::{self, HandOff};
 use crate::imports::Import;
 use crate::marks::{self, Marks};
 use crate::notice::{self, Notice};
@@ -21,42 +21,45 @@ use crate::packages::{self, Package, Packages};
 use crate::resolve::{Outcome, Place, Resolution, Resolver};
 use crate::scripts::{self, Scripts};
 use crate::stop::Stop;
+use crate::timings::Stages;
 use crate::tsconfig;
 
 /// Reads the project, with the hand-off file at the path given or with none, and returns the document
-/// to print.
-pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
+/// to print. The time of each stage goes into the stages given (spec TIME-2).
+pub fn read(hand_off_path: Option<&Path>, stages: &mut Stages) -> Result<String, Stop> {
     let mut notices = Vec::new();
-    let handed = match hand_off_path {
-        Some(path) => {
-            let handed = hand_off::read(path)?;
+    let handed = stages.time("handOff", || -> Result<Option<HandOff>, Stop> {
+        match hand_off_path {
+            Some(path) => {
+                let handed = hand_off::read(path)?;
 
-            declarations::check(&handed.stacks)?;
+                declarations::check(&handed.stacks)?;
 
-            if handed.truncated {
+                if handed.truncated {
+                    notices.push(Notice::new(
+                        "detection-cut-short",
+                        None,
+                        "yak's detection stopped at its limit of folders, so the folders the hand-off file lists \
+                         are not the whole workspace."
+                            .to_owned(),
+                    ));
+                }
+
+                Ok(Some(handed))
+            }
+            None => {
                 notices.push(Notice::new(
-                    "detection-cut-short",
+                    "no-hand-off-file",
                     None,
-                    "yak's detection stopped at its limit of folders, so the folders the hand-off file lists \
-                     are not the whole workspace."
+                    "No hand-off file was given, so the project is read from its own standard files, with no \
+                     declarations."
                         .to_owned(),
                 ));
+
+                Ok(None)
             }
-
-            Some(handed)
         }
-        None => {
-            notices.push(Notice::new(
-                "no-hand-off-file",
-                None,
-                "No hand-off file was given, so the project is read from its own standard files, with no \
-                 declarations."
-                    .to_owned(),
-            ));
-
-            None
-        }
-    };
+    })?;
 
     // The root is the folder the hand-off file names, whatever folder the analyzer was started in, and
     // without a hand-off file the folder it was started in (spec LIST-1).
@@ -68,64 +71,77 @@ pub fn read(hand_off_path: Option<&Path>) -> Result<String, Stop> {
             ))
         })?,
     };
-    let listing = files::list(&root, &mut notices)?;
+    let listing = stages.time("files", || files::list(&root, &mut notices))?;
     let files = listing.files.as_slice();
-    let marks = marks::apply(files, handed.as_ref(), &mut notices)?;
+    let marks = stages.time("marks", || {
+        marks::apply(files, handed.as_ref(), &mut notices)
+    })?;
     // The `package.json` files are read before the tsconfig files, and the fields of both are checked
     // after, so that two faults always give the same line (spec RUN-4).
-    let packages = packages::load(&root, files, &marks.data)?.checked(
-        files,
-        handed.as_ref().map(|handed| handed.folders.as_slice()),
-        &mut notices,
-    );
-    let configs = tsconfig::load(
-        &root,
-        files,
-        &marks.data,
-        packages.as_ref().ok(),
-        &mut notices,
-    )?
-    .checked();
+    let packages = stages.time("packages", || {
+        Ok::<_, Stop>(packages::load(&root, files, &marks.data)?.checked(
+            files,
+            handed.as_ref().map(|handed| handed.folders.as_slice()),
+            &mut notices,
+        ))
+    })?;
+    let configs = stages.time("tsconfig", || {
+        Ok::<_, Stop>(
+            tsconfig::load(
+                &root,
+                files,
+                &marks.data,
+                packages.as_ref().ok(),
+                &mut notices,
+            )?
+            .checked(),
+        )
+    })?;
     let (packages, configs) = match (packages, configs) {
         (Ok(packages), Ok(configs)) => (packages, configs),
         (Err(fault), Ok(_)) | (Ok(_), Err(fault)) => return Err(fault.stop()),
         (Err(first), Err(second)) => return Err(first.earlier(second).stop()),
     };
-    let scripts = scripts::read(&root, files, &marks.data, &mut notices)?;
-    let resolver = Resolver::new(&listing, &packages, &configs);
-    let resolved = resolver.resolve(&root, &scripts)?;
-    let entries = entries::find(
-        &entries::Project {
-            files,
-            packages: &packages,
-            configs: &configs,
-            resolver: &resolver,
-            resolved: &resolved,
-            handed: handed.as_ref(),
-        },
-        &mut notices,
-    )?;
-    let mut document = json!({
-        "entries": entry_points(&entries),
-        "entryFaults": entries
-            .faults
-            .iter()
-            .map(|(folder, fault)| json!({ "fault": fault.name(), "package": folder }))
-            .collect::<Vec<Value>>(),
-        "files": files
-            .iter()
-            .filter(|each| !scripts.gone.contains(&each.path))
-            .map(|each| file(each, &marks, &packages, &scripts, &resolved))
-            .collect::<Vec<Value>>(),
-        "handOff": handed.is_some(),
-        "notices": notice::printed(notices),
-        "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
-    });
+    let scripts = scripts::read(&root, files, &marks.data, &mut notices, stages)?;
+    let resolver = stages.time("resolve", || Resolver::new(&listing, &packages, &configs));
+    let resolved = stages.time("resolve", || resolver.resolve(&root, &scripts))?;
+    let entries = stages.time("entries", || {
+        entries::find(
+            &entries::Project {
+                files,
+                packages: &packages,
+                configs: &configs,
+                resolver: &resolver,
+                resolved: &resolved,
+                handed: handed.as_ref(),
+            },
+            &mut notices,
+        )
+    })?;
 
-    // An object's keys in order, whatever order they were added in.
-    document.sort_all_objects();
+    Ok(stages.time("build", || {
+        let mut document = json!({
+            "entries": entry_points(&entries),
+            "entryFaults": entries
+                .faults
+                .iter()
+                .map(|(folder, fault)| json!({ "fault": fault.name(), "package": folder }))
+                .collect::<Vec<Value>>(),
+            "files": files
+                .iter()
+                .filter(|each| !scripts.gone.contains(&each.path))
+                .map(|each| file(each, &marks, &packages, &scripts, &resolved))
+                .collect::<Vec<Value>>(),
+            "handOff": handed.is_some(),
+            "notices": notice::printed(notices),
+            "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
+        });
 
-    Ok(format!("{document:#}"))
+        // An object's keys in order, whatever order they were added in.
+        document.sort_all_objects();
+
+        format!("{document:#}")
+    }))
 }
 
 /// The entry points as they are printed, by path, each with every source that made it one (spec

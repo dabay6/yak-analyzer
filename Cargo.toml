@@ -59,6 +59,10 @@ path = "tests/pages.test.rs"
 name = "entries"
 path = "tests/entries.test.rs"
 
+[[test]]
+name = "timings"
+path = "tests/timings.test.rs"
+
 [dependencies]
 # Parse scripts into syntax trees and walk them; released together, so pinned together (spec AN-2, DEP-3).
 oxc_allocator = "=0.158.0"

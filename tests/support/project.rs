@@ -7,8 +7,8 @@ use std::process::{Command, Output};
 
 use serde_json::{Value, json};
 
-/// Shuts the machine's and the user's own git settings out of a command, global excludes included, so
-/// that a test's result does not depend on the machine.
+/// Shuts the machine's and the user's own git settings out of a command, global excludes included, and
+/// the analyzer's timing switch, so that a test's result does not depend on the machine (spec TEST-1a).
 fn alone(command: &mut Command) -> &mut Command {
     let none = Path::new(env!("CARGO_TARGET_TMPDIR")).join("no-git-settings");
 
@@ -20,6 +20,7 @@ fn alone(command: &mut Command) -> &mut Command {
         .env("GIT_CONFIG_GLOBAL", &none)
         .env("GIT_CONFIG_SYSTEM", &none)
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("YAK_ANALYZER_TIMINGS")
 }
 
 /// One made-up project.
