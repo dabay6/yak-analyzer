@@ -118,7 +118,7 @@ Terms:
 - **TIME-2** The stages of the reading, in the order `graph::read` takes them, and their keys:
   `handOff` (reading and checking the hand-off file; 0 without one), `files` (listing the files
   through git, `files::list`; on a cold run this includes git reading its index and the repository's
-  folders from disk, though not loading git's program, which MEAS-2 loads first), `marks` (applying
+  folders from disk, though not loading git's code, which MEAS-2's warm-up loads first), `marks` (applying
   the hand-off file's `data` and `generated` declarations to the file list, `marks::apply`; near 0
   without a hand-off file), `packages` (the `package.json` files), `tsconfig`,
   `scriptsRead` (the time spent in `fs::read` of each script, summed over the files) and
@@ -140,7 +140,12 @@ Terms:
   because yak reads standard error only when a run fails (design IF-3), and a failed run never has
   the line, even if a user's environment sets the variable and yak passes it on.
 - **TIME-4** With the variable set or not, standard output, the exit code, the files read and the
-  git commands run are identical.
+  git commands run are identical. TEST-1 checks standard output and the exit code. A reviewer checks
+  the files read and the git commands in the code: the clocks wrap the existing calls and never
+  change their arguments.
+- **TIME-4a** The timing line is written with `writeln!` to standard error, and a failure to write
+  it is ignored, so a closed standard error never turns a run that succeeded into a fault
+  (`eprintln!` would panic, and the run would exit 3).
 - **TIME-5** The line's shape is `{"timings":{"reading":{<the stages of TIME-2>},"print":n,"total":n}}`.
   The outer key tells it apart from a stop line, which begins with `yak-analyzer:`.
 - **TIME-6** The stages of a reading are grouped under one key so that `audit` can add a second
@@ -153,9 +158,11 @@ Terms:
   unset. It checks that standard output and the exit code are the same both times, that standard
   error is empty when the variable is unset, and that when it's set, standard error is one line that
   parses as JSON with every key of TIME-2, TIME-2a and TIME-5. It sets the variable through the
-  existing `Project::run` hook in `tests/support/project.rs`, and that file's helper `alone`, which
-  shuts out the machine's own settings, also removes `YAK_ANALYZER_TIMINGS`, so a developer's
-  environment never changes another test's result.
+  existing `Project::run` hook in `tests/support/project.rs`.
+- **TEST-1a** Every place a test starts the binary removes `YAK_ANALYZER_TIMINGS` first, unless the
+  test sets it: the helper `alone` in `tests/support/project.rs`, `run` in `tests/support/mod.rs`,
+  and the commands `tests/cli.test.rs` builds itself. Otherwise a developer with the variable set
+  would see the tests that require an empty standard error fail.
 - **TEST-2** A test runs a stopping `graph` (for example, a missing hand-off file) with the variable
   set, and checks that standard error is the one stop line and nothing else.
 
@@ -168,9 +175,12 @@ Terms:
   hand-off file, so `handOff` is always 0: the stages this item asks about (listing, reading,
   parsing) read the same files with a hand-off file or without one. Session's call.
 - **MEAS-2** It takes, in this order: on Linux with `--drop-caches`, the emptying of the file cache
-  (MEAS-4); then one `--version` run of the executable and one `git --version`, both untimed, so
-  that the cold run carries neither a first start nor the loading of the analyzer's and git's own
-  programs from disk, only the project's files and git's reading of the repository; one cold run;
+  (MEAS-4); then a warm-up: one untimed `graph` run on a tiny project the script writes into a new
+  temporary folder (a git repository holding a `package.json`, a `tsconfig.json` and two
+  TypeScript files that import each other). That run goes through every stage, so it loads nearly
+  all the analyzer's and git's code from disk, and it starts the executable for the first time. The
+  cold run that follows carries the project's files and git's reading of the repository, and
+  neither a first start nor the loading of program code. Then: one cold run;
   10 warm runs; then a first start
   (a copy of the executable in a new temporary folder, outside the folder measured, timed on its
   first `graph` run, with the files cached). Session's call on the counts.
@@ -178,13 +188,16 @@ Terms:
   values, as a table for a person and, with `--json`, as one JSON document. It also prints the
   wall-clock time it measured around each run, so that process start, which no stage covers,
   shows as wall-clock time minus `total`, and `other` as TIME-2 defines it. The JSON document holds
-  every run (its kind, its wall-clock time and its timing line), the platform, the executable's
-  version, the folder measured and that folder's commit hash; its exact layout is the builder's.
+  every run (its kind, its wall-clock time and its timing line), the platform, the SHA-256 hash of
+  the executable's file (two builds of one version differ there, which `--version` can't show), the
+  folder measured, that folder's commit hash, and whether it had uncommitted changes (from
+  `git status --porcelain`). Its exact layout is the builder's.
 - **MEAS-3a** With `--combine <file> <file>...`, the script reads JSON documents that earlier runs
   of it wrote (`--json`) and prints the same table over all their runs together. Each kind of run is
   pooled across the files: the cold runs of three rounds give a median of three. A run labeled
   "first run, cache unknown" is never pooled with cold runs; it stays a kind of its own. The files
-  must agree on the platform, the executable's version and the measured folder's commit; when they
+  must agree on the platform, the executable's hash, the measured folder's commit and whether it
+  had uncommitted changes; when they
   don't, the script stops with a line naming the difference, so Linux and Windows numbers are never
   pooled. With no cold runs among the files, the cold columns read "none". It adds one more
   column per stage: the cold median minus the warm median, which is how much of a cold run's time
@@ -204,8 +217,8 @@ Terms:
   through `fail`, with the analyzer's own stop line. A run that exits 0 but writes no timing line
   stops it with a line of the script's own saying that no timing line came, and that the
   executable may be older than the switch. The script needs a built executable: when the one it
-  would use is missing, or its untimed `--version` fails, it stops with a line naming
-  `cargo build --release` as the fix.
+  would use is missing, or doesn't run, it stops with a line that names the path, and, when that
+  path is the default `BUILT`, gives `cargo build --release` as the fix.
 - **MEAS-6** The script's own logic (reading the timing lines, the medians, the labels) has tests
   in `scripts/`, run by the gates' `node --test` command.
 
@@ -223,11 +236,13 @@ Terms:
 ### The CI job
 
 - **JOB-1** A workflow that runs only when it is started by hand (`workflow_dispatch`), never on a
-  push or a pull request, on `ubuntu-24.04`, the Linux runner `ci.yml` already uses. Session's call: Linux is the platform least like the
-  owner's Windows machine, and the only one of the CI runners where the file cache can be emptied
-  on purpose.
-- **JOB-2** It sets up Rust and Node as the `target` job in `ci.yml` does (rustup with the version
-  `rust-toolchain.toml` names; `actions/setup-node`, pinned the same way), builds with
+  push or a pull request, directly on the `ubuntu-24.04` runner, with no container. `ci.yml`'s Linux
+  `target` job builds inside a manylinux container, where emptying the cache, `sudo` and the
+  ordinary user of MEAS-4 don't work, so this job doesn't copy that setup. Session's call: Linux is
+  the platform least like the owner's Windows machine, and its file cache can be emptied without
+  restarting.
+- **JOB-2** It uses the runner's own rustup, which picks the version `rust-toolchain.toml` names,
+  and `actions/setup-node`, pinned to the same commit as in `ci.yml`. It builds with
   `cargo build --release --locked`, checks out the stand-in (GEN-1), and runs the script
   with `--drop-caches --json`, three times over, each with its own cold run, then combines the
   three with `--combine` (MEAS-3a). Session's call: three cold runs, because a single one says
@@ -241,15 +256,19 @@ Terms:
 
 - **TAKE-1** On the owner's Windows machine: yakshaver and at least one other local repository of
   similar size, each with at least two cold runs, each taken as the first run on that repository
-  after a restart of the machine, passed with `--cold --json`. One restart may serve both
-  repositories, since running the script on one doesn't read the other's files. Each repository's runs are then
+  after a restart of the machine, passed with `--cold --json`. After the restart, the script is the
+  first thing run, before an editor, a terminal whose prompt runs `git status`, or anything else
+  opens either repository, and neither repository changes between restarts. One restart may serve
+  both repositories, since running the script on one doesn't read the other's files. Each repository's runs are then
   combined with `--combine` (MEAS-3a). Session's call: a restart is the only way to empty the cache
   without admin tools.
 - **TAKE-2** On Linux: the CI job of JOB-1, run once.
 - **TAKE-3** The numbers and the conclusion go into a report in the report folder. It names only
   yakshaver among the repositories; any other is described by its size alone. The headline numbers
   (cold, warm and first start on each platform, and the stage that takes most of a cold run) go on
-  the work item's record, where `2026-11-19-match-fallow-speed` will read them.
+  the work item's record, where `2026-11-19-match-fallow-speed` will read them. If CI's cold median
+  is within a tenth of its warm median, the report says emptying the cache had no visible effect
+  there, and CI's stage split isn't used for conclusions about cold runs.
 - **TAKE-4** The item is done when the switch, the script and the job have passed the gates and
   TAKE-1 to TAKE-3 are done. Whatever the numbers say, nothing is made faster here (owner).
 
@@ -272,8 +291,12 @@ Terms:
   that tests use made-up projects. Rejected: it is the largest piece of new code here, needed only
   until yakshaver is public, and less like a real repository than a real one pinned to a commit.
   This isn't a test, so the made-up-projects rule doesn't bind it. Session's call.
-- **macOS as the second platform.** Rejected: emptying its file cache (`purge`) needs root as well,
-  and Linux differs more from Windows in how it reads files. Session's call.
+- **macOS as the second platform.** Its runners also allow passwordless sudo, and `purge` empties
+  its file cache. Rejected: the owner asked for one platform beyond Windows, and Linux, with a
+  different file system and a different way of caching files, is further from Windows than macOS
+  is. Session's call.
+- **A Windows CI runner.** Its runners run as administrator and could empty the cache. Rejected:
+  Windows is already measured on the owner's own machine, which is what SPEED-3 names.
 
 ## Risks
 
@@ -282,8 +305,18 @@ Terms:
   6,000 reads on 3,000 files, well under a millisecond. TIME-4 and TEST-1 hold standard output
   identical. The clock is only read when the variable is set.
 - **A restart on Windows is not a clean cold run.** Windows may load files at start-up (its
-  SuperFetch service), and Defender's state changes. TAKE-1 takes two cold runs for each repository,
-  and the report says how far apart they were.
+  SuperFetch service), and Defender's state changes. Things that start at sign-in can read a
+  repository before the script does: an editor reopening it, a shell prompt running `git status`,
+  the Windows Search indexer. TAKE-1 has the script run first, takes two cold runs for each
+  repository, and the report says how far apart they were.
+- **On CI, emptying the cache may not make reads cold.** The runner is a virtual machine; the host
+  or the storage beneath it may cache what the virtual machine reads, so `drop_caches` may make
+  reads only partly cold. TAKE-3 checks the cold runs against the warm ones, and says so when there
+  is no visible difference. The owner's Windows numbers are the ones SPEED-3 names, and they don't
+  rely on CI.
+- **The warm-up doesn't load every line of code.** The tiny project of MEAS-2 doesn't use every
+  path the parser and resolver have, so a little code may still be loaded during the cold run. The
+  code is about 4MB, which is small beside 3,000 project files.
 - **The CI runner's numbers are not the owner's machine's.** They are reported as their own
   platform, never mixed with Windows. Their use is the split between stages, not the totals.
 - **Noise.** One cold run per round, three rounds on CI, two on Windows: enough to see whether the
