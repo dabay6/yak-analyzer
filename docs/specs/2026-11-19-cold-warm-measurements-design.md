@@ -46,10 +46,30 @@ which stage takes that time: listing the files through git, reading them, or par
 
 Terms:
 
+- **yakshaver** is the developer tool this analyzer is built for; **yak** is its command. yak
+  starts the analyzer, through the **launcher**: the small Node program in
+  `npm/yak-analyzer/lib/launch.js` that the npm package installs and that starts the platform's
+  executable.
+- **fallow** is the dead-code tool yak runs today, which the analyzer is to replace. **`audit`** is
+  the analyzer's command for finding dead code, planned by
+  `docs/specs/2026-11-13-dead-code-findings-design.md` and not built yet.
+- **The hand-off file** is the file yak writes to tell the analyzer which folder to read and what a
+  project declares (`graph --hand-off <file>`; see CONTRIBUTING.md, "The commands").
+- **The owner** is the person who decides this work; **the brainstorm** is the conversation, between
+  the owner and a session, that this spec was written from; **the builder** is whoever plans and
+  builds from this spec. **The work item's record** is the log of decisions and notes yakshaver
+  keeps for each work item, outside this repository.
+- Design IDs, such as SPEED-3, CACHE-1 or IF-3, are requirements of the design spec. SPEED-3 says
+  the analyzer's speed is measured on the owner's Windows machine, with its own time split from what
+  yak and the launcher add. CACHE-1 says a cache between runs is built only if that measurement
+  calls for one. IF-3 says yak reads the analyzer's standard error only when a run fails, and relays
+  its first line.
 - **A cold run** is a run with the project's files not in the operating system's file cache. **A
   warm run** is the same run again straight after, with them cached.
 - **A first start** is the first run of an executable file that has never run, which Windows
-  Defender may scan. It is measured separately from a cold run (owner).
+  Defender may scan. It is measured separately from a cold run (owner). Linux has no such scan, so
+  a first start there is expected to cost nothing extra; it is measured anyway, the same way, so the
+  two platforms' tables match.
 - **A stage** is one step of `graph`, in the order `src/graph.rs` takes them (TIME-2).
 - **The stand-in** is a public open-source repository the CI job measures while yakshaver is private
   (GEN-1).
@@ -96,11 +116,15 @@ Terms:
   `handOff` (reading and checking the hand-off file; 0 without one), `files` (listing the files
   through git, `files::list`), `marks`, `packages` (the `package.json` files), `tsconfig`,
   `scriptsRead` (the time spent in `fs::read` of each script, summed over the files) and
-  `scriptsParse` (the rest of `scripts::read`: parsing and finding imports, summed the same way),
+  `scriptsParse` (for each file, the time from `fs::read` returning to the end of that file's
+  parsing and finding of imports, summed over the files),
   `resolve`, `entries`, and `build` (building the output document and formatting it as text, which
   `graph::read` does before it returns). Reading and parsing are kept apart because which of the two takes a cold
   run's time is the question this item asks. Each is measured with `std::time::Instant`.
-  `scripts::read` reads one file after another, so the two sums add up to its wall-clock time.
+  `scripts::read` reads one file after another, so the two sums add up to nearly all of its
+  wall-clock time. The small steps between stages (the loop's own work, `env::current_dir`,
+  combining two faults) fall into no stage; the script shows them as `other`, which is `total` minus
+  the sum of every stage and `print` (MEAS-3).
 - **TIME-2a** Two more keys are measured outside the reading: `print` (writing the formatted
   document to standard output) and `total` (from the start of the command in `src/main.rs` to the
   end of printing). So the clock for `print` and `total` lives in `src/main.rs`, and `graph::read`
@@ -131,29 +155,39 @@ Terms:
 
 ### The measuring script
 
-- **MEAS-1** `scripts/measure.mjs` takes the path of the analyzer's executable and a folder, runs
-  `graph` there with `YAK_ANALYZER_TIMINGS=1`, and reads the timing line of each run. It uses Node
-  alone, as the other scripts do, and the helpers they share in `scripts/lib/run.mjs`: `BUILT` as
-  the default executable, and `fail` for stopping.
-- **MEAS-2** It takes, in this order: one cold run (MEAS-4), then 10 warm runs, then a first start
-  (a copy of the executable in a new temporary folder, outside the folder measured, run once).
-  Session's call on the counts.
+- **MEAS-1** `scripts/measure.mjs` takes a folder as its one argument, runs `graph` there with
+  `YAK_ANALYZER_TIMINGS=1`, and reads the timing line of each run. `--exe <path>` names the
+  executable; without it, the script uses `BUILT` from `scripts/lib/run.mjs`, the release build. It
+  uses Node alone, as the other scripts do, and `fail` from the same file for stopping. It passes no
+  hand-off file, so `handOff` is always 0: the stages this item asks about (listing, reading,
+  parsing) read the same files with a hand-off file or without one. Session's call.
+- **MEAS-2** It takes, in this order: one `--version` run of the executable, untimed, so that a
+  first start never lands in the cold run; one cold run (MEAS-4); 10 warm runs; then a first start
+  (a copy of the executable in a new temporary folder, outside the folder measured, timed on its
+  first `graph` run, with the files cached). Session's call on the counts.
 - **MEAS-3** It prints, for each kind of run and each stage, the median and the lowest and highest
   values, as a table for a person and, with `--json`, as one JSON document. It also prints the
   wall-clock time it measured around each run, so that process start, which no stage covers,
-  shows as wall-clock time minus `total`.
+  shows as wall-clock time minus `total`, and `other` as TIME-2 defines it. The JSON document holds
+  every run (its kind, its wall-clock time and its timing line), the platform, the executable's
+  version, the folder measured and that folder's commit hash; its exact layout is the builder's.
 - **MEAS-3a** With `--combine <file> <file>...`, the script reads JSON documents that earlier runs
   of it wrote (`--json`) and prints the same table over all their runs together. Each kind of run is
-  pooled across the files: the cold runs of three rounds give a median of three. It adds one more
+  pooled across the files: the cold runs of three rounds give a median of three. A run labeled
+  "first run, cache unknown" is never pooled with cold runs; it stays a kind of its own. It adds one more
   column per stage: the cold median minus the warm median, which is how much of a cold run's time
   that stage adds. The CI job's rounds and the Windows restarts are combined this way. Session's
   call: one way of combining for both platforms, since the Windows cold runs come from separate
   invocations, one after each restart.
 - **MEAS-4** The cold run: on Linux, with `--drop-caches`, the script empties the file cache first
-  (`sync; echo 3 > /proc/sys/vm/drop_caches`, which needs root). Elsewhere, and without the option,
-  it can't empty the cache. With `--cold`, it labels the first run as cold on the caller's word;
-  without either option, it labels it "first run, cache unknown". Session's call: the script never
-  needs admin rights on Windows.
+  by running `sudo -n sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'` as a child process. The
+  script itself runs as the ordinary user, so git never sees a checkout owned by someone else (which
+  it refuses as "dubious ownership"); `-n` makes sudo fail at once rather than ask for a password,
+  and a failure stops the script with a line saying passwordless sudo is needed. GitHub's Linux
+  runners allow passwordless sudo. `--drop-caches` on any other platform stops the script with a
+  line saying it works on Linux only. With `--cold`, the script labels the cold run as cold on the
+  caller's word; `--drop-caches` implies it. Without either option, it labels the run "first run,
+  cache unknown". Session's call: the script never needs admin rights on Windows.
 - **MEAS-5** A broken run is never averaged in. A run that exits other than 0 stops the script,
   through `fail`, with the analyzer's own stop line. A run that exits 0 but writes no timing line
   stops it with a line of the script's own saying that no timing line came, and that the
@@ -175,7 +209,7 @@ Terms:
 ### The CI job
 
 - **JOB-1** A workflow that runs only when it is started by hand (`workflow_dispatch`), never on a
-  push or a pull request, on `ubuntu-latest`. Session's call: Linux is the platform least like the
+  push or a pull request, on `ubuntu-24.04`, the Linux runner `ci.yml` already uses. Session's call: Linux is the platform least like the
   owner's Windows machine, and the only one of the CI runners where the file cache can be emptied
   on purpose.
 - **JOB-2** It builds the release executable, checks out the stand-in (GEN-1), and runs the script
@@ -249,6 +283,7 @@ Terms:
 - How the stage clocks are threaded through `graph::read`: a small struct of `Instant`s, or a list,
   as reads best.
 - Which public repository is the stand-in, within GEN-2.
-- The workflow file's name, and whether it is a new file or a job in `ci.yml` with its own trigger.
-  The tests in `scripts/workflow.test.mjs` read `ci.yml`, so a new file avoids touching them.
+- The workflow file's name. It is a new file in `.github/workflows/`, because a trigger belongs to a
+  whole workflow, and `ci.yml` runs on every push; a new file also leaves the tests in
+  `scripts/workflow.test.mjs`, which read `ci.yml`, untouched.
 - The script's option names other than those this spec names, and its table's layout.
