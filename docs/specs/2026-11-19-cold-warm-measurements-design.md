@@ -51,8 +51,8 @@ Terms:
 - **A first start** is the first run of an executable file that has never run, which Windows
   Defender may scan. It is measured separately from a cold run (owner).
 - **A stage** is one step of `graph`, in the order `src/graph.rs` takes them (TIME-2).
-- **The made-up project** is a project the measuring script writes for the purpose, with no code
-  from any real repository (GEN-1).
+- **The stand-in** is a public open-source repository the CI job measures while yakshaver is private
+  (GEN-1).
 - **The report folder** is the work item's `yak-reports/<item id>` folder in git's common
   directory, on the owner's machine and committed nowhere.
 
@@ -88,32 +88,44 @@ Terms:
 
 - **TIME-1** When the environment variable `YAK_ANALYZER_TIMINGS` is set to `1`, a `graph` run
   that succeeds writes one line on standard error after its output: a JSON object with the
-  milliseconds each stage took, as whole numbers (rounded down), and the total. Set to anything
-  else, or unset, the analyzer behaves as it does today. Session's call: an environment variable,
-  because the command line accepts only exact forms (`src/cli.rs`) and yak's interface has no room
-  for a new option.
-- **TIME-2** The stages, in the order the run takes them, and their keys: `handOff` (reading and
-  checking the hand-off file; 0 without one), `files` (listing the files through git, `files::list`),
-  `marks`, `packages` (the `package.json` files), `tsconfig`, `scripts` (reading and parsing the
-  scripts), `resolve`, `entries`, `print` (building and formatting the output), and `total`, the
-  time from the start of `graph::read` to the end of printing. Each is measured with
-  `std::time::Instant`.
+  microseconds each stage took, as whole numbers, and the total. Microseconds, because a warm stage
+  can take well under a millisecond. Set to anything else, or unset, the analyzer behaves as it does
+  today. Session's call: an environment variable, because the command line accepts only exact forms
+  (`src/cli.rs`) and yak's interface has no room for a new option.
+- **TIME-2** The stages of the reading, in the order `graph::read` takes them, and their keys:
+  `handOff` (reading and checking the hand-off file; 0 without one), `files` (listing the files
+  through git, `files::list`), `marks`, `packages` (the `package.json` files), `tsconfig`,
+  `scriptsRead` (the time spent in `fs::read` of each script, summed over the files) and
+  `scriptsParse` (the rest of `scripts::read`: parsing and finding imports, summed the same way),
+  `resolve`, `entries`. Reading and parsing are kept apart because which of the two takes a cold
+  run's time is the question this item asks. Each is measured with `std::time::Instant`.
+  `scripts::read` reads one file after another, so the two sums add up to its wall-clock time.
+- **TIME-2a** Two more keys are measured outside the reading: `print` (building and formatting the
+  output document, and writing it to standard output) and `total` (from the start of the command in
+  `src/main.rs` to the end of printing). So the clock for `print` and `total` lives in `src/main.rs`,
+  and `graph::read` hands back its stage times beside the document it returns. A cold run's extra
+  time per stage is read as the cold median minus the warm median for that stage (MEAS-3).
 - **TIME-3** The line is only written on a run that succeeded. A run that stops still writes
-  exactly its one line, as RUN-3 says, and nothing else. This is the one change to RUN-3: yak never
-  sets the variable, so what yak reads on standard error doesn't change.
+  exactly its one line, as RUN-3 says, and nothing else. This is the one change to RUN-3. It is safe
+  because yak reads standard error only when a run fails (design IF-3), and a failed run never has
+  the line, even if a user's environment sets the variable and yak passes it on.
 - **TIME-4** With the variable set or not, standard output, the exit code, the files read and the
   git commands run are identical.
-- **TIME-5** The line has its own key, `"timings"`, around the object (`{"timings":{...}}`), so a
-  reader can tell it from a stop line, which begins with `yak-analyzer:`.
-- **TIME-6** A later command can add its own stages to the same line under its own keys. That is not
-  built here.
+- **TIME-5** The line's shape is `{"timings":{"reading":{<the stages of TIME-2>},"print":n,"total":n}}`.
+  The outer key tells it apart from a stop line, which begins with `yak-analyzer:`.
+- **TIME-6** The stages of a reading are grouped under one key so that `audit` can add a second
+  reading, of the base, under a key of its own, timed separately even if the two run in parallel
+  (dead-code INH-4, LIVE-5). That is not built here.
 
 ### Tests of the switch
 
 - **TEST-1** A test in `tests/` runs `graph` on a made-up fixture project with the variable set and
   unset. It checks that standard output and the exit code are the same both times, that standard
   error is empty when the variable is unset, and that when it's set, standard error is one line that
-  parses as JSON with every key of TIME-2.
+  parses as JSON with every key of TIME-2, TIME-2a and TIME-5. It sets the variable through the
+  existing `Project::run` hook in `tests/support/project.rs`, and that file's helper `alone`, which
+  shuts out the machine's own settings, also removes `YAK_ANALYZER_TIMINGS`, so a developer's
+  environment never changes another test's result.
 - **TEST-2** A test runs a stopping `graph` (for example, a missing hand-off file) with the variable
   set, and checks that standard error is the one stop line and nothing else.
 
@@ -121,7 +133,8 @@ Terms:
 
 - **MEAS-1** `scripts/measure.mjs` takes the path of the analyzer's executable and a folder, runs
   `graph` there with `YAK_ANALYZER_TIMINGS=1`, and reads the timing line of each run. It uses Node
-  alone, as the other scripts do.
+  alone, as the other scripts do, and the helpers they share in `scripts/lib/run.mjs`: `BUILT` as
+  the default executable, and `fail` for stopping.
 - **MEAS-2** It takes, in this order: one cold run (MEAS-4), then 10 warm runs, then a first start
   (a copy of the executable in a new temporary folder, outside the folder measured, run once).
   Session's call on the counts.
@@ -139,15 +152,16 @@ Terms:
 - **MEAS-6** The script's own logic (reading the timing lines, the medians, the labels) has tests
   in `scripts/`, run by the gates' `node --test` command.
 
-### The made-up project
+### The stand-in repository
 
-- **GEN-1** With `--generate <folder>`, the script writes the made-up project into that folder (an
-  empty folder, outside any checkout), makes it a git repository and commits it, then measures it.
-  It holds no code from any real repository.
-- **GEN-2** It is about 3,000 source files, near the size of yakshaver (2,796 tracked files today).
-  It has a workspace of several packages with `package.json` files, a `tsconfig.json` with path
-  aliases, a mix of `.ts`, `.tsx`, `.js` and `.mjs` files, and imports between files and between
-  packages. The same arguments always write the same files, so runs on different days compare.
+- **GEN-1** On CI, the analyzer measures a public open-source repository, the stand-in, checked out
+  at one commit that the workflow pins by its full hash, so runs on different days compare. Nothing
+  from it is copied into this repository; it is only read, as the analyzer reads any project.
+  Session's call, over writing a made-up project: a real repository is more realistic and needs no
+  generator, the largest piece of new code the first draft had.
+- **GEN-2** The builder picks the stand-in: a TypeScript workspace of several packages with a
+  `tsconfig.json`, of 2,000 to 4,000 tracked files (yakshaver has 2,796 today), that `graph` reads
+  without stopping. The report names it and its commit.
 
 ### The CI job
 
@@ -155,7 +169,7 @@ Terms:
   push or a pull request, on `ubuntu-latest`. Session's call: Linux is the platform least like the
   owner's Windows machine, and the only one of the CI runners where the file cache can be emptied
   on purpose.
-- **JOB-2** It builds the release executable, generates the made-up project, and runs the script
+- **JOB-2** It builds the release executable, checks out the stand-in (GEN-1), and runs the script
   with `--drop-caches`, three times over, each with its own cold run. Session's call: three cold
   runs, because a single one says nothing about noise.
 - **JOB-3** It writes the script's table to the job's summary and keeps the JSON as an artifact.
@@ -191,13 +205,19 @@ Terms:
 - **Measuring the whole run from outside only, with no switch.** Rejected: the throwaway test did
   that, and it couldn't say which stage takes the cold run's time, which is the question the fallow
   item needs answered.
+- **A made-up project the script writes, about 3,000 files, the same every time.** Fits the rule
+  that tests use made-up projects. Rejected: it is the largest piece of new code here, needed only
+  until yakshaver is public, and less like a real repository than a real one pinned to a commit.
+  This isn't a test, so the made-up-projects rule doesn't bind it. Session's call.
 - **macOS as the second platform.** Rejected: emptying its file cache (`purge`) needs root as well,
   and Linux differs more from Windows in how it reads files. Session's call.
 
 ## Risks
 
-- **The switch alters what it measures.** Reading the clock costs nanoseconds, a dozen times per
-  run. TIME-4 and TEST-1 hold standard output identical. Nothing is timed per file.
+- **The switch alters what it measures.** Reading the clock costs tens of nanoseconds. It's read a
+  dozen times per run, plus twice per script file for `scriptsRead` and `scriptsParse`: about
+  6,000 reads on 3,000 files, well under a millisecond. TIME-4 and TEST-1 hold standard output
+  identical. The clock is only read when the variable is set.
 - **A restart on Windows is not a clean cold run.** Windows may load files at start-up (its
   SuperFetch service), and Defender's state changes. TAKE-1 takes two cold runs for each repository,
   and the report says how far apart they were.
@@ -208,14 +228,15 @@ Terms:
   The fallow item's 100 to 200ms band needs its own run counts, and they are that item's.
 - **A first start that hides inside a cold run.** MEAS-2 takes the first start with a fresh copy
   after the warm runs, with the files cached, so it carries only the executable's own cost.
-- **The made-up project doesn't behave like a real one.** TAKE-1 measures real repositories on
-  Windows; the made-up project only stands in on CI until yakshaver is public.
+- **The stand-in isn't yakshaver.** TAKE-1 measures yakshaver itself on Windows; the stand-in
+  only fills in on CI until yakshaver is public. A stand-in that changes upstream doesn't matter,
+  because it's pinned to one commit (GEN-1).
 
 ## Left to the builder
 
 - How the stage clocks are threaded through `graph::read`: a small struct of `Instant`s, or a list,
   as reads best.
-- The made-up project's exact shape inside GEN-2, and the default seed and size flags.
+- Which public repository is the stand-in, within GEN-2.
 - The workflow file's name, and whether it is a new file or a job in `ci.yml` with its own trigger.
   The tests in `scripts/workflow.test.mjs` read `ci.yml`, so a new file avoids touching them.
 - The script's option names other than those this spec names, and its table's layout.
