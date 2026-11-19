@@ -1,0 +1,53 @@
+name: Measure
+
+# Started by hand from the Actions tab, never on a push or a pull request (spec JOB-1).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: Measure cold against warm runs
+    # Straight on the runner, with no container: emptying the file cache, sudo and an ordinary user all need it
+    # (spec JOB-1, MEAS-4).
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The stand-in for yakshaver while yakshaver is private: a public TypeScript workspace near its size, pinned
+      # to one commit, which graph reads without a hand-off file (spec GEN-1, GEN-2). Once yakshaver is public, it
+      # is one more checkout step here (spec JOB-4).
+      STAND_IN: mui/base-ui
+      STAND_IN_COMMIT: 35fb3007e948750601045d5b88404f5f49646b61
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.18.0
+          package-manager-cache: false
+      # The runner's own rustup picks the version rust-toolchain.toml names (spec JOB-2).
+      - name: Build the release executable
+        run: cargo build --release --locked
+      - name: Check out the stand-in
+        run: |
+          git init --quiet "$RUNNER_TEMP/stand-in"
+          git -C "$RUNNER_TEMP/stand-in" fetch --quiet --depth 1 "https://github.com/$STAND_IN" "$STAND_IN_COMMIT"
+          git -C "$RUNNER_TEMP/stand-in" checkout --quiet FETCH_HEAD
+      - name: Measure three rounds, each with its own cold run
+        run: |
+          mkdir -p measured
+          for round in 1 2 3; do
+            node scripts/measure.mjs "$RUNNER_TEMP/stand-in" --drop-caches --json > "measured/round-$round.json"
+          done
+      - name: Combine the rounds into the job's summary
+        run: node scripts/measure.mjs --combine measured/round-1.json measured/round-2.json measured/round-3.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: measured
+          path: measured/*.json
+          if-no-files-found: error
