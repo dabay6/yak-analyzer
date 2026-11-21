@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.10.0](https://github.com/dabay6/yak-analyzer/compare/v0.9.0...v0.10.0) (2026-11-17)
+
+
+### Features
+
+* **entries:** read the commands a CI workflow runs as a script's ([cc609ea](https://github.com/dabay6/yak-analyzer/commit/cc609eaf9b0d402009137a374111d9a1b8fb8af2))
+
+## [0.9.0](https://github.com/dabay6/yak-analyzer/compare/v0.8.0...v0.9.0) (2026-11-17)
+
+
+### Features
+
+* **entries:** read a configuration file a script names by an option ([62850fe](https://github.com/dabay6/yak-analyzer/commit/62850fe8dcebcf8c85d508a0ad78de40fc711edd))
+
+## [0.8.0](https://github.com/dabay6/yak-analyzer/compare/v0.7.1...v0.8.0) (2026-11-17)
+
+
+### Features
+
+* **uses:** follow what is read off import() and require() ([1062d22](https://github.com/dabay6/yak-analyzer/commit/1062d2265ee063101a3db9db35bd7d89b3f81134))
+* **uses:** follow what is read off import() and require() ([13a6ae2](https://github.com/dabay6/yak-analyzer/commit/13a6ae2abda2edfe8291a450f4f7b7cc0f21af71))
+
+## [0.7.1](https://github.com/dabay6/yak-analyzer/compare/v0.7.0...v0.7.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **entries:** read a tool's configuration as the tool reads it, and check the named repositories ([9866e16](https://github.com/dabay6/yak-analyzer/commit/9866e167a9123eff40cb1c00a3ff3e9285c268e6))
+* **entries:** read what a tool's configuration names as the tool reads it ([12d3a14](https://github.com/dabay6/yak-analyzer/commit/12d3a14fd832b3b7e45014deeb10ba2eab7e8fb5))
+
+## [0.7.0](https://github.com/dabay6/yak-analyzer/compare/v0.6.0...v0.7.0) (2026-11-15)
+
+
+### Features
+
+* **audit:** compare with a base commit and mark findings new or inherited ([e3788ac](https://github.com/dabay6/yak-analyzer/commit/e3788ac0f14be1b423dd337d73ab0d92e0274090))
+* **audit:** compare with a base commit and mark findings new or inherited ([37696f5](https://github.com/dabay6/yak-analyzer/commit/37696f5e8f75ef955e6e84a4b00e0d76e74e1161))
+* **audit:** end with the launcher and keep deep projects off a small stack ([3046e13](https://github.com/dabay6/yak-analyzer/commit/3046e136545c054b89b93ab62b084b6b57e4439d))
+* **audit:** follow renames and compare cycles by their edges ([5705c76](https://github.com/dabay6/yak-analyzer/commit/5705c7645d584f0f0c86c5ce67dc7ac75e581915))
+
+## [0.6.0](https://github.com/dabay6/yak-analyzer/compare/v0.5.0...v0.6.0) (2026-11-15)
+
+
+### Features
+
+* **audit:** add the audit command and its SARIF report ([0a2244c](https://github.com/dabay6/yak-analyzer/commit/0a2244cd330a12033e742234b0dd76c4e4458c7a))
+* **audit:** add the audit command and report the five dead-code kinds ([a0b4dce](https://github.com/dabay6/yak-analyzer/commit/a0b4dcec4e9b86954fc341e2eee666e71991568c))
+* **audit:** report unresolved imports and circular dependencies ([101044e](https://github.com/dabay6/yak-analyzer/commit/101044e14912bcbf7826fc85a103cffdc31c7315))
+* **audit:** report unused files, exports and types ([71fc1be](https://github.com/dabay6/yak-analyzer/commit/71fc1be6d76f6455527772dea0ed1e355a6b2224))
+
+## [0.5.0](https://github.com/dabay6/yak-analyzer/compare/v0.4.0...v0.5.0) (2026-11-14)
+
+
+### Features
+
+* **uses:** read each file's names and count the uses of its exports ([ee5beed](https://github.com/dabay6/yak-analyzer/commit/ee5beed9c83b12ca0beedd04d70c26919fab5ca5))
+* **uses:** read each file's names and count the uses of its exports ([05f8f37](https://github.com/dabay6/yak-analyzer/commit/05f8f37dc9fc47ca8df977d5aea6bd608ac1be38))
+
+## [0.4.0](https://github.com/dabay6/yak-analyzer/compare/v0.3.0...v0.4.0) (2026-11-14)
+
+
+### Features
+
+* **entries:** read entry points from scripts and tool configuration ([194e0a3](https://github.com/dabay6/yak-analyzer/commit/194e0a3172849864eb908829b2485d938f4440f8))
+* **entries:** read entry points from scripts and tool configuration ([8dc96ff](https://github.com/dabay6/yak-analyzer/commit/8dc96ff66de80a0c2bb4c86567ba78b3c2feea73))
+
 ## [0.3.0](https://github.com/dabay6/yak-analyzer/compare/v0.2.0...v0.3.0) (2026-11-14)
 
 

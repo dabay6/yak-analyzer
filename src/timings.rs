@@ -10,9 +10,9 @@ use serde_json::{Map, Value, json};
 /// The variable that turns the timings on.
 const VARIABLE: &str = "YAK_ANALYZER_TIMINGS";
 
-/// The stages of a reading, in the order `graph::read` takes them (spec TIME-2). The line holds every
+/// The stages of a reading, in the order `reading::working` takes them (spec TIME-2, TIME-2b). The line holds every
 /// one, 0 for a stage that never ran.
-const READING: [&str; 10] = [
+const READING: [&str; 11] = [
     "handOff",
     "files",
     "marks",
@@ -22,6 +22,7 @@ const READING: [&str; 10] = [
     "scriptsParse",
     "resolve",
     "entries",
+    "uses",
     "build",
 ];
 

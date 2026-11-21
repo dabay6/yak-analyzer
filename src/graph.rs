@@ -1,147 +1,61 @@
-//! The `graph` command: reads a project and prints what it read as one JSON document (spec OUT-1).
+//! The `graph` command: prints what reading a project found as one JSON document (spec OUT-1).
 //!
-//! So far it reads the hand-off file, the file list, the `data` and `generated` declarations, the
-//! packages, the tsconfig files, the imports of every script, where each import leads, and the entry
-//! points with the source of each (spec CMD-4).
+//! So far that is the hand-off file, the file list, the `data` and `generated` declarations, the
+//! packages, the tsconfig files, the imports and the names of every script, where each import leads,
+//! the entry points with the source of each, every use of an export, and the files the entry points
+//! reach (spec CMD-4).
 
 use std::collections::BTreeMap;
-use std::env;
-use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::declarations;
 use crate::entries::{self, Entries};
-use crate::files::{self, File};
-use crate::hand_off::{self, HandOff};
-use crate::imports::Import;
-use crate::marks::{self, Marks};
-use crate::notice::{self, Notice};
-use crate::packages::{self, Package, Packages};
-use crate::resolve::{Outcome, Place, Resolution, Resolver};
-use crate::scripts::{self, Scripts};
-use crate::stop::Stop;
-use crate::timings::Stages;
-use crate::tsconfig;
+use crate::files::File;
+use crate::imports::{EVERY, Export, Import, Name};
+use crate::marks::Marks;
+use crate::notice;
+use crate::packages::{Package, Packages};
+use crate::reading::Reading;
+use crate::resolve::{Outcome, Place, Resolution};
+use crate::scripts::Scripts;
+use crate::uses::{Origin, Reach, Use, Uses};
 
-/// Reads the project, with the hand-off file at the path given or with none, and returns the document
-/// to print. The time of each stage goes into the stages given (spec TIME-2).
-pub fn read(hand_off_path: Option<&Path>, stages: &mut Stages) -> Result<String, Stop> {
-    let mut notices = Vec::new();
-    let handed = stages.time("handOff", || -> Result<Option<HandOff>, Stop> {
-        match hand_off_path {
-            Some(path) => {
-                let handed = hand_off::read(path)?;
+/// The document `graph` prints for a reading.
+pub fn printed(reading: Reading) -> String {
+    let Reading {
+        handed,
+        files,
+        marks,
+        packages,
+        scripts,
+        resolved,
+        entries,
+        uses,
+        notices,
+    } = reading;
+    let mut document = json!({
+        "entries": entry_points(&entries),
+        "entryFaults": entries
+            .faults
+            .iter()
+            .map(|(folder, fault)| json!({ "fault": fault.name(), "package": folder }))
+            .collect::<Vec<Value>>(),
+        "files": files
+            .iter()
+            .filter(|each| !scripts.gone.contains(&each.path))
+            .map(|each| file(each, &marks, &packages, &scripts, &resolved))
+            .collect::<Vec<Value>>(),
+        "handOff": handed,
+        "notices": notice::printed(notices),
+        "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
+        "reachable": reachable(&uses),
+        "uses": uses.list.iter().map(used).collect::<Vec<Value>>(),
+    });
 
-                declarations::check(&handed.stacks)?;
+    // An object's keys in order, whatever order they were added in.
+    document.sort_all_objects();
 
-                if handed.truncated {
-                    notices.push(Notice::new(
-                        "detection-cut-short",
-                        None,
-                        "yak's detection stopped at its limit of folders, so the folders the hand-off file lists \
-                         are not the whole workspace."
-                            .to_owned(),
-                    ));
-                }
-
-                Ok(Some(handed))
-            }
-            None => {
-                notices.push(Notice::new(
-                    "no-hand-off-file",
-                    None,
-                    "No hand-off file was given, so the project is read from its own standard files, with no \
-                     declarations."
-                        .to_owned(),
-                ));
-
-                Ok(None)
-            }
-        }
-    })?;
-
-    // The root is the folder the hand-off file names, whatever folder the analyzer was started in, and
-    // without a hand-off file the folder it was started in (spec LIST-1).
-    let root = match &handed {
-        Some(handed) => handed.root.clone(),
-        None => env::current_dir().map_err(|error| {
-            Stop::new(format!(
-                "the folder the analyzer was started in cannot be read ({error}); start it in a checkout"
-            ))
-        })?,
-    };
-    let listing = stages.time("files", || files::list(&root, &mut notices))?;
-    let files = listing.files.as_slice();
-    let marks = stages.time("marks", || {
-        marks::apply(files, handed.as_ref(), &mut notices)
-    })?;
-    // The `package.json` files are read before the tsconfig files, and the fields of both are checked
-    // after, so that two faults always give the same line (spec RUN-4).
-    let packages = stages.time("packages", || {
-        Ok::<_, Stop>(packages::load(&root, files, &marks.data)?.checked(
-            files,
-            handed.as_ref().map(|handed| handed.folders.as_slice()),
-            &mut notices,
-        ))
-    })?;
-    let configs = stages.time("tsconfig", || {
-        Ok::<_, Stop>(
-            tsconfig::load(
-                &root,
-                files,
-                &marks.data,
-                packages.as_ref().ok(),
-                &mut notices,
-            )?
-            .checked(),
-        )
-    })?;
-    let (packages, configs) = match (packages, configs) {
-        (Ok(packages), Ok(configs)) => (packages, configs),
-        (Err(fault), Ok(_)) | (Ok(_), Err(fault)) => return Err(fault.stop()),
-        (Err(first), Err(second)) => return Err(first.earlier(second).stop()),
-    };
-    let scripts = scripts::read(&root, files, &marks.data, &mut notices, stages)?;
-    let resolver = stages.time("resolve", || Resolver::new(&listing, &packages, &configs));
-    let resolved = stages.time("resolve", || resolver.resolve(&root, &scripts))?;
-    let entries = stages.time("entries", || {
-        entries::find(
-            &entries::Project {
-                files,
-                packages: &packages,
-                configs: &configs,
-                resolver: &resolver,
-                resolved: &resolved,
-                handed: handed.as_ref(),
-            },
-            &mut notices,
-        )
-    })?;
-
-    Ok(stages.time("build", || {
-        let mut document = json!({
-            "entries": entry_points(&entries),
-            "entryFaults": entries
-                .faults
-                .iter()
-                .map(|(folder, fault)| json!({ "fault": fault.name(), "package": folder }))
-                .collect::<Vec<Value>>(),
-            "files": files
-                .iter()
-                .filter(|each| !scripts.gone.contains(&each.path))
-                .map(|each| file(each, &marks, &packages, &scripts, &resolved))
-                .collect::<Vec<Value>>(),
-            "handOff": handed.is_some(),
-            "notices": notice::printed(notices),
-            "packages": packages.list.iter().map(package).collect::<Vec<Value>>(),
-        });
-
-        // An object's keys in order, whatever order they were added in.
-        document.sort_all_objects();
-
-        format!("{document:#}")
-    }))
+    format!("{document:#}")
 }
 
 /// The entry points as they are printed, by path, each with every source that made it one (spec
@@ -159,8 +73,34 @@ fn entry_points(entries: &Entries) -> Vec<Value> {
         .collect()
 }
 
-/// One file as it is printed. A file that was read has its imports, each with where it leads, and the
-/// count of those that cannot be followed.
+/// The files the entry points reach, by path, each with whether it is reached only as text, by
+/// imports that carry a query (spec USE-6).
+fn reachable(uses: &Uses) -> Vec<Value> {
+    uses.reached
+        .iter()
+        .map(|(path, reach)| json!({ "path": path, "text": *reach == Reach::Text }))
+        .collect()
+}
+
+/// One use as it is printed: the file whose export is used, the export's name, `*` for every export,
+/// and where it counts from, the file and line of a reference or an entry point's source (spec CMD-4).
+fn used(used: &Use) -> Value {
+    let (by, line, entry) = match &used.origin {
+        Origin::Reference { file, line } => (Some(file), Some(line), None),
+        Origin::Entry(source) => (None, None, Some(source.printed())),
+    };
+
+    json!({
+        "by": by,
+        "entry": entry,
+        "file": used.file,
+        "line": line,
+        "name": used.name.as_deref().unwrap_or(EVERY),
+    })
+}
+
+/// One file as it is printed. A file that was read has its imports, each with where it leads, the
+/// count of those that cannot be followed, and its own exports.
 fn file(
     file: &File,
     marks: &Marks,
@@ -181,6 +121,7 @@ fn file(
         (scripts.read.get(&file.path), resolved.get(&file.path))
     {
         printed["computedImports"] = json!(read.computed);
+        printed["exports"] = read.exports.iter().map(export).collect();
         printed["imports"] = read
             .imports
             .iter()
@@ -192,11 +133,30 @@ fn file(
     printed
 }
 
+/// One export of a file as it is printed: its name, whether it is a value or a type, where its name
+/// is written, and whether its own file refers to it (spec USE-1, USE-2).
+fn export(export: &Export) -> Value {
+    json!({
+        "column": export.column,
+        "kind": if export.is_type { "type" } else { "value" },
+        "line": export.line,
+        "name": export.name,
+        "usedInFile": export.used_in_file,
+    })
+}
+
+/// One name an import brings in as it is printed: the target's name for it, `*` for the namespace,
+/// its local binding, and the names the importing file passes it on under (spec USE-1, USE-2a).
+fn name(name: &Name) -> Value {
+    json!({ "exported": name.exported, "local": name.local, "name": name.name })
+}
+
 /// One import as it is printed, with where it leads and the rule that decided it (spec OUT-1).
 fn import(import: &Import, resolution: &Resolution) -> Value {
     let mut printed = json!({
         "form": import.form.name(),
         "line": import.line,
+        "names": import.names.iter().map(name).collect::<Vec<Value>>(),
         "query": import.has_query(),
         "rule": resolution.rule.name(),
         "specifier": import.specifier,

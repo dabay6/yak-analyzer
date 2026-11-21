@@ -671,6 +671,18 @@ impl<'p> Resolver<'p> {
         }
     }
 
+    /// The files a word of a command names, from the folder, from the root, the command runs in: the
+    /// path itself, or the source of build output, mapped back by the package the path lies in (spec
+    /// ENTRY-7, ENTRY-7a; comparison spec CI-2).
+    pub fn script_target(&self, folder: &str, word: &str) -> Option<Vec<String>> {
+        let path = joined(folder, word)?;
+
+        match self.target(self.package_folder(&path), &path, None) {
+            Found::Done(Outcome::Files(files)) => Some(files),
+            _ => None,
+        }
+    }
+
     /// The paths, from the root, where the source of an `exports` target with a `*` may lie: the target
     /// in its source forms, the target itself, then the places MAP-1 maps build output to, each still
     /// holding its `*` (spec ENTRY-2, MAP-3).

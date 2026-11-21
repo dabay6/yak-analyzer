@@ -1,6 +1,6 @@
 [package]
 name = "yak-analyzer"
-version = "0.3.0"
+version = "0.10.0"
 edition = "2024"
 description = "A static analyzer for TypeScript and JavaScript, built for yakshaver"
 license = "MIT"
@@ -60,15 +60,25 @@ name = "entries"
 path = "tests/entries.test.rs"
 
 [[test]]
+name = "audit"
+path = "tests/audit.test.rs"
+
+[[test]]
+name = "life"
+path = "tests/life.test.rs"
+
+[[test]]
 name = "timings"
 path = "tests/timings.test.rs"
 
 [dependencies]
-# Parse scripts into syntax trees and walk them; released together, so pinned together (spec AN-2, DEP-3).
+# Parse scripts into syntax trees, walk them, and tie each reference to the binding it names
+# (`oxc_semantic`, spec USE-1); released together, so pinned together (spec AN-2, DEP-3).
 oxc_allocator = "=0.158.0"
 oxc_ast = "=0.158.0"
 oxc_ast_visit = "=0.158.0"
 oxc_parser = "=0.158.0"
+oxc_semantic = "=0.158.0"
 oxc_span = "=0.158.0"
 # Finds the tsconfig that governs a file, through its `references` and `extends`, with its `paths` and
 # `baseUrl`, from a file system of the analyzer's own (spec RES-9).
@@ -78,6 +88,9 @@ oxc_resolver = "=11.24.3"
 json-strip-comments = "=3.1.2"
 # Reads the hand-off file and writes what `graph` prints.
 serde_json = "=1.0.154"
+# Makes the fingerprint of each finding `audit` reports, a SHA-256 digest (dead-code spec REPORT-3,
+# DEP-1).
+sha2 = { version = "=0.11.1", default-features = false }
 # Matches the globs of declarations and of the workspace's list (spec KEY-5).
 regex = "=1.13.1"
 # Tells whether two paths are one file on disk, which Rust gives on Windows only in an unstable form.
@@ -86,5 +99,6 @@ same-file = "=1.0.6"
 yaml-rust2 = { version = "=0.13.0", default-features = false }
 
 [dev-dependencies]
-# Checks the tests' hand-off files against the copy of yakshaver's schema. Never part of the binary.
+# Checks the tests' hand-off files against the copy of yakshaver's schema, and the reports `audit`
+# prints against the copy of SARIF's (spec FIX-3). Never part of the binary.
 jsonschema = { version = "=0.61.1", default-features = false }

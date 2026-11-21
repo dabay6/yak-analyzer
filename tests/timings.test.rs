@@ -15,8 +15,8 @@ use project::{Project, printed, stopped};
 /// The variable that turns the timings on.
 const VARIABLE: &str = "YAK_ANALYZER_TIMINGS";
 
-/// The keys of a reading's stages (spec TIME-2).
-const READING: [&str; 10] = [
+/// The keys of a reading's stages (spec TIME-2, TIME-2b).
+const READING: [&str; 11] = [
     "handOff",
     "files",
     "marks",
@@ -26,6 +26,7 @@ const READING: [&str; 10] = [
     "scriptsParse",
     "resolve",
     "entries",
+    "uses",
     "build",
 ];
 

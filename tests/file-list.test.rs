@@ -99,8 +99,8 @@ fn lists_tracked_files_and_untracked_files_that_nothing_ignores_each_with_its_ki
         .write(".git/info/exclude", "local/\n");
 
     let document = project.graph();
-    // A script, a component, a document and a page are read, so each has its imports, which in these
-    // empty files are none.
+    // A script, a component, a document and a page are read, so each has its imports and its exports,
+    // which in these empty files are none.
     let file = |path: &str, kind: &str, tracked: bool| {
         let mut expected = json!({
             "data": false,
@@ -113,6 +113,7 @@ fn lists_tracked_files_and_untracked_files_that_nothing_ignores_each_with_its_ki
 
         if ["script", "declaration", "vue", "mdx", "page"].contains(&kind) {
             expected["computedImports"] = json!(0);
+            expected["exports"] = json!([]);
             expected["imports"] = json!([]);
         }
 

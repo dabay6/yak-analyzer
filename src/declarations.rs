@@ -1,7 +1,9 @@
 //! The declaration keys the analyzer knows, and the check that it can use every declaration a hand-off
 //! file holds (spec KEY-1, KEY-2, KEY-5).
 //!
-//! The keys are drafts until the design spec's stage 2 ends. This part checks them; the parts that read a
+//! The keys and their shapes are fixed under interface version 1 since stage 2 ended (comparison spec
+//! FREEZE-1): a change to any raises the version. This part checks them, the shapes of the three that
+//! describe what a tool does included (spec ENTRY-6a; comparison spec CI-1); the parts that read a
 //! project use them.
 
 use serde_json::Value;
@@ -19,12 +21,37 @@ enum Kind {
     Paths,
     /// A positive whole number.
     Number,
-    /// Any JSON, which only a pack may state.
-    Opaque,
+    /// What a tool reads from its configuration file, which only a pack may state (spec ENTRY-6).
+    ConfigEntries,
+    /// The programs whose file arguments in scripts are entry points, which only a pack may state (spec
+    /// ENTRY-7).
+    ScriptCommands,
+    /// The files a CI system reads commands from, and where in them, which only a pack may state
+    /// (comparison spec CI-1).
+    CommandFiles,
 }
 
+/// The fields an object of `configEntries` may hold, each required but `pattern` and `options` (spec
+/// ENTRY-6, CONF-1).
+const CONFIG_FIELDS: [&str; 7] = [
+    "file",
+    "property",
+    "value",
+    "pattern",
+    "relativeTo",
+    "default",
+    "options",
+];
+
+/// The fields the `options` of a `configEntries` object may hold, each required but `relativeTo`
+/// (spec CONF-1).
+const OPTIONS_FIELDS: [&str; 3] = ["program", "names", "relativeTo"];
+
+/// The fields an object of `commandFiles` may hold, each required but `folder` (comparison spec CI-1).
+const COMMAND_FIELDS: [&str; 3] = ["file", "commands", "folder"];
+
 /// Every key the analyzer knows, with the kind of its value (spec KEY-1).
-const KEYS: [(&str, Kind); 9] = [
+const KEYS: [(&str, Kind); 10] = [
     ("entries", Kind::Globs),
     ("data", Kind::Globs),
     ("generated", Kind::Globs),
@@ -32,8 +59,9 @@ const KEYS: [(&str, Kind); 9] = [
     ("cyclomaticLimit", Kind::Number),
     ("cognitiveLimit", Kind::Number),
     ("duplicationMinimum", Kind::Number),
-    ("configEntries", Kind::Opaque),
-    ("scriptCommands", Kind::Opaque),
+    ("configEntries", Kind::ConfigEntries),
+    ("scriptCommands", Kind::ScriptCommands),
+    ("commandFiles", Kind::CommandFiles),
 ];
 
 /// Who states a declaration: the hand-off file keeps the two apart.
@@ -108,11 +136,213 @@ fn problem(key: &str, value: &Value, source: Source) -> Option<String> {
             Some(number) if number > 0 => None,
             _ => Some("its value must be a positive whole number".to_owned()),
         },
-        Kind::Opaque => match source {
-            Source::Pack => None,
-            Source::Project => Some("only a pack may state this key".to_owned()),
+        Kind::ConfigEntries | Kind::ScriptCommands | Kind::CommandFiles
+            if matches!(source, Source::Project) =>
+        {
+            Some("only a pack may state this key".to_owned())
+        }
+        Kind::ConfigEntries => config_entries_problem(value),
+        Kind::CommandFiles => command_files_problem(value),
+        Kind::ScriptCommands => match texts(value) {
+            Some(names) => names
+                .iter()
+                .find(|name| name.is_empty() || name.contains(char::is_whitespace))
+                .map(|name| format!("the program name `{name}` is empty or holds white space")),
+            None => Some("its value must be a list of program names".to_owned()),
         },
     }
+}
+
+/// Why a `configEntries` value cannot be used, or nothing when it can: a list of objects, each with the
+/// fields ENTRY-6 gives and no other (spec ENTRY-6, ENTRY-6a).
+fn config_entries_problem(value: &Value) -> Option<String> {
+    let Some(list) = value.as_array() else {
+        return Some("its value must be a list of objects".to_owned());
+    };
+
+    list.iter().enumerate().find_map(|(index, entry)| {
+        let number = index + 1;
+        let Some(fields) = entry.as_object() else {
+            return Some(format!("its entry {number} must be an object"));
+        };
+        let field =
+            |name: &str, why: &str| Some(format!("its entry {number}'s field `{name}` {why}"));
+
+        if let Some(unknown) = fields
+            .keys()
+            .find(|key| !CONFIG_FIELDS.contains(&key.as_str()))
+        {
+            return field(unknown, "is not one it may hold");
+        }
+
+        let folder = fields.get("value") == Some(&Value::from("folder"));
+
+        match (fields.get("pattern"), folder) {
+            (None, true) => return field("pattern", "is missing, and a `folder` value needs it"),
+            (Some(_), false) => return field("pattern", "is only for a `folder` value"),
+            _ => {}
+        }
+
+        if let Some(missing) = CONFIG_FIELDS
+            .iter()
+            .find(|name| !matches!(**name, "pattern" | "options") && !fields.contains_key(**name))
+        {
+            return field(missing, "is missing");
+        }
+
+        let property = fields["property"]
+            .as_array()
+            .filter(|keys| !keys.is_empty() && keys.iter().all(Value::is_string));
+
+        if property.is_none() {
+            return field("property", "must be a list of keys, one or more");
+        }
+
+        if !matches!(fields["value"].as_str(), Some("globs" | "folder")) {
+            return field("value", "must be `globs` or `folder`");
+        }
+
+        if !matches!(fields["relativeTo"].as_str(), Some("config" | "detection")) {
+            return field("relativeTo", "must be `config` or `detection`");
+        }
+
+        for name in ["file", "pattern"] {
+            match fields.get(name).map(Value::as_str) {
+                None => {}
+                Some(Some(glob)) => {
+                    if let Some(why) = glob_problem(glob) {
+                        return field(name, &format!("cannot be used: {why}"));
+                    }
+                }
+                Some(None) => return field(name, "must be a glob"),
+            }
+        }
+
+        if let Some(why) = fields.get("options").and_then(options_problem) {
+            return field("options", &why);
+        }
+
+        match texts(&fields["default"]) {
+            Some(globs) => globs
+                .iter()
+                .find_map(|glob| glob_problem(glob))
+                .and_then(|why| field("default", &format!("cannot be used: {why}"))),
+            None => field("default", "must be a list of globs"),
+        }
+    })
+}
+
+/// Why a `commandFiles` value cannot be used, or nothing when it can: a list of objects, each with a
+/// `file` glob and its `commands` paths, optionally its `folder` paths, and no other field (comparison
+/// spec CI-1, CI-3).
+fn command_files_problem(value: &Value) -> Option<String> {
+    let Some(list) = value.as_array() else {
+        return Some("its value must be a list of objects".to_owned());
+    };
+
+    list.iter().enumerate().find_map(|(index, entry)| {
+        let number = index + 1;
+        let Some(fields) = entry.as_object() else {
+            return Some(format!("its entry {number} must be an object"));
+        };
+        let field =
+            |name: &str, why: &str| Some(format!("its entry {number}'s field `{name}` {why}"));
+
+        if let Some(unknown) = fields
+            .keys()
+            .find(|key| !COMMAND_FIELDS.contains(&key.as_str()))
+        {
+            return field(unknown, "is not one it may hold");
+        }
+
+        if let Some(missing) = ["file", "commands"]
+            .iter()
+            .find(|name| !fields.contains_key(**name))
+        {
+            return field(missing, "is missing");
+        }
+
+        let Some(glob) = fields["file"].as_str() else {
+            return field("file", "must be a glob");
+        };
+
+        if let Some(why) = glob_problem(glob) {
+            return field("file", &format!("cannot be used: {why}"));
+        }
+
+        ["commands", "folder"]
+            .iter()
+            .find(|name| fields.get(**name).is_some_and(|paths| !is_paths(paths)))
+            .and_then(|name| {
+                field(
+                    name,
+                    "must be a list of property paths, one or more, each a list of keys, one or more",
+                )
+            })
+    })
+}
+
+/// Whether a value is a list of one or more property paths, each a list of one or more keys.
+fn is_paths(value: &Value) -> bool {
+    value.as_array().is_some_and(|paths| {
+        !paths.is_empty()
+            && paths
+                .iter()
+                .all(|path| texts(path).is_some_and(|keys| !keys.is_empty()))
+    })
+}
+
+/// Why the `options` of a `configEntries` object cannot be used, or nothing when they can: an object
+/// with the program's name, a list of one or more option names, and, optionally, what a named file's
+/// value is relative to (spec CONF-1).
+fn options_problem(options: &Value) -> Option<String> {
+    let Some(fields) = options.as_object() else {
+        return Some("must be an object".to_owned());
+    };
+
+    if let Some(unknown) = fields
+        .keys()
+        .find(|key| !OPTIONS_FIELDS.contains(&key.as_str()))
+    {
+        return Some(format!("holds `{unknown}`, which it may not"));
+    }
+
+    if !fields
+        .get("program")
+        .and_then(Value::as_str)
+        .is_some_and(is_word)
+    {
+        return Some("must name its `program`, one word with no white space".to_owned());
+    }
+
+    let Some(names) = fields
+        .get("names")
+        .and_then(texts)
+        .filter(|names| !names.is_empty())
+    else {
+        return Some("must list its option `names`, one or more".to_owned());
+    };
+
+    if let Some(name) = names
+        .iter()
+        .find(|name| !is_word(name) || name.contains('='))
+    {
+        return Some(format!(
+            "names the option `{name}`, which is empty or holds white space or `=`"
+        ));
+    }
+
+    match fields.get("relativeTo").map(Value::as_str) {
+        None | Some(Some("config" | "detection" | "script")) => None,
+        Some(_) => {
+            Some("has a `relativeTo` that is not `config`, `detection` or `script`".to_owned())
+        }
+    }
+}
+
+/// Whether a text is one word: not empty, with no white space.
+fn is_word(text: &str) -> bool {
+    !text.is_empty() && !text.contains(char::is_whitespace)
 }
 
 /// The entries of a list of text, or nothing when the value is not one.

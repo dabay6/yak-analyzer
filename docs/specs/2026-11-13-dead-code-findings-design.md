@@ -664,3 +664,51 @@ launcher, the five targets and the report folder. Added here:
 - How LIFE-1 and LIFE-3 are met, such as walks written as loops over an explicit stack and work run
   on a thread with a larger stack.
 - Which merged pull request each repository's branch audit uses (LIVE-3), named in the report.
+
+## Amendments
+
+### 2026-11-15: What a tool's configuration file names, read as the tool reads it
+
+The check on the named repositories (LIVE-1 to LIVE-3) was run on 2026-11-15 with the fifth plan's
+build; its judged lists are in the work item's report folder. Every false finding it left came from
+how a glob read from a configuration file, or a word of a script, is turned into files. Two of the
+causes are ENTRY-6's own words, which this amendment changes, with the owner's approval of
+2026-11-15; two are places where the code fell short of words this amendment makes plain.
+
+- A component library's Storybook configuration, in a `.storybook` folder, names its stories as
+  `../src/**/*.stories.ts`, and the vitest configuration of each package of a workspace names one
+  setup file at the root as `../../setup.mjs`. Both steps out of the configuration file's folder and
+  stay inside the detection folder or the root. ENTRY-6 passes any glob that steps out with `..`
+  over, so every story, and the setup file, was reported unused.
+- A package whose tests are compiled before they are run names them, in its test runner's
+  configuration, as `dist/**/*.test.js`: build output, which the file list never holds. ENTRY-3 maps
+  such a glob back to source when an `entries` declaration states it; a glob read from a
+  configuration file was not mapped, so every test, and each helper only the tests import, was
+  reported unused.
+
+- **ENTRY-6b** A glob read from a configuration file that steps out with `..` is joined to the folder
+  it is relative to (`relativeTo`), and each `.` and `..` segment of the joined glob is resolved
+  where it stands, before any wildcard. The glob is used when the resolved glob lies inside the root;
+  it is passed over with ENTRY-6's notice only when it would leave the root, or when a `..` follows a
+  wildcard, whose folder cannot be known. This replaces "steps out with `..`" in ENTRY-6's list of
+  globs passed over; the rest of the list stands. A pack's declared globs, `file`, `pattern` and
+  `default`, are unchanged: they still may not step out.
+- **ENTRY-6c** A glob read from a configuration file, or taken from its `default`, that matches no
+  listed file once joined is mapped back as ENTRY-3 maps an `entries` glob: its folder by the
+  `outDir` of a tsconfig in the package's folder, else its first segment by `src`, and an output
+  ending by the source extensions. Where neither matches, the declaration adds no entry point and
+  gives no notice of its own: a tool's default that matches nothing is ordinary.
+- **ENTRY-6d** A glob read from a configuration file is relative as the tool reads it: a leading `./`
+  names the folder it is relative to, as it does in a path of a `package.json` (reading PACK-6),
+  and is dropped before the glob is matched. This makes plain what ENTRY-6 meant; a value written
+  `./setup.ts` and one written `setup.ts` name the same file.
+- **ENTRY-7a** A word of a script that names a file of another package, as a root script's
+  `node packages/a/dist/run.js` does, is mapped back to source (reading MAP-1) by the package and the
+  tsconfig of the folder the word names, not by the package whose script it is. This makes plain
+  what ENTRY-7 meant by "with RES-3 and MAP-1 applied".
+
+Each of the four has a made-up fixture of its shape, written before its fix (LIVE-6, design
+PROOF-5). One case the check found is left to a later stage: a script that names a second
+configuration file with an option, such as `vitest run --config other.config.ts`, is not read,
+because ENTRY-6 finds configuration files by their names; a pack that states such options is
+stage 3's.

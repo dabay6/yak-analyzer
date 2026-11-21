@@ -1,5 +1,5 @@
 //! Hands the built binary declarations and checks which it can use and how it refuses the rest (spec
-//! KEY-1, KEY-2, KEY-5, RUN-4).
+//! KEY-1, KEY-2, KEY-5, RUN-4, ENTRY-6a; comparison spec CONF-1, CI-1, CI-3, CI-4).
 
 mod support;
 
@@ -38,8 +38,33 @@ fn uses_every_key_it_knows_in_every_form_a_glob_may_take() {
         "cyclomaticLimit": 20,
         "cognitiveLimit": 15,
         "duplicationMinimum": 50,
-        "configEntries": [{ "file": "runner.config.*", "property": ["test", "include"] }],
-        "scriptCommands": { "any": "JSON", "is": ["accepted", 1, null] }
+        "configEntries": [
+            {
+                "file": "runner.config.*",
+                "property": ["test", "include"],
+                "value": "globs",
+                "relativeTo": "config",
+                "default": ["**/*.test.ts"],
+                "options": { "program": "runner", "names": ["--config", "-c"], "relativeTo": "script" }
+            },
+            {
+                "file": "**/runner.config.{js,ts}",
+                "property": ["roots"],
+                "value": "folder",
+                "pattern": "**/*.spec.{js,ts}",
+                "relativeTo": "detection",
+                "default": []
+            }
+        ],
+        "scriptCommands": ["cross-env", "tsx"],
+        "commandFiles": [
+            {
+                "file": ".github/workflows/*.{yml,yaml}",
+                "commands": [["jobs", "*", "steps", "*", "run"]],
+                "folder": [["working-directory"], ["defaults", "run", "working-directory"]]
+            },
+            { "file": ".gitlab-ci.yml", "commands": [["*", "script"], ["*", "before_script"]] }
+        ]
     });
     handed["stacks"][0]["project"] = json!({
         "entries": ["tools/run.ts"],
@@ -69,7 +94,8 @@ fn names_the_stack_the_key_and_who_states_it() {
         ),
         "yak-analyzer: cannot use the declaration `entrypoints` that the pack states for the stack `typescript`: \
          the analyzer knows no such key, only entries, data, generated, internal, cyclomaticLimit, \
-         cognitiveLimit, duplicationMinimum, configEntries, scriptCommands; change it in the pack"
+         cognitiveLimit, duplicationMinimum, configEntries, scriptCommands, commandFiles; change it in the \
+         pack"
     );
     assert_eq!(
         refused(
@@ -132,6 +158,203 @@ fn refuses_a_value_that_is_not_of_its_keys_kind() {
             && line.contains(": its value must be a list of globs; "),
         "{line}"
     );
+}
+
+#[test]
+fn refuses_a_configuration_or_script_declaration_of_another_shape() {
+    let usable = || {
+        json!({
+            "file": "runner.config.js",
+            "property": ["include"],
+            "value": "globs",
+            "relativeTo": "config",
+            "default": ["**/*.test.js"]
+        })
+    };
+    let changed = |change: &dyn Fn(&mut Value)| {
+        let mut entry = usable();
+
+        change(&mut entry);
+
+        json!({ "configEntries": [entry] })
+    };
+    let cases: [(Value, &str); 20] = [
+        (
+            json!({ "configEntries": {} }),
+            ": its value must be a list of objects; ",
+        ),
+        (
+            json!({ "configEntries": [3] }),
+            ": its entry 1 must be an object; ",
+        ),
+        (
+            changed(&|entry| entry["extra"] = json!(1)),
+            ": its entry 1's field `extra` is not one it may hold; ",
+        ),
+        (
+            changed(&|entry| {
+                entry.as_object_mut().expect("an object").remove("default");
+            }),
+            ": its entry 1's field `default` is missing; ",
+        ),
+        (
+            changed(&|entry| entry["value"] = json!("folder")),
+            ": its entry 1's field `pattern` is missing, and a `folder` value needs it; ",
+        ),
+        (
+            changed(&|entry| entry["pattern"] = json!("**/*.js")),
+            ": its entry 1's field `pattern` is only for a `folder` value; ",
+        ),
+        (
+            changed(&|entry| entry["property"] = json!([])),
+            ": its entry 1's field `property` must be a list of keys, one or more; ",
+        ),
+        (
+            changed(&|entry| entry["value"] = json!("list")),
+            ": its entry 1's field `value` must be `globs` or `folder`; ",
+        ),
+        (
+            changed(&|entry| entry["relativeTo"] = json!("package")),
+            ": its entry 1's field `relativeTo` must be `config` or `detection`; ",
+        ),
+        (
+            changed(&|entry| entry["file"] = json!("src/[a")),
+            ": its entry 1's field `file` cannot be used: the glob `src/[a` has a bracket left open; ",
+        ),
+        (
+            changed(&|entry| entry["file"] = json!(4)),
+            ": its entry 1's field `file` must be a glob; ",
+        ),
+        (
+            changed(&|entry| entry["default"] = json!(["../x/*.js"])),
+            ": its entry 1's field `default` cannot be used: the glob `../x/*.js` is absolute or steps out",
+        ),
+        (
+            changed(&|entry| entry["options"] = json!(3)),
+            ": its entry 1's field `options` must be an object; ",
+        ),
+        (
+            changed(&|entry| {
+                entry["options"] = json!({ "program": "runner", "names": ["-c"], "extra": 1 });
+            }),
+            ": its entry 1's field `options` holds `extra`, which it may not; ",
+        ),
+        (
+            changed(&|entry| entry["options"] = json!({ "names": ["-c"] })),
+            ": its entry 1's field `options` must name its `program`, one word with no white space; ",
+        ),
+        (
+            changed(&|entry| entry["options"] = json!({ "program": "runner", "names": [] })),
+            ": its entry 1's field `options` must list its option `names`, one or more; ",
+        ),
+        (
+            changed(&|entry| {
+                entry["options"] = json!({ "program": "runner", "names": ["--config x"] });
+            }),
+            ": its entry 1's field `options` names the option `--config x`, which is empty or holds white \
+             space or `=`; ",
+        ),
+        (
+            changed(&|entry| {
+                entry["options"] =
+                    json!({ "program": "runner", "names": ["-c"], "relativeTo": "package" });
+            }),
+            ": its entry 1's field `options` has a `relativeTo` that is not `config`, `detection` or \
+             `script`; ",
+        ),
+        (
+            json!({ "scriptCommands": "node" }),
+            ": its value must be a list of program names; ",
+        ),
+        (
+            json!({ "scriptCommands": ["cross env"] }),
+            ": the program name `cross env` is empty or holds white space; ",
+        ),
+    ];
+
+    for (index, (pack, expected)) in cases.into_iter().enumerate() {
+        let line = refused(&format!("declarations-shape-{index}"), pack, json!({}));
+
+        assert!(line.contains(expected), "{line}");
+    }
+}
+
+#[test]
+fn refuses_a_command_file_declaration_a_project_states_or_of_another_shape() {
+    assert_eq!(
+        refused(
+            "declarations-command-files-project",
+            json!({}),
+            json!({ "commandFiles": ["ci.yml"] })
+        ),
+        "yak-analyzer: cannot use the declaration `commandFiles` that the project states for the stack \
+         `typescript`: only a pack may state this key; change it in the project's own declarations"
+    );
+
+    let usable = || json!({ "file": "ci.yml", "commands": [["jobs", "*", "run"]] });
+    let changed = |change: &dyn Fn(&mut Value)| {
+        let mut entry = usable();
+
+        change(&mut entry);
+
+        json!({ "commandFiles": [entry] })
+    };
+    let paths = "must be a list of property paths, one or more, each a list of keys, one or more";
+    let cases: [(Value, String); 10] = [
+        (
+            json!({ "commandFiles": {} }),
+            ": its value must be a list of objects; ".to_owned(),
+        ),
+        (
+            json!({ "commandFiles": [3] }),
+            ": its entry 1 must be an object; ".to_owned(),
+        ),
+        (
+            changed(&|entry| entry["extra"] = json!(1)),
+            ": its entry 1's field `extra` is not one it may hold; ".to_owned(),
+        ),
+        (
+            changed(&|entry| {
+                entry.as_object_mut().expect("an object").remove("commands");
+            }),
+            ": its entry 1's field `commands` is missing; ".to_owned(),
+        ),
+        (
+            changed(&|entry| entry["file"] = json!(4)),
+            ": its entry 1's field `file` must be a glob; ".to_owned(),
+        ),
+        (
+            changed(&|entry| entry["file"] = json!("../ci/*.yml")),
+            ": its entry 1's field `file` cannot be used: the glob `../ci/*.yml` is absolute or steps out"
+                .to_owned(),
+        ),
+        (
+            changed(&|entry| entry["commands"] = json!([])),
+            format!(": its entry 1's field `commands` {paths}; "),
+        ),
+        (
+            changed(&|entry| entry["commands"] = json!([[]])),
+            format!(": its entry 1's field `commands` {paths}; "),
+        ),
+        (
+            changed(&|entry| entry["commands"] = json!(["run"])),
+            format!(": its entry 1's field `commands` {paths}; "),
+        ),
+        (
+            changed(&|entry| entry["folder"] = json!([["dir", 1]])),
+            format!(": its entry 1's field `folder` {paths}; "),
+        ),
+    ];
+
+    for (index, (pack, expected)) in cases.into_iter().enumerate() {
+        let line = refused(
+            &format!("declarations-command-files-{index}"),
+            pack,
+            json!({}),
+        );
+
+        assert!(line.contains(&expected), "{line}");
+    }
 }
 
 #[test]

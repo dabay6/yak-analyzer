@@ -28,10 +28,26 @@ test('the guide names the commands, and says how a fixture is written and run (s
     '## The commands',
     '`yak-analyzer interface`',
     '`yak-analyzer graph --hand-off <file>`',
+    'entry points with what made each one',
+    '`yak-analyzer audit` reads the project as `graph` does',
+    '--hand-off <file> --base <commit>`',
     'not part of the interface\nversion',
     '## Fixtures',
     '`tests/support/project.rs`',
     'cargo test --release --locked --test resolve',
+  ]) {
+    assert.ok(guide.replaceAll('\r\n', '\n').includes(said), said);
+  }
+});
+
+test('the guide says what interface version 1 covers, and that a change to it raises the number (comparison spec FREEZE-1)', () => {
+  for (const said of [
+    'Interface version 1 covers',
+    '`entries`, `data`, `generated`, `internal`',
+    '`configEntries`, `scriptCommands` and `commandFiles`',
+    '`unused-file`, `unused-export`, `unused-type`,\n`unresolved-import` and `circular-dependency`',
+    '`yakAnalyzer/v1`',
+    'A change to any of them raises\nthe interface version',
   ]) {
     assert.ok(guide.replaceAll('\r\n', '\n').includes(said), said);
   }

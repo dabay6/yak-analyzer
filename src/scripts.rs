@@ -1,11 +1,9 @@
-//! Reading every file of the list that holds imports: its content from disk, parsed, and its imports
-//! found. Scripts and type declaration files are parsed whole; Vue components, MDX documents and HTML
-//! pages by their own readers (spec PARSE-1 to PARSE-6, LIST-3).
+//! Reading every file of the list that holds imports: its content from its tree, parsed, and its
+//! imports found. Scripts and type declaration files are parsed whole; Vue components, MDX documents
+//! and HTML pages by their own readers (spec PARSE-1 to PARSE-6, LIST-3).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::io::{self, ErrorKind};
-use std::path::Path;
 
 use crate::files::{File, Kind};
 use crate::imports::{self, Broken, Read};
@@ -13,6 +11,7 @@ use crate::notice::Notice;
 use crate::pages::{self, Skipped};
 use crate::stop::Stop;
 use crate::timings::Stages;
+use crate::tree::Tree;
 
 /// What reading the scripts found.
 #[derive(Debug, Default)]
@@ -33,10 +32,11 @@ enum Unread {
 
 /// Reads every script, type declaration file, Vue component, MDX document and HTML page in the list
 /// that is not data, in the order of the list. A tracked file that cannot be read stops the run; an
-/// untracked one is skipped with a notice (spec PARSE-2). The time spent reading from disk and the
-/// time spent parsing go into the stages given apart, each summed over the files (spec TIME-2).
+/// untracked one is skipped with a notice (spec PARSE-2), and so is any at the base, where it has no
+/// imports and no exports (dead-code spec COMMIT-4). The time spent reading from the tree and the time
+/// spent parsing go into the stages given apart, each summed over the files (spec TIME-2, TIME-2b).
 pub fn read(
-    root: &Path,
+    tree: &Tree,
     files: &[File],
     data: &BTreeSet<String>,
     notices: &mut Vec<Notice>,
@@ -49,7 +49,7 @@ pub fn read(
             continue;
         }
 
-        let bytes = stages.time("scriptsRead", || fs::read(root.join(&file.path)));
+        let bytes = stages.time("scriptsRead", || tree.read(&file.path));
 
         match stages.time("scriptsParse", || one(file, bytes)) {
             Ok((read, skipped)) => {
@@ -69,10 +69,16 @@ pub fn read(
                 scripts.gone.insert(file.path.clone());
             }
             Err(Unread::Broken(why)) if file.tracked => {
-                return Err(Stop::new(format!(
+                let stop = Stop::new(format!(
                     "the file {} {why}; fix it, or declare it as data if it is broken on purpose",
                     file.path
-                )));
+                ));
+
+                if !tree.is_base() {
+                    return Err(stop);
+                }
+
+                notices.push(Notice::skipped(&file.path, &stop));
             }
             Err(Unread::Broken(why)) => notices.push(Notice::new(
                 "untracked-file-skipped",
@@ -116,7 +122,8 @@ fn passed_over(path: &str, skipped: Skipped) -> Notice {
     }
 }
 
-/// Finds the imports of one file from what reading it from disk gave, with what its reader passed over.
+/// Finds the imports of one file from what reading it from its tree gave, with what its reader passed
+/// over.
 fn one(file: &File, bytes: io::Result<Vec<u8>>) -> Result<(Read, Vec<Skipped>), Unread> {
     let path = file.path.as_str();
     let bytes = bytes.map_err(|error| match error.kind() {

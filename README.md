@@ -9,11 +9,15 @@ third-party analyzer yakshaver wraps today, so that yakshaver depends on an inte
 The first release, 0.1.0, is a walking skeleton: a binary that answers its version, built and
 tested on five targets and published to npm with provenance.
 
-The code since then reads a project. It lists the files git lists, reads the packages and the
-tsconfig files, finds every import of the scripts, Vue components, MDX documents and HTML pages,
-and works out where each import leads, with build output mapped back to its source. It reports
-no findings yet: `yak-analyzer graph` prints what it read, as JSON, and `yak-analyzer interface`
-prints the interface version and the hand-off formats it reads.
+The code since then reads a project and reports what it finds. It lists the files git lists,
+reads the packages and the tsconfig files, finds every import of the scripts, Vue components, MDX
+documents and HTML pages, and works out where each import leads, with build output mapped back to
+its source. `yak-analyzer audit` reports the five dead-code kinds, from the entry points the
+project's files and the hand-off file name: unused files, unused exports and unused types,
+unresolved imports, and circular dependencies, as one SARIF 2.1.0 report. With `--base <commit>`
+it reads that commit from git as well, and marks each finding new or unchanged.
+`yak-analyzer graph` prints what it read, as JSON, and `yak-analyzer interface` prints the
+interface version and the hand-off formats it reads.
 
 ## Install
 
@@ -30,6 +34,8 @@ and Linux with glibc on x64 and arm64. No package runs a script when it is insta
 
 To read a project it needs `git` 2.15 or later on the `PATH`: it asks git for the files and for
 what git ignores, and stops with one line naming both versions when the git it finds is older.
+An audit with `--base` in a partial clone needs git 2.44 or later, the first that reads a
+commit's files without fetching what the clone left out.
 
 If your own npm settings map the `@dabay6` scope to another registry, npm looks for the package
 there and does not find it. Remove that setting first:

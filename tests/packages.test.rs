@@ -305,6 +305,47 @@ fn stops_on_a_package_json_or_a_workspace_list_it_cannot_read() {
 }
 
 #[test]
+fn reads_pnpms_list_within_its_bounds_and_its_values_as_typed() {
+    let deep = Project::new("packages-pnpm-deep");
+
+    deep.write("package.json", "{}")
+        .write(
+            "pnpm-workspace.yaml",
+            &format!("packages:\n{}x\n", "- ".repeat(520_000)),
+        )
+        .commit();
+
+    // Nested past 1,000 levels, the list stops the run with the bound named, and the run ends with its
+    // line written (comparison spec CI-7).
+    assert_eq!(
+        stopped(&deep.run(|_| {})),
+        "yak-analyzer: the workspace's list pnpm-workspace.yaml cannot be read (it is over 1 MiB, or holds \
+         more than 100,000 values, 4 MiB of text or 1,000 levels of nesting once its aliases are \
+         followed); fix it, or declare it as data"
+    );
+
+    let null = Project::new("packages-pnpm-null");
+
+    null.write("package.json", "{}")
+        .write("pnpm-workspace.yaml", "packages: ~\n")
+        .write("apps/web/package.json", r#"{ "name": "web" }"#)
+        .commit();
+
+    let document = null.graph();
+    let workspace: Vec<&str> = document["packages"]
+        .as_array()
+        .expect("a list of packages")
+        .iter()
+        .filter(|package| package["workspace"] == json!(true))
+        .map(|package| package["folder"].as_str().expect("a folder"))
+        .collect();
+
+    // A plain `~` is a null, as the YAML loader read it, so the list names no package (comparison spec
+    // CI-7, spec PACK-3).
+    assert_eq!(workspace, ["."]);
+}
+
+#[test]
 fn stops_on_a_field_of_a_form_it_does_not_have() {
     let cases: [(&str, &str, &str, &str); 5] = [
         (

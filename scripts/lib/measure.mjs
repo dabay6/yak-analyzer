@@ -20,7 +20,7 @@
  * }} Measured
  */
 
-/** The stages of a reading, in the order the analyzer takes them (spec TIME-2). */
+/** The stages of a reading, in the order the analyzer takes them (spec TIME-2, TIME-2b). */
 export const STAGES = [
   'handOff',
   'files',
@@ -31,6 +31,7 @@ export const STAGES = [
   'scriptsParse',
   'resolve',
   'entries',
+  'uses',
   'build',
 ];
 
