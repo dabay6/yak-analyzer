@@ -363,3 +363,31 @@ Terms:
   whole workflow, and `ci.yml` runs on every push; a new file also leaves the tests in
   `scripts/workflow.test.mjs`, which read `ci.yml`, untouched.
 - The script's option names other than those this spec names, and its table's layout.
+
+## Amendments
+
+### 2026-11-21: The reading moved to `reading.rs`, with a `uses` stage, and `audit` exists
+
+While this item was being built, the default branch moved the reading out of `graph::read` into
+`src/reading.rs` (`reading::start`, `reading::working`, `reading::read`), made each file be read
+through a `Tree` (the working copy, or a base commit), added a stage that finds every use of an
+export (`uses::find`), and added `audit`, which reads the working copy and a base commit on two
+threads at once. The Windows measurements of TAKE-1 and TAKE-1a were taken on the build before
+that change (0.3.0) and stand as its baseline; the report says so. With the owner's approval of
+2026-11-21:
+
+- **TIME-2b** The stages of TIME-2 are taken where `reading.rs` now takes them, under the same keys:
+  `handOff` is `reading::start` (reading and checking the hand-off file and finding the root);
+  `files` is `files::list`; `marks`, `packages`, `tsconfig`, `resolve` and `entries` are the same
+  calls inside `reading::read`; `scriptsRead` is each file's `Tree::read`, and `scriptsParse` the
+  rest of that file's reading, as TIME-2 says of `fs::read`. A new key, **`uses`**, follows
+  `entries`: the time of `uses::find`. `build` is `graph::printed`, which builds and formats the
+  document from the reading. `tree.failure()` falls into no stage, so into `other`. The line holds
+  eleven reading keys, in that order, and MEAS-3's table gains a `uses` row.
+- **TIME-2c** `total` starts at the first line of `run` in `src/main.rs`, as TIME-2a says; `run`
+  now runs on a thread of its own, so the thread's start falls outside `total`, into the script's
+  `start` row, with the process's start.
+- **TIME-6a** `audit` is not timed by this item: it writes no timing line, with the variable set or
+  not, and its readings take the stages switched off. Its two readings run in parallel, and how to
+  report them belongs to `2026-11-19-match-fallow-speed`, which compares `audit` with fallow. TIME-6
+  stands: the stages stay grouped under `reading` so that `audit` can add its own later.
