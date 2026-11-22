@@ -1742,10 +1742,12 @@ Expected: one commit.
 
 ```rust edit path=tests/complexity.test.rs
 <<<<<<< find
-    assert!(line.contains("cannot be read"), "{line}");
+        .and_then(|notice| notice["sentence"].as_str())
+        .unwrap_or_default()
 }
 =======
-    assert!(line.contains("cannot be read"), "{line}");
+        .and_then(|notice| notice["sentence"].as_str())
+        .unwrap_or_default()
 }
 
 /// The functions a document lists in the file given, in its order: each one's readable name path,
@@ -1764,6 +1766,13 @@ fn scores<'d>(document: &'d Value, path: &str) -> Vec<(&'d str, u64, u64)> {
             )
         })
         .collect()
+}
+>>>>>>> replace
+<<<<<<< find
+    assert!(line.contains("cannot be read"), "{line}");
+}
+=======
+    assert!(line.contains("cannot be read"), "{line}");
 }
 
 #[test]
