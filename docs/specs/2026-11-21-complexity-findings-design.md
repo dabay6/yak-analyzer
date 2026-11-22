@@ -168,7 +168,10 @@ Terms:
   first argument still share a count.
 
   A left side or a callee is written as its chain of names joined by `.`, with `[]` for a computed
-  member, whatever spacing, line breaks, comments or optional chaining the source has. A string
+  member, whatever spacing, line breaks, comments or optional chaining the source has. A call inside
+  the chain is written as `()`, without its arguments, and a `new` keeps its keyword: so
+  `promise.then(…).catch(() => …)` is `promise.then().catch()`, `describe.each(rows)("x", () => …)`
+  is `describe.each()("x")`, and `new Promise((resolve) => …)` is `new Promise()`. A string
   argument is written as its value in double quotes, whatever quotes the source uses. So a
   formatter's rewrap or quote change moves no fingerprint. Session's call: design IF-4 says a function's own name or its
   place, and the call it is passed to is the nearest thing to a name such a function has.
@@ -376,6 +379,7 @@ Terms:
   - a removed earlier sibling, unnamed and of a repeated name, with the later function made worse;
   - a formatter's rewrap of an assignment and a callee, and a quote change in a string argument;
   - an anonymous default export;
+  - callbacks whose callee chain holds a call or a `new`;
   - LIMIT-1's precedence, LIMIT-2's one limit and no limit, and a score equal to its limit;
   - CPX-5's data, generated and `.d.ts` files, and FN-2's Vue blocks and MDX document;
   - the command, with and without `--all` and with and without limits.
