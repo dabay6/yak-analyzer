@@ -99,6 +99,16 @@ fn any_other_value_leaves_standard_error_empty() {
 }
 
 #[test]
+fn audit_writes_no_timings_with_the_variable_set() {
+    let project = project("switch-on-audit");
+
+    // `printed` checks that the run succeeded and left standard error empty (spec TIME-6a).
+    printed(&project.start("audit", |binary| {
+        binary.env(VARIABLE, "1");
+    }));
+}
+
+#[test]
 fn a_run_that_stops_writes_its_one_stop_line_and_no_timings() {
     // The folder's name stays clear of the word the line is checked for, since the stop line names the path.
     let project = project("switch-on-stopped");

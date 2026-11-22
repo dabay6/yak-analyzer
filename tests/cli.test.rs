@@ -93,6 +93,7 @@ fn audit_without_a_hand_off_file_prints_one_sarif_report_and_exits_zero() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_yak-analyzer"))
         .arg("audit")
+        .env_remove("YAK_ANALYZER_TIMINGS")
         .current_dir(&root)
         .output()
         .expect("the binary starts");
@@ -162,6 +163,7 @@ fn refuses_a_base_git_would_read_as_an_option_before_git_sees_it() {
     for base in ["--output=written.txt", "-", "main\nother", ""] {
         let output = Command::new(env!("CARGO_BIN_EXE_yak-analyzer"))
             .args(["audit", "--base", base])
+            .env_remove("YAK_ANALYZER_TIMINGS")
             .current_dir(&folder)
             .output()
             .expect("the binary starts");
