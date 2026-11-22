@@ -1,10 +1,12 @@
 //! New against inherited: each finding of the working tree marked `new`, or `unchanged` where the base
 //! commit has it too, through the files git finds renamed between them (dead-code spec INH-1 to INH-3,
-//! COMMIT-4, REPORT-4).
+//! COMMIT-4, REPORT-4); a complexity finding by its function's scores there (complexity spec NEW-1 to
+//! NEW-5).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write as _;
 
+use crate::complexity::{self, Scores};
 use crate::findings::{self, Baseline, Finding, Graph, Location, Rule};
 use crate::git;
 use crate::notice::{Notice, SKIPPED};
@@ -84,39 +86,50 @@ pub fn mark(working: &Reading, found: &mut [Finding], base: &Base) -> Vec<Notice
         ));
     }
 
-    // A file skipped at the base can leave it with findings it never had, which would make the same
-    // findings on the branch look inherited: so then every finding is new (dead-code spec COMMIT-4).
-    if !skipped.is_empty() {
-        notices.push(Notice::new(
-            "base-files-skipped",
-            None,
-            format!(
-                "{} file(s) were skipped at the base, so no finding is marked unchanged: `{}`.",
-                skipped.len(),
-                skipped.join("`, `")
-            ),
-        ));
-
-        for finding in found.iter_mut() {
-            finding.baseline = Some(Baseline::New);
-        }
-
-        return notices;
-    }
-
     let moved = |path: &str| {
         base.renames
             .get(path)
             .cloned()
             .unwrap_or_else(|| path.to_owned())
     };
+
+    // One function's scores depend on no other file, so a file skipped at the base leaves the
+    // complexity findings compared; a skipped script has no functions there (complexity spec NEW-4).
+    complex(working, found, base, moved);
+
+    // A file skipped at the base can leave it with findings it never had, which would make the same
+    // findings on the branch look inherited: so then every other finding is new (dead-code spec
+    // COMMIT-4).
+    if !skipped.is_empty() {
+        notices.push(Notice::new(
+            "base-files-skipped",
+            None,
+            format!(
+                "{} file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
+                 unchanged; complexity findings are still compared, and those in a skipped script are new: \
+                 `{}`.",
+                skipped.len(),
+                skipped.join("`, `")
+            ),
+        ));
+
+        for finding in found
+            .iter_mut()
+            .filter(|finding| finding.rule != Rule::Complexity)
+        {
+            finding.baseline = Some(Baseline::New);
+        }
+
+        return notices;
+    }
+
     let (base_found, _) = findings::find(&base.reading);
     // How many findings of each fingerprint the base has, with its paths moved to the branch's.
     let mut held: BTreeMap<String, usize> = BTreeMap::new();
 
     for finding in base_found
         .iter()
-        .filter(|finding| finding.rule != Rule::CircularDependency)
+        .filter(|finding| !matches!(finding.rule, Rule::CircularDependency | Rule::Complexity))
     {
         *held.entry(finding.moved(moved)).or_default() += 1;
     }
@@ -143,6 +156,10 @@ pub fn mark(working: &Reading, found: &mut [Finding], base: &Base) -> Vec<Notice
             continue;
         }
 
+        if finding.rule == Rule::Complexity {
+            continue;
+        }
+
         let inherited = held
             .get_mut(&finding.fingerprint)
             .filter(|count| **count > 0)
@@ -159,6 +176,54 @@ pub fn mark(working: &Reading, found: &mut [Finding], base: &Base) -> Vec<Notice
     findings::sort(found);
 
     notices
+}
+
+/// Marks each complexity finding: unchanged where the base has its function, the path moved through
+/// the renames, over each limit the finding is over with a score at least as high, and otherwise new,
+/// with what the base had in its message. Every function of the base is read, and functions of one
+/// fingerprint pair in source order (complexity spec NEW-1 to NEW-3, NEW-5).
+fn complex(working: &Reading, found: &mut [Finding], base: &Base, moved: impl Fn(&str) -> String) {
+    let limits = working.limits;
+    let mut held: BTreeMap<String, VecDeque<Scores>> = BTreeMap::new();
+
+    for measured in complexity::measured(&base.reading, limits) {
+        held.entry(complexity::fingerprint(
+            &moved(&measured.path),
+            &measured.function,
+        ))
+        .or_default()
+        .push_back(Scores::from(measured.function.scored));
+    }
+
+    for finding in found
+        .iter_mut()
+        .filter(|finding| finding.rule == Rule::Complexity)
+    {
+        let Some(detail) = &mut finding.complexity else {
+            continue;
+        };
+        let at_base = held
+            .get_mut(&finding.fingerprint)
+            .and_then(VecDeque::pop_front);
+        let inherited = at_base.is_some_and(|scores| {
+            complexity::inherited(&detail.over, detail.scores, scores, limits)
+        });
+
+        if let Some(scores) = at_base
+            && !inherited
+        {
+            finding
+                .message
+                .push_str(&complexity::at_base(&detail.over, scores, limits));
+        }
+
+        detail.base = Some(at_base);
+        finding.baseline = Some(if inherited {
+            Baseline::Unchanged
+        } else {
+            Baseline::New
+        });
+    }
 }
 
 /// Marks a circular dependency: inherited when one strongly connected set of the base holds all its

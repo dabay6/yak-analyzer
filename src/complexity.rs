@@ -1,8 +1,9 @@
 //! The `complexity` command, and the complexity of a reading's functions, which `audit` reports too:
 //! the limit of each measure, each function's scores against them with the fingerprint and message
-//! of its finding, and the document the command prints (complexity spec LIMIT-1, LIMIT-2, CPX-2 to
-//! CPX-4, SOLO-1 to SOLO-5).
+//! of its finding and how it compares with the base, and the document the command prints
+//! (complexity spec LIMIT-1, LIMIT-2, CPX-2 to CPX-4, NEW-1, NEW-3, SOLO-1 to SOLO-5).
 
+use std::cmp::Ordering;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -260,6 +261,34 @@ pub fn message(measured: &Measured, limits: Limits) -> String {
 
     message.push('.');
     message
+}
+
+/// Whether a finding is inherited from the base's scores of its function: for each measure it is
+/// over, the base's score is over the same limit and at least as high (spec NEW-1; design BASE-5).
+pub fn inherited(over: &[&str], now: Scores, base: Scores, limits: Limits) -> bool {
+    over.iter().all(|measure| {
+        limits
+            .limit(measure)
+            .is_some_and(|limit| base.score(measure) > limit)
+            && base.score(measure) >= now.score(measure)
+    })
+}
+
+/// What a new finding's message adds of the base: for each measure it is over, the base's score, and
+/// where that was not over the limit, so (spec NEW-3).
+pub fn at_base(over: &[&str], base: Scores, limits: Limits) -> String {
+    over.iter()
+        .map(|measure| {
+            let was = base.score(measure);
+            let against = match was.cmp(&limits.limit(measure).unwrap_or_default()) {
+                Ordering::Greater => "",
+                Ordering::Equal => ", at the limit",
+                Ordering::Less => ", under the limit",
+            };
+
+            format!(" At the base its {measure} complexity was {was}{against}.")
+        })
+        .collect()
 }
 
 /// Reads the working tree as `audit` does, with the hand-off file given or with none, and returns the
