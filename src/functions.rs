@@ -10,15 +10,22 @@ use std::collections::BTreeMap;
 
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
-    self, Argument, ArrowFunctionExpression, AssignmentTarget, BindingIdentifier, BindingPattern,
-    ChainElement, Class, Expression, FormalParameters, MethodDefinitionKind, ObjectExpression,
-    Program, PropertyKey, PropertyKind,
+    self, Argument, ArrowFunctionExpression, AssignmentExpression, AssignmentTarget,
+    BindingIdentifier, BindingPattern, BreakStatement, CallExpression, CatchClause, ChainElement,
+    ChainExpression, Class, ConditionalExpression, ContinueStatement, DoWhileStatement, Expression,
+    ForInStatement, ForOfStatement, ForStatement, FormalParameters, IfStatement, JSXElement,
+    JSXFragment, LogicalExpression, LogicalOperator, MethodDefinitionKind, ObjectExpression,
+    Program, PropertyKey, PropertyKind, Statement, SwitchCase, SwitchStatement, WhileStatement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_semantic::{NodeId, ScopeFlags, Semantic};
 use oxc_span::{GetSpan, Span};
 
 use crate::imports::{DEFAULT, Lines};
+
+/// How many properties a component's first parameter may take apart before each more adds to its
+/// cognitive complexity (fallow's `PROP_COUNT_FLOOR`; spec SCORE-2).
+const PROPS_FLOOR: usize = 4;
 
 /// One function, class or object literal of a file, as the walk found it.
 #[derive(Debug, PartialEq, Eq)]
@@ -162,6 +169,30 @@ struct Frame {
     cyclomatic: u64,
     /// Its cognitive complexity so far.
     cognitive: u64,
+    /// How many of the structures that nest are around the walk's place in it.
+    nesting: u64,
+    /// The operator of the last `&&`, `||` or `??` it counted, until a run of them ends (spec
+    /// SCORE-2).
+    last: Option<LogicalOperator>,
+    /// Whether it renders JSX.
+    jsx: bool,
+    /// Whether its name is shaped like a React component's or hook's.
+    react: bool,
+    /// How many properties its first parameter takes apart, where it is an object pattern.
+    props: usize,
+}
+
+impl Frame {
+    /// What a component that takes many properties apart adds to its cognitive complexity: each
+    /// property past the floor, where it renders JSX (fallow's `fold_component_prop_count`; spec
+    /// SCORE-2).
+    fn wide(&self) -> u64 {
+        if self.jsx {
+            u64::try_from(self.props.saturating_sub(PROPS_FLOOR)).unwrap_or(u64::MAX)
+        } else {
+            0
+        }
+    }
 }
 
 /// Walks a program and records its units, with each function's scores.
@@ -211,10 +242,23 @@ impl<'a> Scorer<'_, 'a> {
                 self.units[*open].holds = true;
             }
 
+            let react = self.react(node, span, own);
+            let props = params
+                .and_then(|params| params.items.first())
+                .map_or(0, |first| match &first.pattern {
+                    BindingPattern::ObjectPattern(object) => object.properties.len(),
+                    _ => 0,
+                });
+
             self.frames.push(Frame {
                 unit: place,
                 cyclomatic: 1,
                 cognitive: 0,
+                nesting: 0,
+                last: None,
+                jsx: false,
+                react,
+                props,
             });
         }
 
@@ -234,7 +278,7 @@ impl<'a> Scorer<'_, 'a> {
             && let Some(scored) = &mut self.units[frame.unit].scored
         {
             scored.cyclomatic = frame.cyclomatic;
-            scored.cognitive = frame.cognitive;
+            scored.cognitive = frame.cognitive + frame.wide();
         }
 
         self.open.pop();
@@ -289,6 +333,114 @@ impl<'a> Scorer<'_, 'a> {
 
         (name, span.start)
     }
+
+    /// Whether a function's name is shaped like a React component's or hook's, read as fallow reads
+    /// it: its own identifier, or else what declares it, or the call it is passed to, by name; never a
+    /// name taken from a call (fallow's `frame_name_is_react_shaped`; spec SCORE-2).
+    fn react(&self, node: NodeId, span: Span, own: Option<&BindingIdentifier<'a>>) -> bool {
+        let mut node = node;
+        let mut span = span;
+        let name = own
+            .map(|identifier| identifier.name.to_string())
+            .or_else(|| {
+                loop {
+                    let (outer, holder) = self.holder(node, span);
+
+                    if let Some((name, _)) = declared(holder, outer) {
+                        break Some(name);
+                    }
+
+                    match holder {
+                        AstKind::CallExpression(call) if passed(&call.arguments, outer) => {
+                            node = call.node_id.get();
+                            span = call.span;
+                        }
+                        _ => break None,
+                    }
+                }
+            });
+
+        name.is_some_and(|name| {
+            name.starts_with(|first: char| first.is_ascii_uppercase()) || hook(&name)
+        })
+    }
+
+    /// The innermost function's frame, where the walk is inside one.
+    fn frame(&mut self) -> Option<&mut Frame> {
+        self.frames.last_mut()
+    }
+
+    /// Adds a path to the innermost function's cyclomatic complexity (spec SCORE-1, SCORE-2).
+    fn branch(&mut self) {
+        if let Some(frame) = self.frame() {
+            frame.cyclomatic += 1;
+        }
+    }
+
+    /// Adds one to the innermost function's cognitive complexity, whatever its nesting.
+    fn flat(&mut self) {
+        if let Some(frame) = self.frame() {
+            frame.cognitive += 1;
+        }
+    }
+
+    /// Adds one and the nesting to the innermost function's cognitive complexity.
+    fn structural(&mut self) {
+        if let Some(frame) = self.frame() {
+            frame.cognitive += 1 + frame.nesting;
+        }
+    }
+
+    /// Walks what the closure walks one level of nesting deeper in the innermost function.
+    fn nested(&mut self, walk: impl FnOnce(&mut Self)) {
+        if let Some(frame) = self.frame() {
+            frame.nesting += 1;
+        }
+
+        walk(self);
+
+        if let Some(frame) = self.frame() {
+            frame.nesting -= 1;
+        }
+    }
+
+    /// A loop: a path, and one and the nesting (spec SCORE-1).
+    fn looped(&mut self) {
+        self.branch();
+        self.structural();
+    }
+
+    /// An `if` with the `else if`s and the `else` after it. Each `if` adds a path. The first adds one
+    /// and its nesting to the cognitive score, and each `else if` and the `else` one, and each body is
+    /// one level deeper than the first `if`; each test is at its level (fallow's `visit_if_chain`;
+    /// spec SCORE-1, SCORE-2).
+    fn if_chain(&mut self, statement: &IfStatement<'a>, alternate: bool) {
+        self.branch();
+
+        if alternate {
+            self.flat();
+        } else {
+            self.structural();
+        }
+
+        self.visit_expression(&statement.test);
+        self.nested(|scorer| scorer.visit_statement(&statement.consequent));
+
+        match &statement.alternate {
+            Some(Statement::IfStatement(next)) => self.if_chain(next, true),
+            Some(otherwise) => {
+                self.flat();
+                self.nested(|scorer| scorer.visit_statement(otherwise));
+            }
+            None => {}
+        }
+    }
+}
+
+/// Whether a name is a React hook's: `use` and then a capital letter (fallow's `is_hook_callee`).
+fn hook(name: &str) -> bool {
+    name.strip_prefix("use")
+        .is_some_and(|rest| rest.starts_with(|next: char| next.is_ascii_uppercase()))
 }
 
 /// The name a declaration gives what it holds, with the offset the name is placed at where it is a
@@ -486,5 +638,184 @@ impl<'a> Visit<'a> for Scorer<'_, 'a> {
         self.enter(object.node_id.get(), object.span, None, None);
         walk::walk_object_expression(self, object);
         self.leave(false);
+    }
+
+    fn visit_if_statement(&mut self, statement: &IfStatement<'a>) {
+        self.if_chain(statement, false);
+    }
+
+    fn visit_for_statement(&mut self, statement: &ForStatement<'a>) {
+        self.looped();
+
+        if let Some(init) = &statement.init {
+            self.visit_for_statement_init(init);
+        }
+
+        if let Some(test) = &statement.test {
+            self.visit_expression(test);
+        }
+
+        if let Some(update) = &statement.update {
+            self.visit_expression(update);
+        }
+
+        self.nested(|scorer| scorer.visit_statement(&statement.body));
+    }
+
+    fn visit_for_in_statement(&mut self, statement: &ForInStatement<'a>) {
+        self.looped();
+        self.visit_for_statement_left(&statement.left);
+        self.visit_expression(&statement.right);
+        self.nested(|scorer| scorer.visit_statement(&statement.body));
+    }
+
+    fn visit_for_of_statement(&mut self, statement: &ForOfStatement<'a>) {
+        self.looped();
+        self.visit_for_statement_left(&statement.left);
+        self.visit_expression(&statement.right);
+        self.nested(|scorer| scorer.visit_statement(&statement.body));
+    }
+
+    fn visit_while_statement(&mut self, statement: &WhileStatement<'a>) {
+        self.looped();
+        self.visit_expression(&statement.test);
+        self.nested(|scorer| scorer.visit_statement(&statement.body));
+    }
+
+    fn visit_do_while_statement(&mut self, statement: &DoWhileStatement<'a>) {
+        self.looped();
+        self.nested(|scorer| scorer.visit_statement(&statement.body));
+        self.visit_expression(&statement.test);
+    }
+
+    // A `switch` adds one and its nesting once, and each `case` with a test a path, an empty one
+    // included (fallow's `visit_switch_statement` and `visit_switch_case`).
+    fn visit_switch_statement(&mut self, statement: &SwitchStatement<'a>) {
+        self.structural();
+        self.visit_expression(&statement.discriminant);
+        self.nested(|scorer| scorer.visit_switch_cases(&statement.cases));
+    }
+
+    fn visit_switch_case(&mut self, case: &SwitchCase<'a>) {
+        if case.test.is_some() {
+            self.branch();
+        }
+
+        walk::walk_switch_case(self, case);
+    }
+
+    // A `try` and a `finally` add nothing and nest nothing; a `catch` adds a path, and one and its
+    // nesting.
+    fn visit_catch_clause(&mut self, clause: &CatchClause<'a>) {
+        self.branch();
+        self.structural();
+        self.nested(|scorer| walk::walk_catch_clause(scorer, clause));
+    }
+
+    fn visit_conditional_expression(&mut self, conditional: &ConditionalExpression<'a>) {
+        self.branch();
+        self.structural();
+        self.visit_expression(&conditional.test);
+        self.nested(|scorer| {
+            scorer.visit_expression(&conditional.consequent);
+            scorer.visit_expression(&conditional.alternate);
+        });
+    }
+
+    // Each `&&`, `||` and `??` adds a path. One adds to the cognitive score when its operator is not
+    // the last one counted, and the last one is forgotten after an operator neither of whose sides is
+    // another, parentheses not seen through (fallow's `visit_logical_expression`; spec SCORE-2).
+    fn visit_logical_expression(&mut self, logical: &LogicalExpression<'a>) {
+        self.branch();
+
+        if let Some(frame) = self.frame()
+            && frame.last != Some(logical.operator)
+        {
+            frame.cognitive += 1;
+            frame.last = Some(logical.operator);
+        }
+
+        walk::walk_logical_expression(self, logical);
+
+        let is_logical = |side: &Expression<'_>| matches!(side, Expression::LogicalExpression(_));
+
+        if !is_logical(&logical.left)
+            && !is_logical(&logical.right)
+            && let Some(frame) = self.frame()
+        {
+            frame.last = None;
+        }
+    }
+
+    fn visit_assignment_expression(&mut self, assignment: &AssignmentExpression<'a>) {
+        if assignment.operator.is_logical() {
+            self.branch();
+        }
+
+        walk::walk_assignment_expression(self, assignment);
+    }
+
+    // A chain adds a path where its outermost link is optional, and its other links add nothing
+    // (fallow's `visit_chain_expression`; spec SCORE-2).
+    fn visit_chain_expression(&mut self, chained: &ChainExpression<'a>) {
+        let optional = match &chained.expression {
+            ChainElement::CallExpression(call) => call.optional,
+            ChainElement::TSNonNullExpression(_) => false,
+            ChainElement::ComputedMemberExpression(member) => member.optional,
+            ChainElement::StaticMemberExpression(member) => member.optional,
+            ChainElement::PrivateFieldExpression(member) => member.optional,
+        };
+
+        if optional {
+            self.branch();
+        }
+
+        walk::walk_chain_expression(self, chained);
+    }
+
+    fn visit_break_statement(&mut self, statement: &BreakStatement<'a>) {
+        if statement.label.is_some() {
+            self.flat();
+        }
+
+        walk::walk_break_statement(self, statement);
+    }
+
+    fn visit_continue_statement(&mut self, statement: &ContinueStatement<'a>) {
+        if statement.label.is_some() {
+            self.flat();
+        }
+
+        walk::walk_continue_statement(self, statement);
+    }
+
+    fn visit_jsx_element(&mut self, element: &JSXElement<'a>) {
+        if let Some(frame) = self.frame() {
+            frame.jsx = true;
+        }
+
+        walk::walk_jsx_element(self, element);
+    }
+
+    fn visit_jsx_fragment(&mut self, fragment: &JSXFragment<'a>) {
+        if let Some(frame) = self.frame() {
+            frame.jsx = true;
+        }
+
+        walk::walk_jsx_fragment(self, fragment);
+    }
+
+    // A hook's call adds one to a component's or a hook's cognitive score (fallow's `record_hook`;
+    // spec SCORE-2).
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Expression::Identifier(callee) = &call.callee
+            && hook(callee.name.as_str())
+            && let Some(frame) = self.frame()
+            && frame.react
+        {
+            frame.cognitive += 1;
+        }
+
+        walk::walk_call_expression(self, call);
     }
 }

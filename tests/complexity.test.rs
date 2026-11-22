@@ -84,6 +84,24 @@ fn sentence<'d>(document: &'d Value, kind: &str) -> &'d str {
         .unwrap_or_default()
 }
 
+/// The functions a document lists in the file given, in its order: each one's readable name path,
+/// cyclomatic complexity and cognitive complexity.
+fn scores<'d>(document: &'d Value, path: &str) -> Vec<(&'d str, u64, u64)> {
+    document["functions"]
+        .as_array()
+        .expect("a list of functions")
+        .iter()
+        .filter(|function| function["path"] == json!(path))
+        .map(|function| {
+            (
+                function["function"].as_str().expect("a name path"),
+                function["cyclomatic"].as_u64().expect("a score"),
+                function["cognitive"].as_u64().expect("a score"),
+            )
+        })
+        .collect()
+}
+
 #[test]
 fn with_no_limit_declared_it_lists_no_function_and_says_so() {
     let project = Project::new("complexity-no-limit");
@@ -481,4 +499,148 @@ fn refuses_a_command_line_it_does_not_answer_and_stops_on_a_hand_off_file_it_can
     }));
 
     assert!(line.contains("cannot be read"), "{line}");
+}
+
+#[test]
+fn scores_each_function_as_fallow_counts_it() {
+    let project = Project::new("complexity-scores");
+
+    project
+        .write(
+            "src/scores.ts",
+            r#"export function plain() {}
+export function nested(a, b) { if (a) { if (b) {} } }
+export function chained(a, b) { if (a) {} else if (b) {} else {} }
+export function elsewise(a, b) { if (a) {} else { if (b) {} } }
+export function looped(list) { for (const x of list) { if (x) {} } }
+export function loops(a, list, value) { for (const k in value) {} for (let i = 0; i < 1; i++) {} while (a) {} do {} while (a); }
+export function switched(c) { switch (c) { case 1: case 2: return 1; default: return 0; } }
+export function caught(a) { try { if (a) {} } catch { if (a) {} } finally {} }
+export function ternaries(x) { return x > 0 ? 1 : x < 0 ? -1 : 0; }
+export function runs(a, b, c, d) { return a || b && c || d; }
+export function grouped(a, b, c, d) { return (a || b) && c || d; }
+export function passed(a, b, c) { return a && f(b && c); }
+export function optional(a) { return [a?.b, a?.b?.c, a?.b.c, a?.b(), a?.()]; }
+export function assigned(v) { v ||= 1; v &&= 2; v ??= 3; return v; }
+export function labelled(list) { outer: for (const x of list) { for (const y of x) { if (y) continue outer; break outer; } } }
+export function outer(a) { if (a) { const inner = (b) => { if (b) {} }; return inner; } }
+export function builds(a) { return class { static { if (a) {} } }; }
+export function defaults(a = b ?? 1) {}
+class Top { static { if (x) {} } }
+"#,
+        )
+        .commit();
+
+    let document = complexity(&project, &["--all"]);
+
+    // A nested function is scored on its own, and code outside every function, such as a static
+    // block at the top, is never reported; one inside a function counts there (spec SCORE-1,
+    // SCORE-2).
+    assert_eq!(
+        scores(&document, "src/scores.ts"),
+        [
+            ("plain", 1, 0),
+            ("nested", 3, 3),
+            ("chained", 3, 3),
+            ("elsewise", 3, 4),
+            ("looped", 3, 3),
+            ("loops", 5, 4),
+            ("switched", 3, 1),
+            ("caught", 4, 4),
+            ("ternaries", 3, 3),
+            ("runs", 4, 2),
+            ("grouped", 4, 3),
+            ("passed", 3, 1),
+            ("optional", 4, 0),
+            ("assigned", 4, 0),
+            ("labelled", 4, 8),
+            ("outer", 2, 1),
+            ("outer > inner", 2, 1),
+            ("builds", 2, 1),
+            ("defaults", 2, 1),
+        ]
+    );
+}
+
+#[test]
+fn a_component_s_hooks_and_many_properties_add_to_its_cognitive_score() {
+    let project = Project::new("complexity-react");
+
+    project
+        .write(
+            "src/card.tsx",
+            r#"export function Card({ a, b, c, d, e, f }) {
+  const [x] = useState(0);
+  useEffect(() => {});
+  return <div>{a && b && x}</div>;
+}
+export const Panel = memo(() => { useMemo(() => 1); return <i />; });
+export function helper() { useState(0); return <b />; }
+"#,
+        )
+        .commit();
+
+    let document = complexity(&project, &["--all"]);
+
+    // A name read from what declares a function, or from the call it is passed to, makes it a
+    // component; a lower-case name does not (spec SCORE-2).
+    assert_eq!(
+        scores(&document, "src/card.tsx"),
+        [
+            ("Card", 3, 5),
+            ("Card > useEffect()", 1, 0),
+            ("memo()", 1, 1),
+            ("memo() > useMemo()", 1, 0),
+            ("helper", 1, 0),
+        ]
+    );
+}
+
+#[test]
+fn lists_the_functions_over_a_limit_with_the_measures_they_are_over() {
+    let project = Project::new("complexity-over");
+
+    project
+        .write(
+            "src/over.ts",
+            "export function caught(a) { try { if (a) {} } catch { if (a) {} } }\nexport function nested(a, b) { if (a) { if (b) {} } }\nexport function assigned(v) { v ||= 1; v &&= 2; v ??= 3; return v; }\n",
+        )
+        .commit();
+
+    let over = |document: &Value| -> Vec<(String, Value)> {
+        document["functions"]
+            .as_array()
+            .expect("a list of functions")
+            .iter()
+            .map(|function| {
+                (
+                    function["function"]
+                        .as_str()
+                        .expect("a name path")
+                        .to_owned(),
+                    function["over"].clone(),
+                )
+            })
+            .collect()
+    };
+    let both = declaring(
+        &project,
+        &json!({ "cyclomaticLimit": 3, "cognitiveLimit": 3 }),
+        &json!({}),
+    );
+
+    assert_eq!(
+        over(&complexity(&project, &["--hand-off", &both])),
+        [
+            ("caught".to_owned(), json!(["cyclomatic", "cognitive"])),
+            ("assigned".to_owned(), json!(["cyclomatic"])),
+        ]
+    );
+
+    let cognitive = declaring(&project, &json!({ "cognitiveLimit": 3 }), &json!({}));
+
+    assert_eq!(
+        over(&complexity(&project, &["--hand-off", &cognitive])),
+        [("caught".to_owned(), json!(["cognitive"]))]
+    );
 }
