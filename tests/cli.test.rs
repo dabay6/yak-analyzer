@@ -111,9 +111,9 @@ fn audit_without_a_hand_off_file_prints_one_sarif_report_and_exits_zero() {
         Some(6)
     );
     assert_eq!(run["results"], json!([]));
-    assert_eq!(notifications.as_array().map(Vec::len), Some(1));
+    assert_eq!(notifications.as_array().map(Vec::len), Some(2));
     assert_eq!(
-        notifications[0]["descriptor"]["id"],
+        notifications[1]["descriptor"]["id"],
         json!("no-hand-off-file")
     );
 }

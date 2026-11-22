@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::path::{Path, PathBuf};
 
+use crate::complexity::Limits;
 use crate::declarations;
 use crate::entries::{self, Entries};
 use crate::files::{self, File, Listing};
@@ -44,6 +45,9 @@ pub struct Reading {
     pub uses: Uses,
     /// What a person should know about the run, in the order it was found.
     pub notices: Vec<Notice>,
+    /// The limit of each measure of complexity the declarations give, one for the whole run
+    /// (complexity spec LIMIT-1).
+    pub limits: Limits,
 }
 
 /// What every reading of a run starts from: the hand-off file, the root, and the notices so far.
@@ -199,5 +203,6 @@ pub fn read(
         entries,
         uses,
         notices,
+        limits: Limits::of(handed),
     })
 }

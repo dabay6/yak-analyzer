@@ -7,6 +7,7 @@ use std::fmt::Write as _;
 
 use sha2::{Digest, Sha256};
 
+use crate::complexity::{self, Detail, Scores};
 use crate::entries::Fault;
 use crate::files::{File, Kind};
 use crate::imports::{Form, Import};
@@ -132,6 +133,9 @@ pub struct Finding {
     parts: Vec<String>,
     /// Whether it is new or inherited, with a base; none without one.
     pub baseline: Option<Baseline>,
+    /// What a complexity finding carries in its property bag; none for any other (complexity spec
+    /// CPX-3).
+    pub complexity: Option<Detail>,
 }
 
 impl Finding {
@@ -145,6 +149,7 @@ impl Finding {
             fingerprint: fingerprint(rule, parts),
             parts: parts.iter().map(|part| (*part).to_owned()).collect(),
             baseline: None,
+            complexity: None,
         }
     }
 
@@ -214,8 +219,10 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
     unused(reading, &mut found);
     unresolved(reading, &mut found);
     circular(reading, &mut found);
+    complex(reading, &mut found);
     not_reported(reading, &mut notices);
     computed(reading, &mut notices);
+    notices.extend(reading.limits.notice());
 
     sort(&mut found);
 
@@ -729,6 +736,41 @@ fn looped(nodes: &[&str], edges: &Edges, members: &BTreeSet<usize>, first: usize
     }
 
     message
+}
+
+/// One finding for each function over a limit, whichever measures are over (complexity spec CPX-1 to
+/// CPX-5).
+fn complex(reading: &Reading, found: &mut Vec<Finding>) {
+    let limits = reading.limits;
+
+    for measured in complexity::measured(reading, limits) {
+        if measured.over.is_empty() {
+            continue;
+        }
+
+        let parts = complexity::parts(&measured.path, &measured.function);
+        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        let scored = measured.function.scored;
+        let mut finding = Finding::new(
+            Rule::Complexity,
+            complexity::message(&measured, limits),
+            Location {
+                path: measured.path.clone(),
+                line: Some(scored.line),
+                column: Some(scored.column),
+            },
+            &parts,
+        );
+
+        finding.complexity = Some(Detail {
+            function: measured.function.readable(),
+            scores: Scores::from(scored),
+            limits,
+            over: measured.over,
+            base: None,
+        });
+        found.push(finding);
+    }
 }
 
 /// One notice for each file with an `import()` or `require()` it cannot follow: what it loads must be

@@ -9,6 +9,7 @@ use std::thread;
 
 use serde_json::{Value, json};
 
+use crate::complexity::Detail;
 use crate::files;
 use crate::findings::{self, Finding, Location, Rule};
 use crate::git;
@@ -189,6 +190,10 @@ fn result(finding: &Finding) -> Value {
         result["baselineState"] = json!(baseline.name());
     }
 
+    if let Some(detail) = &finding.complexity {
+        result["properties"] = json!({ "complexity": bag(detail) });
+    }
+
     if !finding.related.is_empty() {
         result["relatedLocations"] = finding
             .related
@@ -204,6 +209,29 @@ fn result(finding: &Finding) -> Value {
     }
 
     result
+}
+
+/// The property bag of a complexity finding: the function, its scores, the limits, the measures it is
+/// over, and with a base its scores there, or `null` where the base does not have it (complexity spec
+/// CPX-3).
+fn bag(detail: &Detail) -> Value {
+    let mut bag = json!({
+        "cognitive": detail.scores.cognitive,
+        "cognitiveLimit": detail.limits.cognitive,
+        "cyclomatic": detail.scores.cyclomatic,
+        "cyclomaticLimit": detail.limits.cyclomatic,
+        "function": detail.function,
+        "over": detail.over,
+    });
+
+    if let Some(base) = detail.base {
+        bag["base"] = base.map_or(
+            Value::Null,
+            |base| json!({ "cognitive": base.cognitive, "cyclomatic": base.cyclomatic }),
+        );
+    }
+
+    bag
 }
 
 /// A location as SARIF writes one: the file, and the line and column where there are some.

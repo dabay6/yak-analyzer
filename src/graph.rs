@@ -32,6 +32,7 @@ pub fn printed(reading: Reading) -> String {
         entries,
         uses,
         notices,
+        limits: _,
     } = reading;
     let mut document = json!({
         "entries": entry_points(&entries),
