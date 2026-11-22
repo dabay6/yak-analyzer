@@ -177,8 +177,10 @@ Terms:
   place, and the call it is passed to is the nearest thing to a name such a function has.
 - **FN-5** A function's name path is the names of what encloses it, from the outside in, then its
   own. What encloses it is each class and function around it, and each object literal around it. A
-  class expression or an object literal takes its name by FN-4's rules for a function (the variable,
-  property or left side it is assigned to), so `const Parser = class {…}` is `Parser`. A class
+  class expression or an object literal takes its name by all of FN-4's rules for a function: the
+  variable, property or left side it is assigned to, `default` as an anonymous default export, and
+  the call it is passed to. So `const Parser = class {…}` is `Parser`, and a Vue component's
+  `export default defineComponent({…})` is `defineComponent()`. Session's call. A class
   declaration's name is its own. A Vue component's script blocks are one file for this count, in
   source order.
   Only a class or object literal with a function somewhere inside it takes part in a name path; one
@@ -380,6 +382,8 @@ Terms:
   - a formatter's rewrap of an assignment and a callee, and a quote change in a string argument;
   - an anonymous default export;
   - callbacks whose callee chain holds a call or a `new`;
+  - an object literal passed to a call (`defineComponent({…})`), and one as an anonymous default
+    export;
   - LIMIT-1's precedence, LIMIT-2's one limit and no limit, and a score equal to its limit;
   - CPX-5's data, generated and `.d.ts` files, and FN-2's Vue blocks and MDX document;
   - the command, with and without `--all` and with and without limits.
