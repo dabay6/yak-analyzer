@@ -1,9 +1,18 @@
 //! Reading every file of the list that holds imports: its content from its tree, parsed, and its
 //! imports found. Scripts and type declaration files are parsed whole; Vue components, MDX documents
 //! and HTML pages by their own readers (spec PARSE-1 to PARSE-6, LIST-3).
+//!
+//! The working copy's files are read ahead on several threads before they are parsed one after
+//! another, so the first opening of each, which Windows Defender scans, overlaps with the others
+//! (parallel reading spec PAR-1 to PAR-7).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, ErrorKind};
+use std::num::NonZeroUsize;
+use std::panic;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 use crate::files::{File, Kind};
 use crate::imports::{self, Broken, Read};
@@ -33,8 +42,13 @@ enum Unread {
 /// Reads every script, type declaration file, Vue component, MDX document and HTML page in the list
 /// that is not data, in the order of the list. A tracked file that cannot be read stops the run; an
 /// untracked one is skipped with a notice (spec PARSE-2), and so is any at the base, where it has no
-/// imports and no exports (dead-code spec COMMIT-4). The time spent reading from the tree and the time
-/// spent parsing go into the stages given apart, each summed over the files (spec TIME-2, TIME-2b).
+/// imports and no exports (dead-code spec COMMIT-4).
+///
+/// On the working copy, every file is read ahead on several threads before the loop; the base's files
+/// are read one at a time in the loop, through its one git (parallel reading spec PAR-1, PAR-2). The
+/// time spent reading goes into `scriptsRead`: on the working copy the wall-clock time of the pre-read,
+/// on the base each file's read, summed. The time spent parsing goes into `scriptsParse`, summed over
+/// the files (spec TIME-2, TIME-2b; parallel reading spec CLOCK-1).
 pub fn read(
     tree: &Tree,
     files: &[File],
@@ -43,13 +57,25 @@ pub fn read(
     stages: &mut Stages,
 ) -> Result<Scripts, Stop> {
     let mut scripts = Scripts::default();
+    let wanted = wanted(files, data);
+    let read_ahead = if tree.is_base() {
+        Vec::new()
+    } else {
+        stages.time("scriptsRead", || {
+            let count = threads(thread::available_parallelism(), wanted.len());
 
-    for file in files {
-        if !reads(file.kind) || data.contains(&file.path) {
-            continue;
-        }
+            ahead(tree, &wanted, count, |_| true)
+        })
+    };
+    let mut read_ahead = read_ahead.into_iter();
 
-        let bytes = stages.time("scriptsRead", || tree.read(&file.path));
+    for file in wanted {
+        // A file the pre-read holds no result for, every file at the base, is read here (parallel
+        // reading spec PAR-3).
+        let bytes = match read_ahead.next().flatten() {
+            Some(bytes) => bytes,
+            None => stages.time("scriptsRead", || tree.read(&file.path)),
+        };
 
         match stages.time("scriptsParse", || one(file, bytes)) {
             Ok((read, skipped)) => {
@@ -98,6 +124,71 @@ pub const fn reads(kind: Kind) -> bool {
         kind,
         Kind::Script | Kind::Declaration | Kind::Vue | Kind::Mdx | Kind::Page
     )
+}
+
+/// The files of the list whose imports are read, in its order: the kinds the analyzer reads, less
+/// those declared as data (spec PARSE-1; parallel reading spec PAR-6).
+fn wanted<'a>(files: &'a [File], data: &BTreeSet<String>) -> Vec<&'a File> {
+    files
+        .iter()
+        .filter(|file| reads(file.kind) && !data.contains(&file.path))
+        .collect()
+}
+
+/// How many threads read ahead, the reading's own included: the machine's parallelism, or 1 when it
+/// cannot be told, and never more than the files to read, so 0 when there are none (parallel reading
+/// spec PAR-4).
+fn threads(parallelism: io::Result<NonZeroUsize>, files: usize) -> usize {
+    parallelism.map_or(1, NonZeroUsize::get).min(files)
+}
+
+/// Reads every file given from the tree, on the number of threads given, the calling thread included,
+/// and returns each file's result in its place. Each thread takes the next file nobody has taken until
+/// none is left, so the files of a thread that could not start, or that `may_start` refuses, are read
+/// by the others. A thread that panics passes its panic on, once every thread is joined (parallel
+/// reading spec PAR-1, PAR-3, PAR-5).
+fn ahead(
+    tree: &Tree,
+    files: &[&File],
+    threads: usize,
+    may_start: impl Fn(usize) -> bool,
+) -> Vec<Option<io::Result<Vec<u8>>>> {
+    let next = AtomicUsize::new(0);
+    let slots: Vec<Mutex<Option<io::Result<Vec<u8>>>>> =
+        files.iter().map(|_| Mutex::new(None)).collect();
+    let work = || {
+        let mut index = next.fetch_add(1, Ordering::Relaxed);
+
+        while let Some(file) = files.get(index) {
+            let bytes = tree.read(&file.path);
+
+            if let Ok(mut slot) = slots[index].lock() {
+                *slot = Some(bytes);
+            }
+
+            index = next.fetch_add(1, Ordering::Relaxed);
+        }
+    };
+
+    thread::scope(|scope| {
+        let started: Vec<_> = (1..threads)
+            .filter(|&number| may_start(number))
+            .filter_map(|_| thread::Builder::new().spawn_scoped(scope, work).ok())
+            .collect();
+
+        work();
+
+        for reader in started {
+            if let Err(fault) = reader.join() {
+                panic::resume_unwind(fault);
+            }
+        }
+    });
+
+    slots
+        .into_iter()
+        .map(|slot| slot.into_inner().ok().flatten())
+        .collect()
 }
 
 /// The notice for what a reader passed over (spec PARSE-3, PARSE-4).
@@ -152,3 +243,6 @@ fn one(file: &File, bytes: io::Result<Vec<u8>>) -> Result<(Read, Vec<Skipped>), 
             .map_err(broken),
     }
 }
+
+#[cfg(test)]
+mod tests;
