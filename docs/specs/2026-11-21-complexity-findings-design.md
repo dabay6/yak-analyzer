@@ -696,8 +696,8 @@ SCORE-1 was: the owner handed the counting over.
   - **Suppression comments.** fallow skips a function with a complexity suppression comment on its
     start line (`crates/engine/src/health/findings.rs`); the analyzer reads no such comment. Each finding
     the analyzer reports where fallow's comment skipped it is set apart, as VS-4 sets apart, and
-    counted; it is not a false finding. Whether the analyzer should read them is the owner's to
-    decide.
+    counted; it is not a false finding. Reading them is left to a later item, the owner's call: the
+    owner's own projects use no such comment today.
   - **Other files.** fallow scores Svelte `<script>` blocks, Astro frontmatter and Angular inline
     templates, which the analyzer does not parse (FN-2); its findings there are set apart, as VS-4
     sets apart its findings in MDX documents and HTML pages. fallow parses a `.js` or `.ts` file
