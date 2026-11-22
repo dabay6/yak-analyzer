@@ -123,7 +123,9 @@ Terms:
 - **FN-1** A function is a function declaration, a function expression, an arrow function, or a
   method of a class or an object literal. Getters, setters and constructors count as methods. Code
   outside every function, such as a module's top level or a class's static block, is not a function
-  and is never reported. Session's call.
+  and is never reported. A declaration with no body is not a function either: a TypeScript overload
+  signature, a `declare function`, an abstract method, or a method of an interface or type. It takes
+  no place under FN-5, so adding an overload moves no fingerprint. Session's call.
 - **FN-2** Functions are found in every file whose code the analyzer parses whole: scripts, and the
   `<script>` and `<script setup>` blocks of Vue components (the reading spec's PARSE-1 and PARSE-3).
   MDX documents and HTML pages are read only for their import statements, so their functions are not
@@ -139,11 +141,12 @@ Terms:
   left side it is assigned to, as written (`a.b.read = function () {…}` gives `a.b.read`). Otherwise
   it is unnamed. Session's call.
 - **FN-5** A function's name path is the names of what encloses it, from the outside in, then its
-  own. What encloses it is each class and function around it, and each object literal around it that
-  has a name by FN-4's rules for a function (the variable, property or left side it is assigned to).
+  own. What encloses it is each class and function around it, and each object literal around it. A
+  class expression or an object literal takes its name by FN-4's rules for a function (the variable,
+  property or left side it is assigned to), so `const Parser = class {…}` is `Parser`.
   Within one enclosing class, function, object literal or file, each name used more than once takes
   its place among the uses of that name, in source order, after the first: `read`, then `read #2`.
-  An unnamed function, or an unnamed class, takes its place among the unnamed ones directly inside
+  An unnamed function, class or object literal takes its place among the unnamed ones directly inside
   the same enclosure: the first is `<anonymous 1>`. So no two functions of one file have the same name
   path. This is design IF-4's fingerprint for a function: its path, the names that enclose it, and its
   own name or place, with no line number. The readable form joins the parts with ` > `, as in
@@ -209,7 +212,11 @@ Terms:
   base, or `null` where the base doesn't have the function. This is what the engine will read for
   yakshaver's tracking (owner: the scores and the limit reach yak). Session's call for the names.
 - **CPX-4** Its fingerprint is made, as design IF-4 says, from the rule, the file's path and the
-  function's name path (FN-5), under the existing scheme `yakAnalyzer/v1`. The run's list of rules
+  function's name path (FN-5), under the existing scheme `yakAnalyzer/v1`. Each part of the name path
+  is its own part of the digest, length-prefixed as `src/findings.rs` does today, so a name holding
+  ` > ` can't collide with a nested path. FN-4's and FN-5's rules become part of the scheme. Until the
+  swap nothing records a reason against the analyzer's fingerprints, so a fix to them before then
+  costs nothing. After it, a fix is a new scheme, which design IF-6 says the release must announce. The run's list of rules
   gains `complexity`, after the five.
 - **CPX-5** No function in a file declared data or generated, or in a `.d.ts` file, is reported
   (design FIND-10). The same holds at the base.
@@ -287,8 +294,8 @@ Terms:
   the test (CONTRIBUTING.md, "Fixtures"). These are at least:
   - each counting rule SCORE-1 and the plan's list from SCORE-2 name;
   - each naming case of FN-4 and FN-5, among them a getter and setter pair, methods of two sibling
-    object literals, two assignments ending in the same member, and one name declared in two sibling
-    blocks;
+    object literals, two assignments ending in the same member, one name declared in two sibling
+    blocks, a class expression assigned to a variable, and a function with overload signatures;
   - FN-6's accepted cases: a rename, an unnamed function added before another, and a function of a
     repeated name added before another;
   - each base case: a function absent at the base, one under at the base, one worse, one the same,
@@ -337,7 +344,7 @@ Terms:
 - **VS-7** The judged list holds, at the top, which bar holds and each case left (the comparison
   spec's BAR-4); the pinned commits, fallow's version and both tools' settings; per root, the counts
   shared, analyzer-only and fallow-only, and each judgment; VS-4's section apart; the branch audits;
-  CMP-6's times; and each fix with its fixture. The owner reads it before the item closes (design
+  VS-6's times; and each fix with its fixture. The owner reads it before the item closes (design
   PROOF-3, PROOF-4).
 
 ## Alternatives considered
@@ -394,6 +401,7 @@ Terms:
 - The exact wording of messages and notices, within CPX-2, NEW-3 and LIMIT-2.
 - The order of keys in the command's JSON, and whether `notices` there carries the base's notices
   (it has no base today).
-- How CMP-2 normalizes a function's start line, where decorators or `export` make the two tools
+- How VS-2 normalizes a function's start line, where decorators or `export` make the two tools
   differ.
-- The rules SCORE-2's reading of fallow yields, written into the plan with their sources.
+- How the plan's first step reads fallow's counting (SCORE-2). The rules it yields come back to this
+  spec as SCORE-4's amendment, not left in the plan.
