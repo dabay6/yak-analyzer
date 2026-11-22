@@ -6,7 +6,8 @@
 
 **Amends:** `docs/specs/2026-11-19-cold-warm-measurements-design.md`, the meaning of the timing
 keys `scriptsRead` and `scriptsParse` in its TIME-2 and TIME-2b, and TIME-2's sentence that
-`scripts::read` reads one file after another (CLOCK-1 here).
+`scripts::read` reads one file after another (CLOCK-1 here). That spec belongs to another work item
+and gets no entry of its own; this header is the record of the change.
 
 **Builds from:** the analyzer's design spec,
 `docs/specs/2026-11-10-in-house-code-analyzer-design.md` in the yakshaver repository, called **the
@@ -22,27 +23,35 @@ it. The owner was asked about the build choices together and answered "your call
 ## Intent
 
 yak-analyzer is meant to replace fallow, the dead-code tool yak runs today, so its speed is judged
-against fallow's, measured the same way, on the yakshaver repository (owner). A throwaway check on
-2026-11-22 timed both side by side: yak-analyzer 0.10.0's `audit --hand-off <file>` against fallow
+against fallow's, measured the same way, on the yakshaver repository (owner). A throwaway check on the
+night of 2026-11-21 (its result files carry 2026-11-22, in UTC) timed both side by side: yak-analyzer 0.10.0's `audit --hand-off <file>` against fallow
 3.39.0's `fallow dead-code --format json`, both as bare executables with their output thrown away,
 timed by the wall clock from outside. The check's scripts and results are in the work item's report
 folder.
 
 | Run | yak-analyzer `audit` | fallow `dead-code` |
 |---|---|---|
-| warm, median of ten alternating runs, four rounds | 1.10 to 1.49s | 1.40 to 1.79s (2.18s without its cache) |
+| warm: five rounds of ten runs each, the tools taking turns; the lowest and highest round median | 1.10 to 1.49s | 1.40 to 1.79s (1.75 to 2.19s without its cache) |
 | first run after a restart, that tool going first | 26.5s | 5.6s (5.7s without its cache) |
 
 Warm, yak-analyzer is already as fast or faster. Cold it is about 21 seconds slower. By the owner's
 bands (below), a gap of a second or more is investigated now (owner). fallow's cache saves nothing
 on a cold run, so the gap is in how the files are read. On Windows, Microsoft Defender scans each
-file the first time it is opened after a restart; the earlier item found that reading the script
-files (`scriptsRead`) is 97% of a cold `graph` run, and yak-analyzer reads them one after another.
+file the first time it is opened after a restart; the earlier item, `2026-11-17-cold-warm-performance`,
+found that reading the script
+files (`scriptsRead`) is 97% of what a cold `graph` run adds over a warm one (about 93% of the whole
+cold run), and yak-analyzer reads them one after another.
 
 A second check read yakshaver's script files cold after one restart, in four equal shares, each with
 a different number of threads: 1 thread 8.4ms a file, 4 threads 2.3ms, 8 threads 1.3ms, 16 threads
 0.9ms. Defender's scans overlap when files are opened in parallel. At 16 threads all of yakshaver's
-2,744 script files would read cold in about 2.4 seconds, against about 23 one at a time.
+2,744 tracked files with script extensions (counted by extension, so close to but not exactly the
+script files below) would read cold in about 2.4 seconds, against about 23 one at a time. Each
+thread count was one sample after one restart.
+
+A projection, not a promise: taking about 20.6 of those seconds off the 26.5s cold run leaves about
+5.9s, against fallow's 5.6s, a gap of about 300ms, on the edge between "acceptable" and "wait for
+Rust linting". So CMP-4's extra pair of restarts will most likely be needed.
 
 So this item reads the working copy's script files on several threads at once, leaving everything
 else about the reading as it is, and then measures the gap to fallow again.
@@ -103,7 +112,10 @@ Terms:
   RUN-4). If the measurement shows they matter, that is a later item.
 - Linux and macOS. They have no Defender scan; the change runs there too, and must keep every
   result, but nothing is measured there.
-- Timing `audit` with the timing switch. It stays as dead-code TIME-6a says: no timing line.
+- Timing `audit` with the timing switch (CLOCK-1). TIME-6a left how to report `audit`'s two
+  readings to this item; this item leaves it as TIME-6a built it, with no timing line, because the
+  comparison with fallow times `audit` from outside (CMP-1) and `graph` reads the working copy the
+  same way. Session's call.
 - Changing the warm run. It already meets the goal.
 
 **Anti-goals,** failures even if it technically works:
@@ -120,24 +132,40 @@ Terms:
 
 - **PAR-1** On the working copy, before its loop, `scripts::read` reads the bytes of every script
   file on several threads at once, and keeps each file's result (its bytes, or the `io::Error` the
-  read gave) at that file's position in the file list. The loop then runs as today, in list order,
-  and takes each file's bytes from the pre-read instead of calling `Tree::read`. Everything the loop
+  read gave) with that file, so the loop finds each file's result when it reaches the file. The loop
+  then runs as today, over the whole file list in its order, and takes each script file's bytes from
+  the pre-read instead of calling `Tree::read`. Everything the loop
   does with the bytes is unchanged: the same parsing, the same notices, the same `gone` set, and the
   same first tracked broken file stopping the run (reading PARSE-2, LIST-3, RUN-4). So the output is
   the same as today's by construction. Session's call.
 - **PAR-2** The pre-read runs only on the working copy (`!tree.is_base()`). On the base the loop
   reads each file through `Tree::read` as today. Session's call.
-- **PAR-3** A file the pre-read holds no result for is read in the loop through `Tree::read`, as
-  today. This covers the base, and a thread that could not be started: when starting a thread fails,
-  the pre-read goes on with the threads it has, or with none, and the run's result is unchanged.
-  Session's call: a run that would succeed today never stops because a thread could not start.
-- **PAR-4** The number of threads is `std::thread::available_parallelism()`, or 1 when that call
-  fails, and never more than the number of script files. With one thread or fewer than two script
-  files, no thread is started and the loop reads as today. There is no setting for it (owner
-  approved). On the owner's 16-thread machine this is 16, which the second check measured.
-- **PAR-5** The threads are `std::thread::scope` threads from the standard library, with no new
-  crate. They only read bytes; no thread but the reading's own parses, so they need no larger stack
-  (dead-code LIFE-3). Session's call.
+- **PAR-3** The files are shared out through one shared counter: each thread, the reading's own
+  included, takes the next unread file from it until none is left, so each script file is read by
+  exactly one of the pre-read's threads. The reading's own
+  thread is one of them: it reads files beside the threads it starts, so every script file of the
+  working copy has a result when the pre-read ends, even when no thread could be started. When
+  starting a thread fails, the files it would have read are read by the threads that did start, and
+  the run's result is unchanged. Session's call: a run that would succeed today never stops because a
+  thread could not start. On the base, which has no pre-read (PAR-2), the loop reads each file
+  through `Tree::read` as today; and should the loop ever find a working-copy file with no result,
+  it reads that file through `Tree::read` too, rather than failing. A panic on a pre-read thread
+  ends the run as a fault in the analyzer, with its one line and exit code, as any panic does today
+  (reading RUN-3). So each started thread is joined explicitly and a panic passed on with
+  `std::panic::resume_unwind`, as `src/audit.rs` does with the base's thread; left to the scope's
+  implicit join, the scope would panic a second time and the hook would print a second line.
+- **PAR-4** The pre-read's number of threads, the reading's own included, is
+  `std::thread::available_parallelism()`, or 1 when that call fails, and never more than the number
+  of script files. So it starts one thread fewer than that number. With no script files there is no
+  pre-read and no thread. With a count of 1 it starts none,
+  and the reading's own thread reads every script file, one after another, before the loop. There is
+  no setting for it (owner approved). On the owner's machine, with 16 logical processors, the count
+  is 16, which the second check measured.
+- **PAR-5** The threads are scoped threads from the standard library (`std::thread::scope`), with no
+  new crate, each started with `std::thread::Builder::spawn_scoped`, which returns an error when a
+  thread cannot start (where `Scope::spawn` would panic), so PAR-3 can go on without it. They only
+  read bytes; no thread but the reading's own parses, so they need no larger stack (dead-code
+  LIFE-3). Session's call.
 - **PAR-6** Only the bytes of files the loop would read are read: a data file, or a file of a kind
   `scripts::reads` refuses, is never opened, as today.
 - **PAR-7** `audit --base` keeps reading the working copy and the base at once, on two threads
@@ -146,9 +174,15 @@ Terms:
 
 ### The timing switch
 
-- **CLOCK-1** `scriptsRead` becomes the wall-clock time of the pre-read, plus each `Tree::read` the
-  loop still makes (PAR-3), summed. `scriptsParse` stays each file's time in the loop after its bytes
-  are in hand, summed over the files. This replaces TIME-2's and TIME-2b's meaning of the two keys,
+The timing switch is the environment variable `YAK_ANALYZER_TIMINGS`: set to `1`, a `graph` run
+that succeeds writes one line on standard error with the microseconds each stage of its reading took
+(TIME-1).
+
+- **CLOCK-1** On the working copy, `scriptsRead` becomes the wall-clock time of the pre-read. On the
+  base, which has no pre-read, it stays each file's `Tree::read`, summed, as today; the switch times
+  only `graph`, which reads the working copy, so this matters only if a later item times the base.
+  `scriptsParse` stays each file's time in the loop after its bytes are in hand, summed over the
+  files. This replaces TIME-2's and TIME-2b's meaning of the two keys,
   and TIME-2's sentence that `scripts::read` reads one file after another. The two keys still add up
   to nearly all of `scripts::read`'s wall-clock time, so `other` (MEAS-3) keeps its meaning. The
   line's shape and keys don't change (TIME-5). Session's call.
@@ -162,46 +196,77 @@ Terms:
   more files than threads, with a data file, a file of a kind not read, a missing file and a file
   that cannot be read among them, and checks that every run gives the same results at the same
   positions as reading the files one after another. So the pre-read takes its thread count as an
-  argument, and `scripts::read` passes PAR-4's.
+  argument, and `scripts::read` passes PAR-4's. The file that cannot be read is a folder whose name
+  ends in `.ts`, which `fs::read` refuses on Windows, Linux and macOS alike. Results are compared as
+  the bytes, or as the error's `io::ErrorKind`, since `io::Error` can't be compared directly.
+- **PTEST-1a** The pre-read starts its threads through a small seam a unit test can replace, so a
+  test makes every start fail, and then only the second, and checks that the results are the same
+  as reading the files one after another (PAR-3).
+- **PTEST-1b** PAR-4's count is worked out by a function of the machine's parallelism (or its
+  failure) and the number of script files, with unit tests: no parallelism gives 1; 16 with 3 files
+  gives 3; 16 with 2,744 gives 16; any parallelism with no files gives no pre-read.
 - **PTEST-2** The existing test that two broken tracked scripts stop the run on the first by path
   (`stops_on_a_tracked_script_that_does_not_parse_the_first_by_path` in `tests/imports.test.rs`)
-  passes unchanged. A new fixture test does the same with a tracked script that is not valid UTF-8
-  listed after one that does not parse, and checks the stop line names the first.
-- **PTEST-3** Every existing test passes unchanged, its written-down output included. The fixtures
-  have fewer files than the threads, so a test of a fixture of at least 64 script files, importing
-  one another in a chain, checks that `graph`'s output lists every file and import, in order, as
-  written in the test.
+  passes unchanged. No new fixture is added for it: whether a file is valid UTF-8 or parses is
+  decided in the loop, after the bytes are in hand, which this item doesn't change; the pre-read can
+  only change which read error a file gets, and PTEST-1 covers that.
+- **PTEST-3** Every existing test passes unchanged, its written-down output included. The existing
+  fixtures have a handful of script files each, so each thread reads one file or none. A new fixture
+  test of 64 script files, importing one another in a chain, has more script files than threads on
+  every machine the tests run on today (CI's runners and the owner's machine have at most 16 logical
+  processors), so at least one thread reads more than one file. It checks that `graph`'s output lists
+  every file and import, in order, as written in the test.
 
 ### The comparison with fallow
 
-- **CMP-1** Once built, the gap is measured as the throwaway check measured it (owner): on the
+- **CMP-1** Once built, the gap is measured with the throwaway check's tools, commands and way of
+  timing (owner), in the rounds CMP-2 and CMP-3 set out: on the
   owner's Windows machine, on yakshaver, the release build of this branch's analyzer run as a bare
-  executable, `audit --hand-off <file>` with the hand-off file the check used, against fallow 3.39.0's
+  executable, `audit --hand-off <file>` with the hand-off file the check used
+  (`spike/yakshaver.hand-off.json` in the report folder), against fallow 3.39.0's
   bare executable, `fallow dead-code --format json`, with yakshaver's own fallow configuration; both
   with their output thrown away and timed by the wall clock from outside the process.
-- **CMP-2** Warm: ten alternating runs of each, fallow with its cache, in two rounds; the medians are
-  compared.
+- **CMP-2** Warm: two rounds, each of ten runs of each tool, the tools taking turns, fallow with its
+  cache. The warm gap is the median of yak-analyzer's twenty runs minus the median of fallow's
+  twenty. `spike.mjs`'s warm mode also runs fallow with `--no-cache` in turn; those runs are
+  reported beside the others and are not part of the gap. The check reported each round's median
+  separately; pooling two rounds into one median is the session's call, so the gap is one number.
+  The warm rounds `spike.mjs` takes after each cold run are reported, not pooled into the gap.
 - **CMP-3** Cold: two restarts, one with each tool going first, each tool's cold time being its time
   when it goes first, since the first to run warms the files for the other. After a restart the
   check is the first thing run, before an editor, a terminal whose prompt runs `git status`, or
-  anything else opens yakshaver, and yakshaver doesn't change between the restarts. fallow's earlier
-  cold time (5.6s) may stand in for a fresh one only if fallow, yakshaver's commit and the machine's
-  Defender settings haven't changed; otherwise both are taken again. Session's call.
-- **CMP-4** When a cold gap lies within 300ms of a band's edge, one more pair of restarts is taken
-  and the gap is the median of the cold times. Session's call: one cold run spread by about 260ms
-  between restarts in the throwaway check, more than the 100ms band.
-- **CMP-5** The spike's scripts in the report folder are reused, and stay there: they run fallow,
-  which this repository doesn't depend on, and their numbers are this item's. Session's call.
+  anything else opens yakshaver, and yakshaver doesn't change between the restarts. Both tools' cold
+  times are taken fresh, and fallow's earlier 5.6s is not reused, since the check didn't record
+  yakshaver's commit. The report records the commit this time. Session's call. The cold gap is
+  yak-analyzer's cold time minus fallow's.
+- **CMP-4** When the cold gap lies within 300ms of a band's edge, one more pair of restarts is taken,
+  and the cold gap becomes the mean of yak-analyzer's two cold times minus the mean of fallow's two.
+  Session's call: a single cold run after a restart can't tell a difference of 100ms from the noise
+  between one restart and the next, which nothing measured so far bounds, so near an edge a second
+  pair keeps one odd restart from deciding the band.
+- **CMP-5** The throwaway check's scripts, in the report folder's `spike/` folder (`spike.mjs` times
+  the two tools; `threads.mjs` was the second check), are reused, and stay there: they run fallow,
+  which this repository doesn't depend on, and their numbers are this item's. `spike.mjs` runs the
+  executable at `spike/yak-analyzer.exe`, which is the 0.10.0 copy the check used: before measuring,
+  that copy is renamed `yak-analyzer-0.10.0.exe` and this branch's release build is copied into its
+  place, and the report names the build it measured. The copied build is run before the first
+  restart (the warm rounds of CMP-2 do this), so Defender's check of a never-run executable doesn't
+  land in its cold time. Session's call.
 - **CMP-6** The numbers and the band each gap falls in go into a report in the report folder, and
   the headline (cold and warm gaps, and their bands) on the work item's record. The report says that
-  fallow reads more files than `audit` does, so the two cold times aren't strictly like for like.
+  the two cold times aren't strictly like for like: in the check, fallow run straight after
+  yak-analyzer's cold run still took 2.8s against a warm 1.4 to 1.8s, so it opens about a second's
+  worth of files `audit` never reads. Which files those are is not known, and finding out is not this
+  item's work.
 
 ### Done
 
-- **DONE-1** The item is done when PAR-1 to PTEST-3 have passed the gates and CMP-1 to CMP-6 are
-  done. The band decides what follows, never more work in this item: a cold or warm gap of 300 to
-  1000ms leaves a queued work item that waits for yakshaver's Rust linting support; a gap of 1000ms
-  or more opens a work item to investigate it now, with priority `now`. Session's call: this item
+- **DONE-1** The item is done when PAR-1 to PTEST-3 (with PTEST-1a and PTEST-1b) have passed the gates and CMP-1 to CMP-6 are
+  done. The band decides what follows, never more work in this item: a cold or warm gap over 300ms
+  and under 1000ms opens a new work item in yakshaver's queue, not started, whose description says it
+  waits for yakshaver's Rust linting support; a gap of 1000ms or more opens a work item to
+  investigate it now, given yakshaver's highest queue priority (`now`). Both are opened with
+  `yak work open`, which queues an item without starting it. Session's call: this item
   builds one change and measures it; investigating a remaining gap is new work with its own spec.
 
 ## Alternatives considered
@@ -213,6 +278,11 @@ Terms:
 - **A bounded pipeline: threads read ahead a fixed window of files, the loop parses each as it
   arrives.** Holds only the window in memory. Rejected for now: more code (a channel and its order)
   for a saving that matters only on far larger projects than yakshaver (Risks). Session's call.
+- **Threads that only open and read each file, to set off Defender's scan, and throw the bytes
+  away, with the loop left exactly as it is.** Holds no bytes, and touches the loop not at all.
+  Rejected: every file is read twice, and the loop races the threads to the same files, so whenever
+  it overtakes them it waits on a cold scan one file at a time again; how often that happens depends
+  on timing nobody controls, so the gain would vary from run to run. Session's call.
 - **A thread-pool crate, such as rayon.** Rejected: the standard library's scoped threads do this
   in a few lines, and every dependency is pinned and watched (CONTRIBUTING.md). Session's call.
 - **A fixed number of threads, such as 16, whatever the machine.** Defender's scans are waits, not
@@ -232,8 +302,8 @@ Terms:
   averaging 5KB would hold about 250MB for the reading's length. Accepted for now; the bounded
   pipeline above is the way out if a measured project needs it.
 - **More work on a run that stops.** Today a broken tracked file stops the reading of later files;
-  now they are all read first. The output is the same; only a stopping run takes longer, by at most
-  a warm read of the rest.
+  now they are all read first. The output is the same; only a stopping run takes longer, by reading
+  the rest: cold, that is up to the whole pre-read, about 2.4s on yakshaver.
 - **Order depends on the threads.** PAR-1 keeps each result at its file's list position, and the
   loop alone decides what happens, so the order of reading never reaches the output. PTEST-1 runs
   several thread counts against the one-at-a-time result.
@@ -243,17 +313,24 @@ Terms:
 - **Fewer cores, smaller gain.** A machine with 4 threads would read cold at about the second
   check's 4-thread speed (2.3ms a file, about 6s on yakshaver), still far better than today. Only
   the owner's machine is measured (design SPEED-3).
-- **Parallel reading isn't enough.** The pre-read covers what the earlier item found to be 97% of a
+- **Parallel reading isn't enough.** The pre-read covers what the earlier item found to be about 93% of a
   cold `graph` run; git's listing and the `package.json` and tsconfig reads remain one at a time.
   DONE-1 sends a remaining gap to its own item.
+- **Storage that is slower read in parallel.** On a spinning disk, a network share or a cloud
+  folder whose files are downloaded on first open, reading 16 files at once could be slower than
+  one at a time, and there is no setting to turn it down (owner approved: no setting). Handled by
+  judgment, not measurement: the operating system orders a spinning disk's queued reads, and a
+  network share or a cloud folder waits on round trips, which parallel reads overlap as they overlap
+  Defender's scans. Nothing measures these here. If a user reports a slower run on such storage, a
+  later item weighs a setting or a smaller count.
 - **Too many threads on a very large machine.** `available_parallelism` may be 64 or more; each
   thread needs only a small default stack and the files to read are shared out, so extra threads
   just finish early.
 
 ## Left to the builder
 
-- How the files are shared out among the threads: a shared counter each thread takes the next file
-  from, or fixed slices, as reads best; and how each result reaches its position.
-- Where the pre-read's code lives: in `src/scripts.rs`, or a small module of its own.
+- How each result reaches its file's place (PAR-1, PAR-3).
+- Where the pre-read's code lives: in `src/scripts.rs`, in `Tree` (`src/tree.rs`, which already
+  knows whether it is the working copy), or a small module of its own.
 - The names of the new function and its test.
 - The report's layout (CMP-6).
