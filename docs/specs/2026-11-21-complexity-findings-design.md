@@ -699,6 +699,8 @@ SCORE-1 was: the owner handed the counting over.
     decide.
   - **Other files.** fallow scores Svelte `<script>` blocks, Astro frontmatter and Angular inline
     templates, which the analyzer does not parse (FN-2); its findings there are set apart, as VS-4
-    sets apart its findings in MDX documents and HTML pages. fallow parses some `.js` and `.ts`
-    files again as JSX; the analyzer parses every script with JSX allowed, so a finding in such a
-    file is judged as any other.
+    sets apart its findings in MDX documents and HTML pages. fallow parses a `.js` or `.ts` file
+    again as JSX where its first parse yields nothing. The analyzer parses `.js` files with JSX
+    allowed, so a finding in one is judged as any other; it parses `.ts` files without JSX, so a
+    `.ts` file holding JSX is a file it skips, and fallow's findings there are set apart with the
+    file named.
