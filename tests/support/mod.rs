@@ -6,10 +6,12 @@ use std::process::{Command, Output};
 
 use serde_json::{Value, json};
 
-/// Runs the built binary with the arguments given.
+/// Runs the built binary with the arguments given, without the timing switch a developer's environment
+/// may set (spec TEST-1a).
 pub fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_yak-analyzer"))
         .args(args)
+        .env_remove("YAK_ANALYZER_TIMINGS")
         .output()
         .expect("the binary starts")
 }

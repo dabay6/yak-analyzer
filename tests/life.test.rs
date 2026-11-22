@@ -128,6 +128,7 @@ fn long_project() -> &'static Path {
 fn run(root: &Path, args: &[&str]) -> Output {
     Command::new(BINARY)
         .args(args)
+        .env_remove("YAK_ANALYZER_TIMINGS")
         .current_dir(root)
         .stdin(Stdio::null())
         .output()
@@ -341,6 +342,7 @@ fn a_binary_started_directly_does_not_wait_on_its_standard_input() {
     // LIFE-1).
     let started = Command::new(BINARY)
         .arg("audit")
+        .env_remove("YAK_ANALYZER_TIMINGS")
         .current_dir(&root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -453,6 +455,7 @@ fn audit_with_base(root: &Path) -> Child {
 
     binary
         .args(["audit", "--base", "main"])
+        .env_remove("YAK_ANALYZER_TIMINGS")
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

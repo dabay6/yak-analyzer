@@ -27,6 +27,7 @@ mod reading;
 mod resolve;
 mod scripts;
 mod stop;
+mod timings;
 mod tools;
 mod tree;
 mod tsconfig;
@@ -38,9 +39,11 @@ use std::ffi::OsString;
 use std::panic;
 use std::process::ExitCode;
 use std::thread;
+use std::time::Instant;
 
 use cli::Command;
 use stop::Stop;
+use timings::Stages;
 
 /// The interface version: what yak and the analyzer must agree on (spec RUN-7).
 const INTERFACE_VERSION: u64 = 1;
@@ -79,6 +82,9 @@ fn main() -> ExitCode {
 
 /// Does what the command line asks.
 fn run() -> ExitCode {
+    // When the timings are asked for, the whole run is timed from here, before the arguments are read
+    // (spec TIME-2a, TIME-2c).
+    let started = timings::asked().then(Instant::now);
     let args: Vec<OsString> = env::args_os().skip(1).collect();
 
     match cli::parse(&args) {
@@ -96,7 +102,18 @@ fn run() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Command::Graph { hand_off }) => {
-            ended(reading::working(hand_off.as_deref()).map(graph::printed))
+            let mut stages = Stages::new(started.is_some());
+            let document = reading::working(hand_off.as_deref(), &mut stages)
+                .map(|reading| stages.time("build", || graph::printed(reading)));
+            let succeeded = document.is_ok();
+            let code = stages.time("print", || ended(document));
+
+            // Only a run that succeeded writes the line (spec TIME-3).
+            if succeeded && let Some(started) = started {
+                timings::write(&timings::line(&stages, started.elapsed()));
+            }
+
+            code
         }
         Ok(Command::Audit { hand_off, base }) => {
             ended(audit::run(hand_off.as_deref(), base.as_deref()))

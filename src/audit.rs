@@ -16,6 +16,7 @@ use crate::inherit::{self, Base};
 use crate::notice::{self, Notice};
 use crate::reading::{self, Reading, Start};
 use crate::stop::Stop;
+use crate::timings::Stages;
 use crate::tree::Tree;
 use crate::{INTERFACE_VERSION, STACK};
 
@@ -48,8 +49,15 @@ pub fn run(hand_off: Option<&Path>, base: Option<&str>) -> Result<String, Stop> 
     } = reading::start(hand_off)?;
     let listing = files::list(&root, &mut notices)?;
     let Some(base) = base else {
-        return reading::read(handed.as_ref(), &Tree::working(root), listing, notices)
-            .map(|reading| printed(reading, None));
+        // `audit` is not timed: its readings take the stages switched off (spec TIME-6a).
+        return reading::read(
+            handed.as_ref(),
+            &Tree::working(root),
+            listing,
+            notices,
+            &mut Stages::new(false),
+        )
+        .map(|reading| printed(reading, None));
     };
     let commit = git::commit(&root, base)?;
 
@@ -74,8 +82,13 @@ pub fn run(hand_off: Option<&Path>, base: Option<&str>) -> Result<String, Stop> 
         let base = thread::Builder::new()
             .stack_size(STACK)
             .spawn_scoped(scope, || {
-                let reading =
-                    reading::read(handed.as_ref(), &base_tree, base_listing, base_notices)?;
+                let reading = reading::read(
+                    handed.as_ref(),
+                    &base_tree,
+                    base_listing,
+                    base_notices,
+                    &mut Stages::new(false),
+                )?;
                 let renamed = git::renamed(base_tree.root(), &commit)?;
 
                 Ok::<_, Stop>(Base {
@@ -92,7 +105,13 @@ pub fn run(hand_off: Option<&Path>, base: Option<&str>) -> Result<String, Stop> 
                     "the base cannot be read on a thread of its own ({error})"
                 ))
             })?;
-        let working = reading::read(handed.as_ref(), &working_tree, listing, notices);
+        let working = reading::read(
+            handed.as_ref(),
+            &working_tree,
+            listing,
+            notices,
+            &mut Stages::new(false),
+        );
         let base = base
             .join()
             .unwrap_or_else(|fault| std::panic::resume_unwind(fault));
