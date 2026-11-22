@@ -589,7 +589,9 @@ SCORE-1 was: the owner handed the counting over.
     A chain adds 1 at most, however many `?.` it holds: `a?.b`, `a?.b?.c` and `a.b?.()` add 1, and
     `a?.b.c` and `a?.b()` add nothing, since their last links, `.c` and `()`, are not optional.
     fallow's own comment says every `?.` counts; its code checks only the last link, and its code
-    wins (SCORE-3).
+    wins (SCORE-3). These counts are traced from fallow's code and from how oxc 0.158 shapes a chain
+    (fallow builds on oxc 0.155), not pinned by fallow's tests, which assert only that a chain adds
+    something; plan 3's first step checks them against fallow's output.
 
   `switch`, `default`, `else`, `try`, `finally`, labelled jumps, default parameters, recursion and
   JSX add nothing.
@@ -645,11 +647,13 @@ SCORE-1 was: the owner handed the counting over.
     changes a function's name path or its fingerprint (FN-4, FN-5, CPX-4).
   - **Wide properties** (`fold_component_prop_count`, `count_props`). A function **renders JSX**
     when its own body, outside any function nested in it, holds a JSX element or fragment. Where
-    one does, and its first parameter is an object pattern with no default value, as `({ a, b, c,
-    d, e })`, that takes more than 4 properties apart, it adds 1 to cognitive complexity for each
+    one does, and its first parameter is an object pattern, as `({ a, b, c, d, e })`, with or
+    without a default value, that takes more than 4 properties apart, it adds 1 to cognitive complexity for each
     property past 4, once. Only the pattern's own properties count, each once, whether or not it
     has a default value or a pattern of its own (`{ a = 1, b: { c, d } }` takes 2 apart); a rest
-    element (`...rest`) is not counted.
+    element (`...rest`) is not counted. That a defaulted pattern counts is read from fallow
+    reading the parameter's pattern alone, not pinned by a test of fallow's; plan 3's first step
+    checks it against fallow's output.
 - **SCORE-11** A function is over a limit when its score is greater than the limit, on either
   measure (`complexity_exceeded`), as the spec's terms already say. fallow's
   `health.cyclomaticPolicy: "literal-membership"`, which counts some `||` chains as one for its
@@ -657,20 +661,44 @@ SCORE-1 was: the owner handed the counting over.
   project's fallow configuration sets. This amends VS-1: fallow runs with each repository's
   best-case configuration (the comparison spec's CMP-5) with `health.cyclomaticPolicy` left out, so
   it counts as SCORE-7 does, its default. The judged list says which named repositories, if any, set
-  `literal-membership`, since their gate's cyclomatic findings change at the swap.
+  `literal-membership`, since their gate's cyclomatic findings change at the swap; where one does,
+  a line in the swap's release notes is owed through the same yakshaver item as VS-4's line on CRAP
+  findings.
 - **SCORE-12** The analyzer reads SCORE-10's React name in these cases, each a fixture (CASE-1):
   - `const Panel = wrap(() => 1, () => { … })` and `const Panel = wrap({ size: 1 }, () => { … })`:
     the last arrow has no React name, so a hook call in it adds nothing;
   - `const Panel = flag ? () => { … } : Fallback`, `const Panel = fallback || (() => { … })` and
-    `const Panel = [() => { … }]`: the arrow is `Panel`, so a hook call in it adds 1.
+    `const Panel = [() => { … }]`: the arrow is `Panel`, so a hook call in it adds 1;
+  - `{ get Panel() { … } }`: the accessor's React name is its key, `Panel`, so a hook call in it
+    adds 1.
 
   Plan 1's code gets each of these wrong: it reads a function's name from what directly holds it,
   past parentheses and type assertions, and climbs from a function passed as any argument of a call
   to what holds the call, so it names the first cases' last arrow `Panel` and stops at the `?:`, the
-  `||` or the array in the others. Plan 3 fixes it before the comparison is judged, with these
-  fixtures failing first (design PROOF-5).
+  `||` or the array in the others, and it reads an accessor's name as `get Panel`. Plan 3 fixes it
+  before the comparison is judged, with these fixtures failing first (design PROOF-5). Plan 3 also
+  adds a fixture for each rule of SCORE-6 to SCORE-10 that plan 1's tests leave out, as CASE-1
+  asks: among them a class field's value, `React.useState(…)`, a capitalised name taken from a
+  call's string argument, a destructuring declaration, a defaulted, a nested and a rest property of
+  a wide pattern, and JSX only in a nested function. Each that fails is a fix, as the cases above
+  are.
 - **SCORE-13** SCORE-1 no longer says how anything is counted: its text stays above only because
   approved text is not rewritten, as the record of the rules SCORE-2's reading began from, which
   SCORE-2's "departs from SCORE-1" refers to. Where the spec above names SCORE-1 as the counting
   rules, in its terms (the entry for cyclomatic and cognitive complexity) and in CASE-1, it means
   SCORE-6 to SCORE-10, and CASE-1's fixture for each counting rule covers SCORE-11's comparison too.
+- **SCORE-14** What fallow does that the analyzer does not, and how the comparison treats it:
+  - **Per-path limits.** fallow's `health.thresholdOverrides` sets other limits for some paths or
+    functions; the analyzer has one value for each limit (LIMIT-1). VS-1's best case leaves them
+    out, so both tools use 20 and 15 everywhere, and the judged list says which named repositories
+    set any.
+  - **Suppression comments.** fallow skips a function with a complexity suppression comment on its
+    start line (`engine/src/health/findings.rs`); the analyzer reads no such comment. Each finding
+    the analyzer reports where fallow's comment skipped it is set apart, as VS-4 sets apart, and
+    counted; it is not a false finding. Whether the analyzer should read them is the owner's to
+    decide.
+  - **Other files.** fallow scores Svelte `<script>` blocks, Astro frontmatter and Angular inline
+    templates, which the analyzer does not parse (FN-2); its findings there are set apart, as VS-4
+    sets apart its findings in MDX documents and HTML pages. fallow parses some `.js` and `.ts`
+    files again as JSX; the analyzer parses every script with JSX allowed, so a finding in such a
+    file is judged as any other.
