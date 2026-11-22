@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.0](https://github.com/dabay6/yak-analyzer/compare/v0.10.0...v0.11.0) (2026-11-22)
+
+
+### Features
+
+* go decision, bounded YAML reading and interface version 1's keys ([05cb7cc](https://github.com/dabay6/yak-analyzer/commit/05cb7ccc594a99f98df417d3c8db6db3d0fb2852))
+* **scripts:** measure cold, warm and first-start runs by stage ([c66268e](https://github.com/dabay6/yak-analyzer/commit/c66268e4c8d2216527d10026c5875d07c512ad50))
+* **timings:** measure cold against warm runs by stage ([f72eb0a](https://github.com/dabay6/yak-analyzer/commit/f72eb0adac4d9697acb122318cb9cf254a61f403))
+* **timings:** report the time of each stage when asked ([74634b7](https://github.com/dabay6/yak-analyzer/commit/74634b7940b6c78242ff46e486b5aea794fc64af))
+
 ## [0.10.0](https://github.com/dabay6/yak-analyzer/compare/v0.9.0...v0.10.0) (2026-11-17)
 
 
