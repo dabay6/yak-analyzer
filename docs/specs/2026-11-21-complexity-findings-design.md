@@ -13,7 +13,9 @@ answers no issue.
 - `docs/specs/2026-11-15-dead-code-comparison-design.md` (**the comparison spec** below), its
   FREEZE-1: "a change to one of them raises the interface version (design IF-6)" means a change that
   breaks one of them, as IF-6 says. A change that only adds, such as a new rule name, does not raise
-  it (VER-1 below).
+  it (VER-1 below). The fingerprint scheme FREEZE-1 fixed keeps every part it has. What this item
+  adds to it for the new rule, FN-4's and FN-5's rules for a function's name path, stays a draft
+  until the swap (CPX-4, VER-1).
 - `docs/specs/2026-11-11-reading-a-project-design.md` (**the reading spec** below), its KEY-3: the
   limit keys are now used, and which value wins is built (LIMIT-1 below).
 
@@ -80,7 +82,10 @@ Terms:
   SCORE-1 and SCORE-2 say how each is counted here.
 - **A limit** is a positive whole number a declaration states: `cyclomaticLimit` or
   `cognitiveLimit` (the reading spec's KEY-1). A function is **over** a limit when its score is
-  greater than the limit; a score equal to the limit is not over it.
+  greater than the limit; a score equal to the limit is not over it. That is fallow's comparison too:
+  in the run VS-4 describes, no function scoring exactly 15 cognitive or exactly 20 cyclomatic was
+  flagged for that measure. The pack's fallow configuration states the limits as
+  `health.maxCyclomatic` and `health.maxCognitive`.
 - **The named repositories** are the four repositories, six roots, the comparison spec's CMP-2
   names. Two are private, so this spec doesn't name them (CONTRIBUTING.md).
 - **The judged list** and **the report folder** are as in the comparison spec: the list of judged
@@ -149,7 +154,16 @@ Terms:
   declared (`const read = () => …`); the key of the object property or class member it is (a computed
   key has no name), with `get ` or `set ` before an accessor's (`get value`, `set value`); the whole
   left side it is assigned to, as written (`a.b.read = function () {…}` gives `a.b.read`). Otherwise
-  it is unnamed. Session's call.
+  it is unnamed.
+
+  A function passed as an argument to a call, with no name by those rules, takes its name from the
+  call: the callee as written, with `()`, and inside the parentheses the call's first argument when
+  that is a string literal. So `computed(() => …)` is `computed()`, `items.map(item => …)` is
+  `items.map()`, and `it("reads a file", () => …)` is `it("reads a file")`. A test's callback, a Vue
+  `computed` or `watch`, and an array method's callback are the common unnamed functions, and this
+  keeps an added one from shifting the others' places. Only calls of the same callee with no string
+  first argument still share a count. Session's call: design IF-4 says a function's own name or its
+  place, and the call it is passed to is the nearest thing to a name such a function has.
 - **FN-5** A function's name path is the names of what encloses it, from the outside in, then its
   own. What encloses it is each class and function around it, and each object literal around it. A
   class expression or an object literal takes its name by FN-4's rules for a function (the variable,
@@ -182,7 +196,11 @@ Terms:
 - **SCORE-1** These are the starting rules. SCORE-2 may replace any of them, and SCORE-4 brings the
   final list back here. Session's call: the owner handed the counting over.
   - **Both measures** count only the function's own body. A function nested inside it is scored on
-    its own and adds nothing to the outer function's score, nor to its nesting.
+    its own and adds nothing to the outer function's score, nor to its nesting. This departs from
+    SonarSource 1.7, which counts a nested function's structures in the enclosing function's score
+    with the nesting the function adds. Session's call: fallow reports a nested arrow as a function of
+    its own (178 findings, 27 of them `<arrow>`), and SCORE-2 settles whether it also counts it in the
+    outer one.
   - **Cyclomatic** is 1, plus 1 for each `if`, `for`, `for…in`, `for…of`, `while`, `do`, non-default
     `case`, `catch`, ternary `?:`, and each `&&`, `||` and `??`, their assignment forms (`&&=`, `||=`,
     `??=`) included. Optional chaining (`?.`) and default parameters add nothing.
@@ -197,7 +215,8 @@ Terms:
 - **SCORE-2** Where fallow's counting departs from SCORE-1, fallow's counting wins, rule by rule, so
   the gate's findings stay the same across the swap. Optional chaining, `??`, default parameters,
   `case` fall-through, labelled jumps, nested functions and JSX are the likely places. The plan's
-  first step reads fallow's counting from its documentation and source, at the version VS-1 uses.
+  first step reads fallow's counting from its documentation and source, at the version VS-1 uses,
+  and how it compares a score with its limit.
   It writes each rule the analyzer will count, with where it comes from: SonarSource's
   text, or fallow's file and function. fallow's code is read, not copied (CONTRIBUTING.md), and its
   license is checked before its source is read. If the license doesn't allow reading, the plan uses
@@ -243,9 +262,10 @@ Terms:
   the scores and the limit reach yak). Session's call for the names.
 - **CPX-4** Its fingerprint is made, as design IF-4 says, from the rule, the file's path and the
   function's name path (FN-5), under the existing scheme `yakAnalyzer/v1`. Each part of the name path
-  gives two parts of the digest, its name (empty for an unnamed part) and its number written
-  in decimal digits, each length-prefixed as `src/findings.rs` does today. So a name holding ` > ` or ` #2` can't collide
-  with another path. FN-4's and FN-5's rules are part of the scheme, and are drafts until the swap
+  gives three parts of the digest: `n` for a named part or `u` for an unnamed one, its name (empty
+  for an unnamed part), and its number written in decimal digits, each length-prefixed as
+  `src/findings.rs` does today. So a name holding ` > ` or ` #2`, or an empty string key, can't
+  collide with another path. FN-4's and FN-5's rules are part of the scheme, and are drafts until the swap
   (VER-1). The run's list of rules gains `complexity`, after the five.
 - **CPX-5** No function in a file declared data or generated, or in a `.d.ts` file, is reported
   (design FIND-10). The same holds at the base.
@@ -298,7 +318,8 @@ Terms:
   accepts names it.
 - **SOLO-5** It is a thin command over a function that `audit` and stage 5's MCP tool also use. The
   MCP tool's addition to design MCP-1, a seventh tool, is owed to the design spec as an amendment
-  (owner). It is made through the yakshaver work item `2026-11-18-analyzer-design-spec-stage-2-amendments`,
+  (owner). The same amendment changes STAGE-5's "six tools" to seven, and SWAP-2's line for "too
+  complex" to name the new tool. It is made through the yakshaver work item `2026-11-18-analyzer-design-spec-stage-2-amendments`,
   or its successor if that item has closed, and not in this repository. The command's name, options and document are drafts until
   stage 5 releases the MCP tool, as the declaration keys were drafts until stage 2 ended (the
   comparison spec's FREEZE-1). That stage fixes them with the tool, and may change them first. yak
@@ -327,7 +348,8 @@ Terms:
   - each counting rule of SCORE-1, as SCORE-4's amendment leaves the list;
   - each naming case of FN-4 and FN-5, among them a getter and setter pair, methods of two sibling
     object literals, two assignments ending in the same member, one name declared in two sibling
-    blocks, a class expression assigned to a variable, and a function with overload signatures;
+    blocks, a class expression assigned to a variable, a function with overload signatures, callbacks
+    named from their call (with and without a string first argument), and an empty string key;
   - FN-6's accepted cases: a rename, an unnamed function added before another, a function of a
     repeated name added before another, and an unnamed object literal gaining its first function;
   - FN-5's passed-over object literal with no function in it, and a string key spelled like a
@@ -349,8 +371,10 @@ Terms:
   this comparison starts. fallow's version is the one the pack pins that day in `tools/fallow.md`
   (`install.version`; 3.39.0 when this spec was written, the version stage 2 used), installed as the
   comparison spec's CMP-6 installs it. SCORE-2 reads that same version. The whole-tree runs use
-  `fallow health --format json`, since `fallow audit` reports only the files a branch changed. The
-  branch audits use `fallow audit --base <ref> --format json`, as the gate does (VS-5). fallow runs with its best-case configuration
+  `fallow health --format json`, since `fallow audit` reports only the files a branch changed. On the analyzer's side, the whole-tree runs use `yak-analyzer audit --hand-off <file>` for its
+  findings, and `yak-analyzer complexity --hand-off <file> --all` to read its scores of a function
+  only fallow reports. The branch audits use `fallow audit --base <ref> --format json`, as the gate
+  does, and the analyzer's `audit --base` (VS-5). fallow runs with its best-case configuration
   for each repository (the comparison spec's CMP-5), except that both tools use limits of 20
   cyclomatic and 15 cognitive whatever that configuration says: the hand-off files declare them, and
   fallow's `health.maxCyclomatic` and `health.maxCognitive` are set to them (design FIND-8).
@@ -368,10 +392,13 @@ Terms:
   JDG-5 lists what it sets apart: fallow's findings on a Vue `<template>`, its `<component>` rollups,
   its findings in MDX documents and HTML pages (FN-2), and its findings over its CRAP threshold alone.
   On yakshaver's `main` on 2026-11-21, `fallow health --format json` (fallow 3.15.0, yakshaver's own
-  configuration) gave 178 health findings, and 105 of them were over the CRAP threshold alone.
-  The plan's first step checks whether `fallow audit`'s JSON, which the pack maps today, includes
-  those. If it does, the gate shows them today, and the judged list says how many leave the gate at
-  the swap. Session's call, on design FIND-8's wording.
+  configuration) gave 178 health findings, and 105 of them were over the CRAP threshold alone. That
+  count is from fallow 3.15.0, the machine's install. The plan's first step counts again with the
+  pinned version, and checks whether `fallow audit`'s JSON, which the pack maps today, includes such
+  findings. If it does, the gate shows them today, and the judged list says how many leave the gate
+  at the swap. A line in the swap's release notes (design SWAP-3) is then owed through the same
+  yakshaver item as SOLO-5's amendment. Session's call, on design FIND-8's wording; the owner rules
+  on it before this spec is approved.
 - **VS-5** Branch audits run as the comparison spec's BRA-1 to BRA-3 run them, two merged pull
   requests per repository at the least. They include, where the merges hold one, a branch that makes
   an over-limit function worse, one that takes a function from under to over, and one that adds an
@@ -403,6 +430,9 @@ Terms:
 - **SonarSource's definition as the only arbiter.** Every place fallow differs would move findings at
   the swap. The comparison couldn't call a fallow-only finding a miss without first ruling on the
   definition. Rejected for SCORE-2 (session's call).
+- **Callbacks named only by their place, as design IF-4 reads at its narrowest.** Every added test
+  case or `computed` would shift the places of those after it, marking them new or wrongly inherited
+  on ordinary branches. Rejected for FN-4's call-site names (session's call).
 - **A separate parse for complexity.** It is simpler to keep apart, but it pays the parse twice on
   both trees at every audit, after each edit included. Rejected for FN-3 (session's call).
 - **A base option on the command.** The gate's view is `audit`'s, and the owner's use of the command
@@ -422,7 +452,8 @@ Terms:
   (design PROOF-6). The swap's pack release carries the default limits (design FIND-8, DECL-1a, stage
   3's work in yakshaver). The command's `limits` field and its notice show the state to a person or
   an agent.
-- **Unnamed functions are misread when a sibling is added before them.** A wrongly inherited finding
+- **Unnamed functions are misread when a sibling is added before them.** FN-4 names callbacks from
+  their call, which leaves the shift only among calls of the same callee with no string argument. A wrongly inherited finding
   passes in silence. FN-6 writes the case down, CASE-1 fixes its behaviour, and VS-5 looks for it on
   real branches. If it shows up there, the judged list says so, and changing design IF-4 is the
   owner's call.
