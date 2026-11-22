@@ -118,9 +118,11 @@ Terms:
 - A command of its own for dead code. It comes at the end of the analyzer's stages (owner).
 - Anything in yakshaver or the pack: the pack's default limits, the engine reading the result's
   scores, and tracking or queuing refactoring work (owner).
-- Complexity of a Vue `<template>`, fallow's whole-component rollups, and fallow's CRAP score, which
-  mixes complexity with estimated test coverage. Design FIND-8 names a function's cyclomatic and
-  cognitive complexity only (VS-4).
+- Complexity of a Vue `<template>` and fallow's whole-component rollups. Design FIND-8 names a
+  function's cyclomatic and cognitive complexity only (VS-4).
+- fallow's CRAP score, which mixes complexity with estimated test coverage. It is left out of this
+  item, not ruled out: a later item may add it as a rule of its own, with a design-spec amendment
+  (owner).
 
 **Anti-goals,** failures even if it technically works:
 
@@ -405,7 +407,11 @@ Terms:
   for each repository (the comparison spec's CMP-5), except that both tools use limits of 20
   cyclomatic and 15 cognitive whatever that configuration says: the hand-off files declare them, and
   fallow's `health.maxCyclomatic` and `health.maxCognitive` are set to them (design FIND-8).
-  Session's call for the version: the gate's findings are the ones to keep.
+  fallow's CRAP findings are switched off: fallow has no switch for them, so both `fallow health`
+  and `fallow audit` run with `--max-crap 1000000`, a threshold no function reaches, and the
+  comparison compares cyclomatic and cognitive alone (owner, after the owner asked whether fallow
+  could leave CRAP out; the flag was checked on fallow 3.15.0, and the plan's first step checks it on
+  the pinned version). Session's call for the version: the gate's findings are the ones to keep.
 - **VS-2** Two findings are the same when they are in the same file and name the same function. A
   function is matched by its start line, and by its column where two start on one line, since fallow names an unnamed function `<arrow>` and the
   analyzer by its place. A function both tools report with different scores is shared, and the
@@ -417,15 +423,16 @@ Terms:
   finding or miss becomes a failing fixture before it is fixed (design PROOF-5).
 - **VS-4** Set apart and not counted as misses, each listed with its count, as the comparison spec's
   JDG-5 lists what it sets apart: fallow's findings on a Vue `<template>`, its `<component>` rollups,
-  its findings in MDX documents and HTML pages (FN-2), and its findings over its CRAP threshold alone.
-  On yakshaver's `main` on 2026-11-21, `fallow health --format json` (fallow 3.15.0, yakshaver's own
-  configuration) gave 178 health findings, and 105 of them were over the CRAP threshold alone. That
-  count is from fallow 3.15.0, the machine's install. The plan's first step counts again with the
-  pinned version, and checks whether `fallow audit`'s JSON, which the pack maps today, includes such
-  findings. If it does, the gate shows them today, and the judged list says how many leave the gate
-  at the swap. A line in the swap's release notes (design SWAP-3) is then owed through the same
-  yakshaver item as SOLO-5's amendment. Session's call, on design FIND-8's wording; the owner rules
-  on it before this spec is approved.
+  and its findings in MDX documents and HTML pages (FN-2). Session's call, on design FIND-8's
+  wording. CRAP findings don't appear in the counted runs (VS-1 switches them off), but what leaves
+  the gate is still counted: on yakshaver's `main` on 2026-11-21, `fallow health --format json`
+  (fallow 3.15.0, the machine's install, yakshaver's own configuration, CRAP at its default) gave 178
+  health findings, and 105 of them were over the CRAP threshold alone. The plan's first step counts
+  again with the pinned version at the default threshold, and checks whether `fallow audit`'s JSON,
+  which the pack maps today, includes such findings. If it does, the gate shows them today, and the
+  judged list says how many leave the gate at the swap. A line in the swap's release notes (design
+  SWAP-3) is then owed through the same yakshaver item as SOLO-5's amendment, saying the analyzer
+  doesn't report CRAP findings (owner: left out of this item, maybe added later).
 - **VS-5** Branch audits run as the comparison spec's BRA-1 to BRA-3 run them, two merged pull
   requests per repository at the least. They include, where the merges hold one, a branch that makes
   an over-limit function worse, one that takes a function from under to over, and one that adds an
@@ -442,9 +449,8 @@ Terms:
   spec's BAR-4); the pinned commits, fallow's version and both tools' settings; per root, the counts
   shared, analyzer-only and fallow-only, and each judgment; VS-4's section apart; the branch audits;
   VS-6's times; and each fix with its fixture. The owner reads it before the item closes (design
-  PROOF-3, PROOF-4). The item also closes only once the owner's ruling of VS-4 is on the record, and
-  SOLO-5's amendment, with VS-4's release-notes line where it is owed, is in the yakshaver item or
-  written in the judged list as still owed there.
+  PROOF-3, PROOF-4). The item also closes only once SOLO-5's amendment, with VS-4's release-notes
+  line where it is owed, is in the yakshaver item or written in the judged list as still owed there.
 
 ## Alternatives considered
 
@@ -470,6 +476,9 @@ Terms:
 - **Raising the interface version to 2.** It costs little before the swap, but design IF-6 says an
   addition doesn't raise it. Raising it would teach the pack to update for changes that break
   nothing. Rejected (session's call).
+- **Reporting fallow's CRAP findings too.** The gate would lose nothing at the swap, but the
+  analyzer would have to estimate test coverage, a different analysis from complexity, and design
+  FIND-8 would need amending. Rejected for this item, open to a later one (owner).
 - **Keeping COMMIT-4's all-new rule for complexity.** It is consistent with the dead-code kinds, but
   one broken base file would make every over-limit function new. Rejected for NEW-4 (session's
   call).
@@ -497,8 +506,11 @@ Terms:
   Whichever item lands second rebases onto the other. Neither changes the other's requirements.
 - **Work owed outside this repository is forgotten.** SOLO-5's amendment and VS-4's release-notes
   line are yakshaver's. VS-7 makes the item's close wait for them to be filed or written down as owed.
-- **CRAP findings leave the gate at the swap.** If VS-4 finds the gate shows them today, the owner
-  learns how many before the swap, from the judged list.
+- **CRAP findings leave the gate at the swap.** The owner chose this (Non-goals). If VS-4 finds the
+  gate shows them today, the owner learns how many from the judged list before the swap, and the
+  release notes say so. A later item can add them back.
+- **The pinned fallow lacks `--max-crap`.** The comparison then can't switch CRAP findings off, and
+  sets them apart by the fields fallow's JSON gives them, as VS-4 sets apart the other kinds.
 
 ## Left to the builder
 
