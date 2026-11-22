@@ -135,18 +135,24 @@ Terms:
 - **FN-4** A function's own name is the first of these that applies: the name of a function
   declaration or a named function expression; the variable a function is assigned to where it is
   declared (`const read = () => …`); the key of the object property or class member it is (a computed
-  key has no name); the last member of the left side it is assigned to (`a.b.read = function () {…}`
-  gives `read`). Otherwise it is unnamed. Session's call.
-- **FN-5** A function's name path is the names of the classes and functions that enclose it, from the
-  outside in, then its own. An unnamed function, or an unnamed class, takes its place among the
-  unnamed functions directly inside the same enclosing class, function or file, in source order: the
-  first is `<anonymous 1>`. This is design IF-4's fingerprint for a function: its path, the names that
-  enclose it, and its own name or place, with no line number. The readable form joins the parts with
-  ` > `, as in `Parser > read > <anonymous 2>`. Session's call for the readable form.
+  key has no name), with `get ` or `set ` before an accessor's (`get value`, `set value`); the whole
+  left side it is assigned to, as written (`a.b.read = function () {…}` gives `a.b.read`). Otherwise
+  it is unnamed. Session's call.
+- **FN-5** A function's name path is the names of what encloses it, from the outside in, then its
+  own. What encloses it is each class and function around it, and each object literal around it that
+  has a name by FN-4's rules for a function (the variable, property or left side it is assigned to).
+  Within one enclosing class, function, object literal or file, each name used more than once takes
+  its place among the uses of that name, in source order, after the first: `read`, then `read #2`.
+  An unnamed function, or an unnamed class, takes its place among the unnamed ones directly inside
+  the same enclosure: the first is `<anonymous 1>`. So no two functions of one file have the same name
+  path. This is design IF-4's fingerprint for a function: its path, the names that enclose it, and its
+  own name or place, with no line number. The readable form joins the parts with ` > `, as in
+  `Parser > read > <anonymous 2>`. Session's call, with the readable form.
 - **FN-6** Two consequences of FN-5 are accepted and written here, so nobody takes them for faults.
   A renamed function, or one moved under another enclosing name, is a different function. An unnamed
   function added before an existing one changes the existing one's place, so the two can swap
-  fingerprints. Each has a fixture (CASE-1) and is looked for among the branch audits (VS-5). A file
+  fingerprints, and the same holds for a function of a repeated name. Each has a fixture (CASE-1) and
+  is looked for among the branch audits (VS-5). A file
   git finds renamed keeps its functions (the dead-code spec's INH-2). Session's call: a fingerprint
   that guessed past these would be design IF-4 changed, and nothing yet shows the cost is worth it.
 
@@ -170,6 +176,9 @@ Terms:
 - **SCORE-3** A rule the comparison shows fallow applies inconsistently, against its own
   documentation or its own other cases, is written down in the judged list. The analyzer keeps the
   documented rule. Session's call.
+- **SCORE-4** The rule list SCORE-2's reading yields comes back to this spec as an amendment, with
+  each rule's source, and is approved before the comparison starts. So the rules that decide new
+  against inherited are reviewed as requirements, not left as plan notes. Session's call.
 
 ### The limits
 
@@ -218,15 +227,18 @@ Terms:
 - **NEW-3** A new finding's message adds what the base had: "At the base it was 18." or "At the
   base it was 12, under the limit." Where the base doesn't have the function, the message adds
   nothing. Session's call.
-- **NEW-4** A file skipped at the base, because it didn't parse there, has no functions at the
-  base, so its findings are new. Unlike the dead-code kinds, it doesn't make every other complexity
-  finding new: one function's scores don't depend on any other file. This amends the dead-code
-  spec's COMMIT-4 for this rule only, and the notice COMMIT-4 gives says that complexity findings
-  outside the skipped files were still compared. Session's call: under COMMIT-4 as it stands, one
-  broken file at the base would make every over-limit function in the repository new, which is the
-  anti-goal.
-- **NEW-5** Several functions with one fingerprint can't occur on one side: FN-5 gives each a place
-  of its own. The comparison may rely on that.
+- **NEW-4** Any file skipped at the base leaves the other complexity findings compared as NEW-1
+  says, unlike the dead-code kinds. A skipped script has no functions at the base, so its findings
+  are new. A skipped `package.json` or tsconfig (each a `file-skipped` notice, like a script) affects
+  no function's scores. One function's scores don't depend on any other file. This amends the
+  dead-code spec's COMMIT-4 for this rule only, and the notice COMMIT-4 gives says that complexity
+  findings outside the skipped scripts were still compared. Session's call: under COMMIT-4 as it
+  stands, one broken file at the base would make every over-limit function in the repository new,
+  which is the anti-goal.
+- **NEW-5** FN-5 gives each function of a file a name path of its own, so no two functions on one
+  side share a fingerprint. Should a case FN-5 missed give two, the comparison pairs them in source
+  order, as `src/inherit.rs` pairs findings of one fingerprint today, and the case gets a fixture and
+  a fix of FN-5. Session's call.
 
 ### The command
 
@@ -250,15 +262,20 @@ Terms:
 - **SOLO-5** It is a thin command over a function that `audit` and stage 5's MCP tool also use. The
   MCP tool's addition to design MCP-1, a seventh tool, is owed to the design spec as an amendment
   (owner). It is made through the yakshaver work item that amends the design spec for stage 2, or its
-  successor, and not in this repository.
+  successor, and not in this repository. The command's name, options and document are drafts until
+  stage 5 releases the MCP tool, as the declaration keys were drafts until stage 2 ended (the
+  comparison spec's FREEZE-1). That stage fixes them with the tool, and may change them first. yak
+  never runs the command (owner), so a change before then breaks nothing yak runs. Session's call.
 
 ### The interface version
 
 - **VER-1** The interface version stays 1. A new rule name, a new property on a result and a new
   command only add, and design IF-6 raises the version only for a change that breaks. The comparison
   spec's FREEZE-1 says the same through its "(design IF-6)". `CONTRIBUTING.md`'s paragraph, which says
-  "a change to any of them", becomes "a change that breaks any of them". It names the seventh rule and
-  the new command. The module comment of `src/declarations.rs` and the test that holds the paragraph
+  "a change to any of them", becomes "a change that breaks any of them". It names the seventh rule,
+  and adds to what the version covers the names and meanings of CPX-3's property bag, since the
+  engine will read it. It says the `complexity` command is a draft until stage 5 (SOLO-5). Renaming a
+  field of the bag, or changing what one means, then raises the version. The module comment of `src/declarations.rs` and the test that holds the paragraph
   (`scripts/contributing.test.mjs`) change to match. Session's call: the design spec decides it, and
   until the swap nothing yak runs depends on the analyzer (design PROOF-6).
 - **VER-2** `CONTRIBUTING.md`'s "The commands" also gains the `complexity` command, and its
@@ -269,10 +286,14 @@ Terms:
 - **CASE-1** Each rule above has a made-up project in `tests/`, with its expected output written in
   the test (CONTRIBUTING.md, "Fixtures"). These are at least:
   - each counting rule SCORE-1 and the plan's list from SCORE-2 name;
-  - each naming case of FN-4 and FN-5;
-  - FN-6's two accepted cases: a rename, and an unnamed function added before another;
+  - each naming case of FN-4 and FN-5, among them a getter and setter pair, methods of two sibling
+    object literals, two assignments ending in the same member, and one name declared in two sibling
+    blocks;
+  - FN-6's accepted cases: a rename, an unnamed function added before another, and a function of a
+    repeated name added before another;
   - each base case: a function absent at the base, one under at the base, one worse, one the same,
-    one better, one in a renamed file, and one in a file skipped at the base;
+    one better, one in a renamed file, one in a script skipped at the base, and a `package.json` and
+    a tsconfig skipped at the base;
   - LIMIT-1's precedence, LIMIT-2's one limit and no limit, and a score equal to its limit;
   - CPX-5's data, generated and `.d.ts` files, and FN-2's Vue blocks and MDX document;
   - the command, with and without `--all` and with and without limits.
