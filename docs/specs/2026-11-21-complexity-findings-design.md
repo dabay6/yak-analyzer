@@ -522,3 +522,102 @@ Terms:
   differ.
 - How the plan's first step reads fallow's counting (SCORE-2). The rules it yields come back to this
   spec as SCORE-4's amendment, not left in the plan.
+
+## Amendments
+
+### 2026-11-22: The counting rules read from fallow 3.39.0
+
+SCORE-4 brings back here the rules that SCORE-2's reading yields, so they are reviewed as
+requirements before the comparison starts. Plan 1's first step read fallow's source at the tag
+`v3.39.0` (commit `a6956af`, MIT licence), read and not copied. Every count fallow makes is in one
+visitor, `ComplexityVisitor` in `crates/extract/src/complexity.rs`, and its limits are compared in
+`complexity_exceeded` in `crates/engine/src/health/findings.rs`. Each rule below names the function
+of that visitor it comes from, and says where fallow departs from SonarSource 1.7, the text SCORE-1
+started from. Plan 1 built these rules; nothing here changes the code. Session's call throughout,
+as SCORE-1 was: the owner handed the counting over.
+
+- **SCORE-5** SCORE-6 to SCORE-11 are the counting rules, and replace SCORE-1's starting rules
+  where they differ. Replaces `SCORE-1`. Three of SCORE-1's rules change: optional chaining adds to
+  cyclomatic complexity (SCORE-7), a recursive call adds nothing (SCORE-8), and a run of boolean
+  operators is counted as fallow counts it, not as SonarSource does (SCORE-9). React rules are added
+  (SCORE-10). SCORE-2, SCORE-3 and SCORE-4 stand: a rule changed by a fix during the comparison is a
+  further amendment.
+- **SCORE-6** What is scored, on both measures. A function with a body (a declaration, an
+  expression, an arrow, a method, an accessor or a constructor) is scored on its own, from nesting
+  0, and adds nothing to the function around it, on either measure (`visit_function`,
+  `visit_arrow_function_expression`). A function with no body (an overload, a `declare`d or an
+  abstract one) is not scored. A default value of a parameter is walked as part of its function, so
+  a `??` in it counts there; the default itself adds nothing. Code outside every function counts
+  toward no function: fallow scores it as `<module>`, which it never reports (`visit_program`). Code
+  in a class's static block, or in a class field's value that is not a function, counts toward the
+  function around the class, if there is one.
+- **SCORE-7** Cyclomatic complexity is 1 (`push_function`), plus 1 for each:
+  - `if`, and each `else if` (`visit_if_chain`);
+  - `for`, `for…in`, `for…of`, `while` and `do…while` (`visit_for_statement` and its siblings);
+  - `case` with a test, an empty fall-through `case` included (`visit_switch_case`);
+  - `catch` (`visit_catch_clause`);
+  - `?:` (`visit_conditional_expression`);
+  - `&&`, `||` and `??`, one for each operator (`visit_logical_expression`), and `&&=`, `||=` and
+    `??=` (`visit_assignment_expression`);
+  - optional chain whose outermost link is optional (`visit_chain_expression`): `a?.b`, `a?.b?.c`
+    and `a?.()` add 1 each, and `a?.b.c` and `a?.b()` add nothing. fallow's own comment says every
+    `?.` counts; its code checks only the chain's last link, and its code wins (SCORE-3).
+
+  `switch`, `default`, `else`, `try`, `finally`, labelled jumps, default parameters, recursion and
+  JSX add nothing.
+- **SCORE-8** Cognitive complexity starts at 0, at nesting 0 (`push_function`). Each of these adds
+  1 and the nesting, the number of them already around it in the function:
+  - an `if`; its test stays at its level, and its body is one level deeper (`visit_if_chain`);
+  - a `?:`; its test stays at its level, and both branches are one level deeper
+    (`visit_conditional_expression`);
+  - a `switch`, once; its discriminant stays at its level, and every `case` is one level deeper
+    (`visit_switch_statement`); a `case` adds nothing;
+  - a loop; its head, the value it walks and a `do…while`'s test stay at its level, and its body is
+    one level deeper (`visit_for_statement` and its siblings);
+  - a `catch`; the whole clause is one level deeper (`visit_catch_clause`).
+
+  An `else if` and an `else` add 1 with no nesting, and their bodies are one level deeper than the
+  first `if` of the chain, so a chain does not deepen. A labelled `break` or `continue` adds 1
+  (`visit_break_statement`, `visit_continue_statement`). `try`, `finally`, an unlabelled jump,
+  `return`, `throw`, `?.`, `!`, `&&=`, `||=`, `??=` and JSX add nothing and open no level. A
+  recursive call adds nothing, which departs from SonarSource: fallow never detects recursion.
+- **SCORE-9** A run of boolean operators (`visit_logical_expression`, `handle_logical_operator`).
+  Each function keeps the last operator it counted, at first none. Each `&&`, `||` or `??`, met
+  before its sides are walked, adds 1 to cognitive complexity when its operator is not the last
+  one, and becomes the last one. After its sides are walked, the last operator is forgotten where
+  neither side is itself an `&&`, `||` or `??`; parentheses are not seen through. So `a && b && c`
+  adds 1, `a && b || c` 2 and `(a || b) && c || d` 3, as SonarSource counts them, but fallow departs
+  from SonarSource where an operator comes back after a different one, or a run sits inside another
+  run's operand: `a || b && c || d` adds 2 (SonarSource 3), and `a && f(b && c)` adds 1
+  (SonarSource 2). A nested function keeps its own last operator, so `a && xs.some(x => x && y)`
+  adds 1 to each function.
+- **SCORE-10** React, which SonarSource does not count:
+  - **Hooks** (`record_hook`, `is_hook_callee`, `frame_name_is_react_shaped`). A call whose callee
+    is a bare name, `use` and then a capital letter, such as `useState(…)`, adds 1 to cognitive
+    complexity with no nesting, in a function whose name begins with a capital letter or is a hook's
+    name. `React.useState(…)` adds nothing.
+  - **The name it reads** is not FN-4's name path. It is the function's own identifier, or else the
+    variable, key or `default` that declares it, or else, for a function passed to a call, the name
+    that declares the call, read outward through calls; so `const Panel = memo(() => …)` is named
+    `Panel`. A name made from a call's string argument, as fallow names `it("works")`, never makes
+    a function a component's or a hook's.
+  - **Wide properties** (`fold_component_prop_count`). A function that renders JSX, and whose first
+    parameter is an object pattern that takes more than 4 properties apart, adds 1 to cognitive
+    complexity for each property past 4, once; a rest element is not counted.
+- **SCORE-11** A function is over a limit when its score is greater than the limit, on either
+  measure (`complexity_exceeded`), as the spec's terms already say. fallow's
+  `health.cyclomaticPolicy: "literal-membership"`, which counts some `||` chains as one for its
+  gate, is not built: the analyzer counts cyclomatic complexity as SCORE-7 says whatever a
+  project's fallow configuration sets, and the comparison runs fallow with its default policy.
+- **SCORE-12** Known differences from fallow, accepted. The comparison writes down each one it
+  meets, and doesn't count it as a false finding or a miss unless it changes which functions are
+  over a limit:
+  - **The React name.** fallow gives a declared name only to the first function its walk reaches
+    under the declaration, so in `const x = c ? () => 1 : () => 2` the second arrow has no name,
+    while SCORE-10 reads `x` for both, and for a function passed by any argument to any call
+    under it. A hook call in such a function adds 1 in the analyzer and nothing in fallow. Where the
+    comparison finds this changes a finding, SCORE-3 applies, and the fix is a further amendment.
+  - **Where a function is placed.** CPX-2 places a method at its key and a function at its own
+    identifier where it has one, with columns from 1; fallow places a method at its `(` and a
+    function at `function` or `async`, with columns from 0 counted in bytes. VS-2 matches by line
+    first, and these differ in line only where a method's key and its `(` are on different lines.
