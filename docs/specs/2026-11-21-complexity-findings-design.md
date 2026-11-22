@@ -528,28 +528,42 @@ Terms:
 ### 2026-11-22: The counting rules read from fallow 3.39.0
 
 SCORE-4 brings back here the rules that SCORE-2's reading yields, so they are reviewed as
-requirements before the comparison starts. Plan 1's first step read fallow's source at the tag
-`v3.39.0` (commit `a6956af`, MIT licence), read and not copied. Every count fallow makes is in one
-visitor, `ComplexityVisitor` in `crates/extract/src/complexity.rs`, and its limits are compared in
-`complexity_exceeded` in `crates/engine/src/health/findings.rs`. Each rule below names the function
-of that visitor it comes from, and says where fallow departs from SonarSource 1.7, the text SCORE-1
-started from. Plan 1 built these rules, apart from the one gap SCORE-12 names, which plan 3
-fixes. Session's call throughout,
-as SCORE-1 was: the owner handed the counting over.
+requirements before the comparison starts.
 
-- **SCORE-5** SCORE-6 to SCORE-11 are the counting rules, and replace SCORE-1's starting rules
-  where they differ. Replaces `SCORE-1`. Three of SCORE-1's rules change: optional chaining adds to
-  cyclomatic complexity (SCORE-7), a recursive call adds nothing (SCORE-8), and a run of boolean
-  operators is counted as fallow counts it, not as SonarSource does (SCORE-9). React rules are added
-  (SCORE-10). SCORE-2, SCORE-3 and SCORE-4 stand: a rule changed by a fix during the comparison is a
-  further amendment. Where fallow's counting is odd (its optional chains, SCORE-7, and its runs of
-  boolean operators, SCORE-9), the analyzer follows it so the gate's findings don't change at the
-  swap; correcting one after the swap is a later item with its own spec, since a score decides new
-  against inherited.
-  - **Another fallow version.** These rules are read at 3.39.0. When the pack pins another version
-    on the day the comparison starts (VS-1), the plan's first step reads what changed in fallow's
-    counting between the two tags, and each rule that changed is a further amendment to this spec,
-    approved before the comparison starts.
+This item is built in three implementation plans, each in `docs/plans/` and each its own pull
+request: **plan 1** (`2026-11-22-complexity-1-scores.md`) finds and names functions, scores them and
+adds the `complexity` command; **plan 2** (`2026-11-22-complexity-2-audit.md`) reports the finding in
+`audit`, new against inherited; **plan 3** runs the comparison with fallow, VS-1 to VS-7. "The plan's
+first step" in SCORE-2 was plan 1's: it read fallow's source at the tag `v3.39.0` (commit `a6956af`,
+MIT licence), read and not copied. Every count fallow makes is in one visitor, `ComplexityVisitor`
+in `crates/extract/src/complexity.rs`, and its limits are compared in `complexity_exceeded` in
+`crates/engine/src/health/findings.rs`. Each rule below names the function it comes from, and says
+where fallow departs from SonarSource 1.7, the text SCORE-1 started from. Plan 1 built these rules,
+apart from the cases SCORE-12 names, which plan 3 fixes. Session's call throughout, as SCORE-1 was:
+the owner handed the counting over.
+
+- **SCORE-5** SCORE-6 to SCORE-10 are the counting rules, and SCORE-11 the comparison of a score
+  with its limit. They replace SCORE-1's starting rules. Replaces `SCORE-1`. Where they differ from
+  SCORE-1:
+  - optional chaining adds to cyclomatic complexity (SCORE-7);
+  - an empty fall-through `case` adds to cyclomatic complexity (SCORE-7);
+  - a recursive call adds nothing (SCORE-8);
+  - a run of boolean operators, `??` among them, is counted as fallow counts it, not as SonarSource
+    does (SCORE-9);
+  - code in a class's static block or field values counts toward the function around the class
+    (SCORE-6);
+  - React hook calls and wide properties add to cognitive complexity (SCORE-10).
+
+  SCORE-2, SCORE-3 and SCORE-4 stand: a rule changed by a fix during the comparison is a further
+  amendment. Where fallow's counting is odd (its optional chains, SCORE-7, and its runs of boolean
+  operators, SCORE-9), the analyzer follows it so the gate's findings don't change at the swap;
+  correcting one after the swap is a later item with its own spec, since a score decides new against
+  inherited.
+
+  **Another fallow version.** These rules are read at 3.39.0. When the pack pins another version on
+  the day the comparison starts (VS-1), plan 3's first step reads what changed in fallow's counting
+  between the two tags, and each rule that changed is a further amendment to this spec, approved
+  before the comparison starts.
 - **SCORE-6** What is scored, on both measures. A function with a body (a declaration, an
   expression, an arrow, a method, an accessor or a constructor) is scored on its own, from nesting
   0, and adds nothing to the function around it, on either measure (`visit_function`,
@@ -567,9 +581,11 @@ as SCORE-1 was: the owner handed the counting over.
   - `?:` (`visit_conditional_expression`);
   - `&&`, `||` and `??`, one for each operator (`visit_logical_expression`), and `&&=`, `||=` and
     `??=` (`visit_assignment_expression`);
-  - optional chain whose outermost link is optional (`visit_chain_expression`): `a?.b`, `a?.b?.c`
-    and `a?.()` add 1 each, and `a?.b.c` and `a?.b()` add nothing. fallow's own comment says every
-    `?.` counts; its code checks only the chain's last link, and its code wins (SCORE-3).
+  - optional chain whose last link, the one applied last, is optional (`visit_chain_expression`).
+    A chain adds 1 at most, however many `?.` it holds: `a?.b`, `a?.b?.c` and `a.b?.()` add 1, and
+    `a?.b.c` and `a?.b()` add nothing, since their last links, `.c` and `()`, are not optional.
+    fallow's own comment says every `?.` counts; its code checks only the last link, and its code
+    wins (SCORE-3).
 
   `switch`, `default`, `else`, `try`, `finally`, labelled jumps, default parameters, recursion and
   JSX add nothing.
@@ -600,46 +616,52 @@ as SCORE-1 was: the owner handed the counting over.
   (SonarSource 2). A nested function keeps its own last operator, so `a && xs.some(x => x && y)`
   adds 1 to each function.
 - **SCORE-10** React, which SonarSource does not count:
-  - **Hooks** (`record_hook`, `is_hook_callee`, `frame_name_is_react_shaped`). A call whose callee
-    is a bare name, `use` and then a capital letter, such as `useState(…)`, adds 1 to cognitive
-    complexity with no nesting, in a function whose name begins with a capital letter or is a hook's
-    name. `React.useState(…)` adds nothing.
-  - **The name it reads** is not FN-4's name path, but fallow's (`visit_variable_declarator`,
+  - **Hooks** (`record_hook`, `is_hook_callee`, `frame_name_is_react_shaped`). A **hook's name** is
+    `use` followed by a capital letter, as `useState` or `usePanel`. A call whose callee is a bare
+    hook's name, such as `useState(…)`, adds 1 to cognitive complexity with no nesting, in a
+    function whose React name (below) begins with a capital letter or is a hook's name.
+    `React.useState(…)` adds nothing.
+  - **The React name** is not FN-4's name path, but fallow's (`visit_variable_declarator`,
     `visit_object_property`, `visit_property_definition`, `visit_method_definition`,
     `visit_export_default_declaration`, `visit_function`). A variable declared to a plain name, an
-    object's or a class's key, and `export default` each hold a name for the first function fallow's
-    walk reaches beneath them, wherever it sits in the value; that function takes the name, and the
-    functions after it under the same declaration have none. A function's own identifier is its
-    name, and it takes the held name's place, which is lost. So `const Panel = memo(() => …)` names
-    the arrow `Panel`, and in `const x = c ? () => 1 : () => 2` only the first arrow is `x`. A name
-    made from a call's string argument, as fallow names `it("works")`, never makes a function a
-    component's or a hook's. This name is read for this rule alone: it never changes a function's
-    name path or its fingerprint (FN-4, FN-5, CPX-4).
-  - **Wide properties** (`fold_component_prop_count`). A function that renders JSX, and whose first
-    parameter is an object pattern that takes more than 4 properties apart, adds 1 to cognitive
-    complexity for each property past 4, once; a rest element is not counted.
+    object's or a class's key, and `export default` each hold their name for the first function
+    fallow's walk reaches beneath them, wherever it sits in the value; that function takes the name,
+    and nothing is held after it. A key or a variable inside the value holds its own name in place
+    of the outer one, and after it nothing is held, whether or not a function took its name. A
+    function's own identifier is its name, and it takes a held name's place, which is lost. So
+    `const Panel = memo(() => …)` names the arrow `Panel`; in `const Panel = flag ? () => 1 : () =>
+    2` only the first arrow is `Panel`; and in `const Panel = wrap({ size: 1 }, () => …)` the arrow
+    has no React name, since the key `size` took the held name's place. Where nothing is held,
+    fallow names a function passed to a call whose first argument is a string, as `it("works")` or
+    `Command.make("setup")`; such a name never makes a function a component's or a hook's, even
+    when it begins with a capital letter. The React name is read for this rule alone: it never
+    changes a function's name path or its fingerprint (FN-4, FN-5, CPX-4).
+  - **Wide properties** (`fold_component_prop_count`, `count_props`). A function **renders JSX**
+    when its own body, outside any function nested in it, holds a JSX element or fragment. Where
+    one does, and its first parameter is an object pattern with no default value, as `({ a, b, c,
+    d, e })`, that takes more than 4 properties apart, it adds 1 to cognitive complexity for each
+    property past 4, once; a rest element (`...rest`) is not counted.
 - **SCORE-11** A function is over a limit when its score is greater than the limit, on either
   measure (`complexity_exceeded`), as the spec's terms already say. fallow's
   `health.cyclomaticPolicy: "literal-membership"`, which counts some `||` chains as one for its
   gate, is not built: the analyzer counts cyclomatic complexity as SCORE-7 says whatever a
-  project's fallow configuration sets. The comparison runs fallow with its default policy, which
-  VS-1's best-case configuration (the comparison spec's CMP-5) therefore never changes, and the
-  judged list says which named repositories, if any, set `literal-membership`, since their gate's
-  cyclomatic findings change at the swap.
-- **SCORE-12** One known gap in what plan 1 built: its React name is not SCORE-10's. It reads a
-  function's name from what directly holds it, past parentheses and type assertions, and climbs
-  from a function passed as any argument of a call to what holds the call. That departs from
-  SCORE-10 both ways:
-  - **It names a function fallow leaves unnamed.** In `const Panel = wrap(() => 1, () => { … })`
-    and `const Panel = wrap({ size: 1 }, () => { … })`, the analyzer names the last arrow `Panel`,
-    while fallow gives the name to the first function it reaches, or loses it after the object's
-    property, so a hook call in that arrow adds 1 in the analyzer and nothing in fallow.
-  - **It leaves unnamed a function fallow names.** In `const Panel = flag ? () => { … } : Fallback`,
-    `const Panel = fallback || (() => { … })` or `const Panel = [() => { … }]`, fallow names the
-    arrow `Panel`, as the first function under the declaration, while the analyzer stops at the
-    `?:`, the `||` or the array, so a hook call adds 1 in fallow and nothing in the analyzer.
+  project's fallow configuration sets. This amends VS-1: fallow runs with each repository's
+  best-case configuration (the comparison spec's CMP-5) with `health.cyclomaticPolicy` left out, so
+  it counts as SCORE-7 does, its default. The judged list says which named repositories, if any, set
+  `literal-membership`, since their gate's cyclomatic findings change at the swap.
+- **SCORE-12** The analyzer reads SCORE-10's React name in these cases, each a fixture (CASE-1):
+  - `const Panel = wrap(() => 1, () => { … })` and `const Panel = wrap({ size: 1 }, () => { … })`:
+    the last arrow has no React name, so a hook call in it adds nothing;
+  - `const Panel = flag ? () => { … } : Fallback`, `const Panel = fallback || (() => { … })` and
+    `const Panel = [() => { … }]`: the arrow is `Panel`, so a hook call in it adds 1.
 
-  It is the analyzer's departure from SCORE-10, not fallow's from its own rule: plan 3 fixes it
-  before the comparison is judged, with these cases as failing fixtures first (design PROOF-5).
-- **SCORE-13** Where the spec above names SCORE-1 as the counting rules, in its terms (the entry
-  for cyclomatic and cognitive complexity) and in CASE-1, it means SCORE-6 to SCORE-11.
+  Plan 1's code gets each of these wrong: it reads a function's name from what directly holds it,
+  past parentheses and type assertions, and climbs from a function passed as any argument of a call
+  to what holds the call, so it names the first cases' last arrow `Panel` and stops at the `?:`, the
+  `||` or the array in the others. Plan 3 fixes it before the comparison is judged, with these
+  fixtures failing first (design PROOF-5).
+- **SCORE-13** SCORE-1 stays as the starting rules SCORE-2's reading began from, which SCORE-2's
+  "departs from SCORE-1" refers to; where its rules differ from SCORE-6 to SCORE-10, as on recursion
+  and optional chaining, they no longer apply. Where the spec above names SCORE-1 as the counting
+  rules, in its terms (the entry for cyclomatic and cognitive complexity) and in CASE-1, it means
+  SCORE-6 to SCORE-10, and CASE-1's fixture for each counting rule covers SCORE-11's comparison too.
