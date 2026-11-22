@@ -541,7 +541,7 @@ in `crates/extract/src/complexity.rs`, and its limits are compared in `complexit
 `crates/engine/src/health/findings.rs`. Each rule below names the function it comes from, and says
 where fallow departs from SonarSource 1.7, the text SCORE-1 started from. Plan 1 built these rules,
 apart from the cases SCORE-12 names, which plan 3 fixes. The amendment replaces SCORE-1 (SCORE-5,
-SCORE-13) and amends VS-1 and VS-7 (SCORE-11). An approved spec's text is never rewritten, so those
+SCORE-13), and amends VS-1 and VS-7 (SCORE-11, SCORE-14) and VS-4 (SCORE-14). An approved spec's text is never rewritten, so those
 requirements above carry no mark of it: read them with this section. Session's call throughout, as
 SCORE-1 was: the owner handed the counting over.
 
@@ -566,7 +566,8 @@ SCORE-1 was: the owner handed the counting over.
   **Another fallow version.** These rules are read at 3.39.0. When the pack pins another version on
   the day the comparison starts (VS-1), plan 3's first step reads what changed in fallow's counting
   between the two tags, and each rule that changed is a further amendment to this spec, approved
-  before the comparison starts.
+  before the comparison starts. A version the pack pins later, before the swap, is read the same
+  way, and each rule that changed is a further amendment then.
 - **SCORE-6** What is scored, on both measures. A function with a body (a declaration, an
   expression, an arrow, a method, an accessor or a constructor) is scored on its own, from nesting
   0, and adds nothing to the function around it, on either measure (`visit_function`,
@@ -669,8 +670,8 @@ SCORE-1 was: the owner handed the counting over.
     the last arrow has no React name, so a hook call in it adds nothing;
   - `const Panel = flag ? () => { … } : Fallback`, `const Panel = fallback || (() => { … })` and
     `const Panel = [() => { … }]`: the arrow is `Panel`, so a hook call in it adds 1;
-  - `{ get Panel() { … } }`: the accessor's React name is its key, `Panel`, so a hook call in it
-    adds 1.
+  - `{ get Panel() { … } }` and `class Box { get Panel() { … } }`: the accessor's React name is its
+    key, `Panel`, so a hook call in it adds 1.
 
   Plan 1's code gets each of these wrong: it reads a function's name from what directly holds it,
   past parentheses and type assertions, and climbs from a function passed as any argument of a call
@@ -693,7 +694,7 @@ SCORE-1 was: the owner handed the counting over.
     out, so both tools use 20 and 15 everywhere, and the judged list says which named repositories
     set any.
   - **Suppression comments.** fallow skips a function with a complexity suppression comment on its
-    start line (`engine/src/health/findings.rs`); the analyzer reads no such comment. Each finding
+    start line (`crates/engine/src/health/findings.rs`); the analyzer reads no such comment. Each finding
     the analyzer reports where fallow's comment skipped it is set apart, as VS-4 sets apart, and
     counted; it is not a false finding. Whether the analyzer should read them is the owner's to
     decide.
@@ -704,3 +705,10 @@ SCORE-1 was: the owner handed the counting over.
     allowed, so a finding in one is judged as any other; it parses `.ts` files without JSX, so a
     `.ts` file holding JSX is a file it skips, and fallow's findings there are set apart with the
     file named.
+
+  Each of these four changes what the gate reports at the swap, against SCORE-5's aim: a function
+  fallow's comment silenced that gets worse becomes a new finding and holds the branch, a path with
+  a raised limit reports at 20 and 15, and findings in the other files, or in a `.ts` file holding
+  JSX, leave the gate. The judged list counts each in the named repositories, and a line in the
+  swap's release notes for each is owed through the same yakshaver item as VS-4's line on CRAP
+  findings, whether or not the named repositories show it, since other projects use the gate.
