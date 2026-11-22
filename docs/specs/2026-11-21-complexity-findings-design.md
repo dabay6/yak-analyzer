@@ -533,7 +533,8 @@ requirements before the comparison starts. Plan 1's first step read fallow's sou
 visitor, `ComplexityVisitor` in `crates/extract/src/complexity.rs`, and its limits are compared in
 `complexity_exceeded` in `crates/engine/src/health/findings.rs`. Each rule below names the function
 of that visitor it comes from, and says where fallow departs from SonarSource 1.7, the text SCORE-1
-started from. Plan 1 built these rules; nothing here changes the code. Session's call throughout,
+started from. Plan 1 built these rules, apart from the one gap SCORE-12 names, which plan 3
+fixes. Session's call throughout,
 as SCORE-1 was: the owner handed the counting over.
 
 - **SCORE-5** SCORE-6 to SCORE-11 are the counting rules, and replace SCORE-1's starting rules
@@ -596,11 +597,16 @@ as SCORE-1 was: the owner handed the counting over.
     is a bare name, `use` and then a capital letter, such as `useState(…)`, adds 1 to cognitive
     complexity with no nesting, in a function whose name begins with a capital letter or is a hook's
     name. `React.useState(…)` adds nothing.
-  - **The name it reads** is not FN-4's name path. It is the function's own identifier, or else the
-    variable, key or `default` that declares it, or else, for a function passed to a call, the name
-    that declares the call, read outward through calls; so `const Panel = memo(() => …)` is named
-    `Panel`. A name made from a call's string argument, as fallow names `it("works")`, never makes
-    a function a component's or a hook's.
+  - **The name it reads** is not FN-4's name path, but fallow's (`visit_variable_declarator`,
+    `visit_object_property`, `visit_property_definition`, `visit_method_definition`,
+    `visit_export_default_declaration`, `visit_function`). A variable declared to a plain name, an
+    object's or a class's key, and `export default` each hold a name for the first function fallow's
+    walk reaches beneath them, wherever it sits in the value; that function takes the name, and the
+    functions after it under the same declaration have none. A function's own identifier is its
+    name, and it takes the held name's place, which is lost. So `const Panel = memo(() => …)` names
+    the arrow `Panel`, and in `const x = c ? () => 1 : () => 2` only the first arrow is `x`. A name
+    made from a call's string argument, as fallow names `it("works")`, never makes a function a
+    component's or a hook's.
   - **Wide properties** (`fold_component_prop_count`). A function that renders JSX, and whose first
     parameter is an object pattern that takes more than 4 properties apart, adds 1 to cognitive
     complexity for each property past 4, once; a rest element is not counted.
@@ -608,16 +614,15 @@ as SCORE-1 was: the owner handed the counting over.
   measure (`complexity_exceeded`), as the spec's terms already say. fallow's
   `health.cyclomaticPolicy: "literal-membership"`, which counts some `||` chains as one for its
   gate, is not built: the analyzer counts cyclomatic complexity as SCORE-7 says whatever a
-  project's fallow configuration sets, and the comparison runs fallow with its default policy.
-- **SCORE-12** Known differences from fallow, accepted. The comparison writes down each one it
-  meets, and doesn't count it as a false finding or a miss unless it changes which functions are
-  over a limit:
-  - **The React name.** fallow gives a declared name only to the first function its walk reaches
-    under the declaration, so in `const x = c ? () => 1 : () => 2` the second arrow has no name,
-    while SCORE-10 reads `x` for both, and for a function passed by any argument to any call
-    under it. A hook call in such a function adds 1 in the analyzer and nothing in fallow. Where the
-    comparison finds this changes a finding, SCORE-3 applies, and the fix is a further amendment.
-  - **Where a function is placed.** CPX-2 places a method at its key and a function at its own
-    identifier where it has one, with columns from 1; fallow places a method at its `(` and a
-    function at `function` or `async`, with columns from 0 counted in bytes. VS-2 matches by line
-    first, and these differ in line only where a method's key and its `(` are on different lines.
+  project's fallow configuration sets. The comparison runs fallow with its default policy, which
+  VS-1's best-case configuration (the comparison spec's CMP-5) therefore never changes, and the
+  judged list says which named repositories, if any, set `literal-membership`, since their gate's
+  cyclomatic findings change at the swap.
+- **SCORE-12** One known gap in what plan 1 built. Its React name reads every function under a
+  declaration as the declared name's, and follows a function passed by any argument to any call
+  outward to the declaration, where SCORE-10 gives the name only to the first function reached. So
+  in `const x = c ? () => 1 : () => 2`, a hook call in the second arrow adds 1 in the analyzer and
+  nothing in fallow. It is the analyzer's departure from SCORE-10, not fallow's from its own rule:
+  plan 3 fixes it before the comparison is judged, with a failing fixture first (design PROOF-5).
+- **SCORE-13** Where the spec above names SCORE-1 as the counting rules, in its terms (the entry
+  for cyclomatic and cognitive complexity) and in CASE-1, it means SCORE-6 to SCORE-11.
