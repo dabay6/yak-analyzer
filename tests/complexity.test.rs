@@ -597,6 +597,74 @@ export function helper() { useState(0); return <b />; }
 }
 
 #[test]
+fn a_function_takes_the_react_name_fallow_s_walk_holds_for_it() {
+    let project = Project::new("complexity-react-names");
+
+    project
+        .write(
+            "src/panels.tsx",
+            r#"export const Wrapped = wrap(() => 1, () => { useState(0); });
+export const Sized = pad({ size: 1 }, () => { useState(0); });
+export const Picked = flag ? () => { useState(0); } : Fallback;
+export const Either = fallback || (() => { useState(0); });
+export const Listed = [() => { useState(0); }];
+export const accessors = { get Panel() { useState(0); return 1; } };
+export class Box { get Panel() { useState(0); return 1; } }
+export function Counter() { React.useState(0); }
+it("Renders", () => { useState(0); });
+export const { Grid } = make(() => { useState(0); });
+"#,
+        )
+        .write(
+            "src/props.tsx",
+            r#"export function Defaulted({ a, b, c, d, e } = {}) { return <i />; }
+export function Nested({ a: { b, c, d, e, f } }) { return <i />; }
+export function Rest({ a, b, c, d, ...rest }) { return <i />; }
+export function Outer({ a, b, c, d, e }) { return () => <i />; }
+export function fields(a) { return class { x = a ? 1 : 2; }; }
+"#,
+        )
+        .commit();
+
+    let document = complexity(&project, &["--all"]);
+
+    // The name a declaration, a key or `export default` holds goes to the first function the walk
+    // reaches beneath it, and a key inside takes its place; an accessor's name has no `get `; a name
+    // from a call's string argument, a destructuring and a member callee make no component (spec
+    // SCORE-10, SCORE-12).
+    assert_eq!(
+        scores(&document, "src/panels.tsx"),
+        [
+            ("wrap()", 1, 0),
+            ("wrap() #2", 1, 0),
+            ("pad()", 1, 0),
+            ("<anonymous 1>", 1, 1),
+            ("<anonymous 2>", 1, 1),
+            ("<anonymous 3>", 1, 1),
+            ("accessors > get Panel", 1, 1),
+            ("Box > get Panel", 1, 1),
+            ("Counter", 1, 0),
+            ("it(\"Renders\")", 1, 0),
+            ("make()", 1, 0),
+        ]
+    );
+    // A first parameter's top-level properties count, with or without a default and never a rest
+    // element, where the function itself renders JSX; a class field's value counts toward the
+    // function around the class (spec SCORE-6, SCORE-10).
+    assert_eq!(
+        scores(&document, "src/props.tsx"),
+        [
+            ("Defaulted", 1, 1),
+            ("Nested", 1, 0),
+            ("Rest", 1, 0),
+            ("Outer", 1, 0),
+            ("Outer > <anonymous 1>", 1, 0),
+            ("fields", 2, 1),
+        ]
+    );
+}
+
+#[test]
 fn lists_the_functions_over_a_limit_with_the_measures_they_are_over() {
     let project = Project::new("complexity-over");
 
