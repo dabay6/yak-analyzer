@@ -62,7 +62,16 @@ Terms:
   **inherited** and doesn't.
 - **The base** is the commit a branch is compared with (`audit --base <commit>`).
 - **fallow** is the tool yak runs today for dead code and complexity. It is open source on GitHub
-  (`fallow-rs/fallow`).
+  (`fallow-rs/fallow`). Its `fallow health` command lists **health findings**: functions over its
+  complexity settings. It also scores a Vue `<template>` block as if it were a function, and makes a
+  **`<component>` rollup** finding that adds a component's worst method to its template. Its **CRAP
+  score** combines a function's cyclomatic complexity with its estimated test coverage, and has a
+  threshold of its own (30 by default).
+- **The swap** is the pack release that replaces fallow with the analyzer in yak, at the end of the
+  analyzer's stages (design SWAP-1, STAGE-6). Until it, nothing yak runs uses the analyzer (design
+  PROOF-6).
+- **The plan** is the implementation plan the builder writes from this spec once it is approved, a
+  file in this repository's `docs/plans/`, which the owner approves before building starts.
 - **The hand-off file** is the file yak writes to tell the analyzer which folder to read and what the
   stacks and the project declare (`--hand-off <file>`; CONTRIBUTING.md, "The commands").
 - **Cyclomatic complexity** counts the independent paths through a function: one, plus one for each
@@ -130,7 +139,7 @@ Terms:
   `<script>` and `<script setup>` blocks of Vue components (the reading spec's PARSE-1 and PARSE-3).
   MDX documents and HTML pages are read only for their import statements, so their functions are not
   scored. A fallow finding in one of them is set apart (VS-4). Session's call: none of fallow's 178
-  findings on yakshaver on 2026-11-22 was in such a file.
+  health findings on yakshaver (the run VS-4 describes) was in such a file.
 - **FN-3** A function is scored in the same parse that finds the file's imports. The file is not
   parsed a second time, and for each function the reading keeps only its name path, its location and
   its two scores. Session's call: the cost is the parse, and it is already paid.
@@ -144,34 +153,47 @@ Terms:
   own. What encloses it is each class and function around it, and each object literal around it. A
   class expression or an object literal takes its name by FN-4's rules for a function (the variable,
   property or left side it is assigned to), so `const Parser = class {…}` is `Parser`.
-  Within one enclosing class, function, object literal or file, each name used more than once takes
-  its place among the uses of that name, in source order, after the first: `read`, then `read #2`.
-  An unnamed function, class or object literal takes its place among the unnamed ones directly inside
-  the same enclosure: the first is `<anonymous 1>`. So no two functions of one file have the same name
-  path. This is design IF-4's fingerprint for a function: its path, the names that enclose it, and its
-  own name or place, with no line number. The readable form joins the parts with ` > `, as in
-  `Parser > read > <anonymous 2>`. Session's call, with the readable form.
+  Only a class or object literal with a function somewhere inside it takes part in a name path; one
+  with none, such as a plain data argument, is passed over and takes no place.
+  Each part of a name path is a name and a number. Within one enclosing class, function, object
+  literal or file, the parts that take part are counted in source order, and functions, classes and
+  object literals share the count. A name used once has the number 1. A name used more than once
+  numbers its uses 1, 2 and on. The unnamed ones have no name and are numbered among themselves the
+  same way. So no two functions of one file have the same name path, even where a string key is
+  spelled like a readable place (`'read #2'` is the name `read #2` with the number 1). This is design
+  IF-4's fingerprint for a function: its path, the names that enclose it, and its own name or place,
+  with no line number. The readable form joins the parts with ` > `, writes a number above 1 as
+  ` #2`, and writes an unnamed part as `<anonymous 1>`, as in `Parser > read #2 > <anonymous 1>`.
+  Session's call, with the readable form.
 - **FN-6** Two consequences of FN-5 are accepted and written here, so nobody takes them for faults.
   A renamed function, or one moved under another enclosing name, is a different function. An unnamed
   function added before an existing one changes the existing one's place, so the two can swap
-  fingerprints, and the same holds for a function of a repeated name. Each has a fixture (CASE-1) and
+  fingerprints. The same holds for a function of a repeated name, and for an unnamed class or object
+  literal that gains its first function. Each has a fixture (CASE-1) and
   is looked for among the branch audits (VS-5). A file
   git finds renamed keeps its functions (the dead-code spec's INH-2). Session's call: a fingerprint
   that guessed past these would be design IF-4 changed, and nothing yet shows the cost is worth it.
 
 ### The scores
 
-- **SCORE-1** Cognitive complexity starts from SonarSource's published definition ("Cognitive
-  Complexity", G. Ann Campbell, version 1.7). Cyclomatic complexity is one plus one for each decision
-  point: each `if`, `for`, `for…in`, `for…of`, `while`, `do`, non-default `case`, `catch`, ternary
-  `?:`, `&&`, `||` and `??`. The scores count only the function's own body. A function nested inside
-  it is scored on its own and adds nothing to the outer function's score, except where SCORE-2's
-  rules say otherwise for cognitive nesting. Session's call: the owner handed the counting over.
+- **SCORE-1** These are the starting rules. SCORE-2 may replace any of them, and SCORE-4 brings the
+  final list back here. Session's call: the owner handed the counting over.
+  - **Both measures** count only the function's own body. A function nested inside it is scored on
+    its own and adds nothing to the outer function's score, nor to its nesting.
+  - **Cyclomatic** is 1, plus 1 for each `if`, `for`, `for…in`, `for…of`, `while`, `do`, non-default
+    `case`, `catch`, ternary `?:`, and each `&&`, `||` and `??`, their assignment forms (`&&=`, `||=`,
+    `??=`) included. Optional chaining (`?.`) and default parameters add nothing.
+  - **Cognitive** follows SonarSource's published definition ("Cognitive Complexity", G. Ann
+    Campbell, version 1.7). It adds 1 for each `if`, `else if`, `else`, ternary, `switch`, loop and
+    `catch`, and for each run of the same boolean operator (`a && b && c` adds 1, `a && b || c` adds
+    2). It adds 1 for a `break` or `continue` to a label, and 1 for a direct recursive call. An `if`,
+    ternary, `switch`, loop or `catch` also adds its nesting depth: how many of those, and how many
+    `try`s, already enclose it inside the function.
 - **SCORE-2** Where fallow's counting departs from SCORE-1, fallow's counting wins, rule by rule, so
   the gate's findings stay the same across the swap. Optional chaining, `??`, default parameters,
   `case` fall-through, labelled jumps, nested functions and JSX are the likely places. The plan's
   first step reads fallow's counting from its documentation and source, at the version VS-1 uses.
-  It writes each rule the analyzer will count into the plan, with where it comes from: SonarSource's
+  It writes each rule the analyzer will count, with where it comes from: SonarSource's
   text, or fallow's file and function. fallow's code is read, not copied (CONTRIBUTING.md), and its
   license is checked before its source is read. If the license doesn't allow reading, the plan uses
   fallow's documentation and fixtures run through fallow instead. Session's call: PROOF-4 measures
@@ -207,17 +229,18 @@ Terms:
   read` has cognitive complexity 23, over the limit of 15 (cyclomatic 12)." Session's call.
 - **CPX-3** Its result carries a SARIF property bag, `properties.complexity`, with `function` (the
   readable name path), `cyclomatic` and `cognitive` (the scores), `cyclomaticLimit` and
-  `cognitiveLimit` (each limit, or `null` where it isn't declared), and `over` (the measures that are
-  over, `cyclomatic` first). With a base, it also carries `base`: the function's two scores at the
-  base, or `null` where the base doesn't have the function. This is what the engine will read for
-  yakshaver's tracking (owner: the scores and the limit reach yak). Session's call for the names.
+  `cognitiveLimit` (each limit, or `null` where it isn't declared), and `over`, a list of the
+  strings `"cyclomatic"` and `"cognitive"` naming the measures that are over, `cyclomatic` first. With
+  a base, it also carries `base`: an object `{ "cyclomatic": <number>, "cognitive": <number> }`
+  holding the function's scores at the base, or `null` where the base doesn't have the function.
+  Without a base, `base` is absent. This is what the engine will read for yakshaver's tracking (owner:
+  the scores and the limit reach yak). Session's call for the names.
 - **CPX-4** Its fingerprint is made, as design IF-4 says, from the rule, the file's path and the
   function's name path (FN-5), under the existing scheme `yakAnalyzer/v1`. Each part of the name path
-  is its own part of the digest, length-prefixed as `src/findings.rs` does today, so a name holding
-  ` > ` can't collide with a nested path. FN-4's and FN-5's rules become part of the scheme. Until the
-  swap nothing records a reason against the analyzer's fingerprints, so a fix to them before then
-  costs nothing. After it, a fix is a new scheme, which design IF-6 says the release must announce. The run's list of rules
-  gains `complexity`, after the five.
+  gives two parts of the digest, its name (empty for an unnamed part) and its number, each
+  length-prefixed as `src/findings.rs` does today. So a name holding ` > ` or ` #2` can't collide
+  with another path. FN-4's and FN-5's rules are part of the scheme, and are drafts until the swap
+  (VER-1). The run's list of rules gains `complexity`, after the five.
 - **CPX-5** No function in a file declared data or generated, or in a `.d.ts` file, is reported
   (design FIND-10). The same holds at the base.
 
@@ -231,8 +254,9 @@ Terms:
   findings. A function under the limit at the base must be found there for its message to say so.
   The existing comparison (`src/inherit.rs`) matches the base's findings by fingerprint alone. It
   gains a comparison of scores for this rule. The five dead-code kinds keep theirs.
-- **NEW-3** A new finding's message adds what the base had: "At the base it was 18." or "At the
-  base it was 12, under the limit." Where the base doesn't have the function, the message adds
+- **NEW-3** A new finding's message adds, for each measure that is over, what the base had: "At the
+  base its cognitive complexity was 18." or "At the base its cognitive complexity was 12, under the
+  limit." Where the base doesn't have the function, the message adds
   nothing. Session's call.
 - **NEW-4** Any file skipped at the base leaves the other complexity findings compared as NEW-1
   says, unlike the dead-code kinds. A skipped script has no functions at the base, so its findings
@@ -279,12 +303,14 @@ Terms:
 - **VER-1** The interface version stays 1. A new rule name, a new property on a result and a new
   command only add, and design IF-6 raises the version only for a change that breaks. The comparison
   spec's FREEZE-1 says the same through its "(design IF-6)". `CONTRIBUTING.md`'s paragraph, which says
-  "a change to any of them", becomes "a change that breaks any of them". It names the seventh rule,
-  and adds to what the version covers the names and meanings of CPX-3's property bag, since the
-  engine will read it. It says the `complexity` command is a draft until stage 5 (SOLO-5). Renaming a
-  field of the bag, or changing what one means, then raises the version. The module comment of `src/declarations.rs` and the test that holds the paragraph
-  (`scripts/contributing.test.mjs`) change to match. Session's call: the design spec decides it, and
-  until the swap nothing yak runs depends on the analyzer (design PROOF-6).
+  "a change to any of them", becomes "a change that breaks any of them". It names the sixth rule,
+  `complexity`. It adds to what the version covers the names and meanings of CPX-3's property bag,
+  since the engine will read it, and FN-4's and FN-5's rules, as part of the fingerprint scheme. Both
+  are drafts until the swap: nothing yak runs reads them before then (design PROOF-6), so changing
+  them raises nothing. From the swap they are fixed, and a change that breaks them raises the
+  version. The paragraph also says the `complexity` command is a draft until stage 5 (SOLO-5). The
+  module comment of `src/declarations.rs` and the test that holds the paragraph
+  (`scripts/contributing.test.mjs`) change to match. Session's call: the design spec decides it.
 - **VER-2** `CONTRIBUTING.md`'s "The commands" also gains the `complexity` command, and its
   description of `audit` says it reports six kinds, the five dead-code kinds and complexity.
 
@@ -292,12 +318,14 @@ Terms:
 
 - **CASE-1** Each rule above has a made-up project in `tests/`, with its expected output written in
   the test (CONTRIBUTING.md, "Fixtures"). These are at least:
-  - each counting rule SCORE-1 and the plan's list from SCORE-2 name;
+  - each counting rule of SCORE-1, as SCORE-4's amendment leaves the list;
   - each naming case of FN-4 and FN-5, among them a getter and setter pair, methods of two sibling
     object literals, two assignments ending in the same member, one name declared in two sibling
     blocks, a class expression assigned to a variable, and a function with overload signatures;
-  - FN-6's accepted cases: a rename, an unnamed function added before another, and a function of a
-    repeated name added before another;
+  - FN-6's accepted cases: a rename, an unnamed function added before another, a function of a
+    repeated name added before another, and an unnamed object literal gaining its first function;
+  - FN-5's passed-over object literal with no function in it, and a string key spelled like a
+    readable place (`'read #2'`);
   - each base case: a function absent at the base, one under at the base, one worse, one the same,
     one better, one in a renamed file, one in a script skipped at the base, and a `package.json` and
     a tsconfig skipped at the base;
@@ -313,8 +341,10 @@ Terms:
   worktrees and hand-written hand-off files (CMP-3), fallow's worktree installed with scripts off
   (CMP-4, CMP-4a), and each root run from that root (CMP-7). The commits are pinned afresh on the day
   this comparison starts. fallow's version is the one the pack's fallow declaration runs that day,
-  installed as the comparison spec's CMP-6 installs it. Both tools use limits of 20 cyclomatic and 15
-  cognitive: the hand-off files declare them, and fallow's configuration sets them (design FIND-8).
+  installed as the comparison spec's CMP-6 installs it. fallow runs with its best-case configuration
+  for each repository (the comparison spec's CMP-5), except that both tools use limits of 20
+  cyclomatic and 15 cognitive whatever that configuration says: the hand-off files declare them, and
+  fallow's `health.maxCyclomatic` and `health.maxCognitive` are set to them (design FIND-8).
   Session's call for the version: the gate's findings are the ones to keep.
 - **VS-2** Two findings are the same when they are in the same file and name the same function. A
   function is matched by its start line, since fallow names an unnamed function `<arrow>` and the
@@ -328,7 +358,8 @@ Terms:
 - **VS-4** Set apart and not counted as misses, each listed with its count, as the comparison spec's
   JDG-5 lists what it sets apart: fallow's findings on a Vue `<template>`, its `<component>` rollups,
   its findings in MDX documents and HTML pages (FN-2), and its findings over its CRAP threshold alone.
-  On yakshaver on 2026-11-22, 105 of fallow's 178 health findings were over the CRAP threshold alone.
+  On yakshaver's `main` on 2026-11-22, `fallow health --format json` (fallow 3.15.0, yakshaver's own
+  configuration) gave 178 health findings, and 105 of them were over the CRAP threshold alone.
   The plan's first step checks whether `fallow audit`'s JSON, which the pack maps today, includes
   those. If it does, the gate shows them today, and the judged list says how many leave the gate at
   the swap. Session's call, on design FIND-8's wording.
