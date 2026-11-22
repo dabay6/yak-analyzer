@@ -66,7 +66,7 @@ fn notifications(run: &Value) -> Vec<(&str, Option<&str>)> {
 }
 
 #[test]
-fn prints_one_report_that_names_the_tool_the_interface_version_and_the_five_rules() {
+fn prints_one_report_that_names_the_tool_the_interface_version_and_the_six_rules() {
     let project = Project::new("audit-report");
 
     project
@@ -101,6 +101,7 @@ fn prints_one_report_that_names_the_tool_the_interface_version_and_the_five_rule
             "unused-type",
             "unresolved-import",
             "circular-dependency",
+            "complexity",
         ]
     );
     assert_eq!(run["invocations"][0]["executionSuccessful"], json!(true));

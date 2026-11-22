@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use crate::functions;
 use crate::imports::{self, Broken, DEFAULT, EVERY, Form, Import, Name, Read, Used};
 
 /// The elements of an HTML page whose content is text a browser does not read as markup.
@@ -56,6 +57,13 @@ pub fn vue(text: &str) -> Result<(Read, Vec<Skipped>), Broken> {
 
         // The lines of the file above the block's content.
         let above = line_at(text, block.content.start) - 1;
+        // The columns of the block's first line before its content (complexity spec FN-5).
+        let indent = text[..block.content.start]
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .encode_utf16()
+            .count();
         let lang = block.tag.attribute("lang");
 
         match imports::read_block(&text[block.content.clone()], lang) {
@@ -76,6 +84,7 @@ pub fn vue(text: &str) -> Result<(Read, Vec<Skipped>), Broken> {
                     import
                 }));
                 read.computed += found.computed;
+                functions::append(&mut read.units, found.units, above, indent);
 
                 for export in found.exports {
                     if export.name != DEFAULT

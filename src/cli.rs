@@ -21,9 +21,16 @@ const HAND_OFF_OPTION: &str = "--hand-off";
 /// The option of `audit` that names the commit to compare with (dead-code spec CMD-1).
 const BASE_OPTION: &str = "--base";
 
+/// The command that reads a project and prints each function's complexity (complexity spec SOLO-1).
+const COMPLEXITY_COMMAND: &str = "complexity";
+
+/// The option of `complexity` that lists every function, not only those over a limit (complexity spec
+/// SOLO-3).
+const ALL_OPTION: &str = "--all";
+
 /// What the binary accepts, for the line that refuses anything else.
-const ACCEPTED: &str = "--version, interface, graph [--hand-off <file>], and audit [--hand-off <file>] \
-                        [--base <commit>]";
+const ACCEPTED: &str = "--version, interface, graph [--hand-off <file>], audit [--hand-off <file>] \
+                        [--base <commit>], and complexity [--hand-off <file>] [--all]";
 
 /// One thing the binary can be asked to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -40,6 +47,12 @@ pub enum Command {
         hand_off: Option<PathBuf>,
         base: Option<String>,
     },
+    /// Read the project and print each function's complexity, with a hand-off file or without one: the
+    /// functions over a limit, or with `all` every function (complexity spec SOLO-1).
+    Complexity {
+        hand_off: Option<PathBuf>,
+        all: bool,
+    },
 }
 
 /// Reads the arguments after the program's name. The error is the text of the refusal.
@@ -54,6 +67,7 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
             hand_off: Some(PathBuf::from(&args[2])),
         }),
         [AUDIT_COMMAND, ..] => audit(args),
+        [COMPLEXITY_COMMAND, ..] => complexity(args),
         [] => Err(format!("nothing to do; it answers {ACCEPTED}")),
         _ => Err(refused(args)),
     }
@@ -90,6 +104,29 @@ fn audit(args: &[OsString]) -> Result<Command, String> {
     }
 
     Ok(Command::Audit { hand_off, base })
+}
+
+/// `complexity` and its options, each at most once, in either order (complexity spec SOLO-1).
+fn complexity(args: &[OsString]) -> Result<Command, String> {
+    let mut hand_off = None;
+    let mut all = false;
+    let mut words = args[1..].iter();
+
+    while let Some(option) = words.next() {
+        match option.to_str() {
+            Some(HAND_OFF_OPTION) if hand_off.is_none() => {
+                let Some(value) = words.next() else {
+                    return Err(refused(args));
+                };
+
+                hand_off = Some(PathBuf::from(value));
+            }
+            Some(ALL_OPTION) if !all => all = true,
+            _ => return Err(refused(args)),
+        }
+    }
+
+    Ok(Command::Complexity { hand_off, all })
 }
 
 /// The refusal of a command line the binary does not answer.
