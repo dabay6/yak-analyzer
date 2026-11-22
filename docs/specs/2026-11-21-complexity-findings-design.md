@@ -533,14 +533,17 @@ requirements before the comparison starts.
 This item is built in three implementation plans, each in `docs/plans/` and each its own pull
 request: **plan 1** (`2026-11-22-complexity-1-scores.md`) finds and names functions, scores them and
 adds the `complexity` command; **plan 2** (`2026-11-22-complexity-2-audit.md`) reports the finding in
-`audit`, new against inherited; **plan 3** runs the comparison with fallow, VS-1 to VS-7. "The plan's
+`audit`, new against inherited; **plan 3** (`2026-11-22-complexity-3-comparison.md`, not yet
+written) runs the comparison with fallow, VS-1 to VS-7. "The plan's
 first step" in SCORE-2 was plan 1's: it read fallow's source at the tag `v3.39.0` (commit `a6956af`,
 MIT licence), read and not copied. Every count fallow makes is in one visitor, `ComplexityVisitor`
 in `crates/extract/src/complexity.rs`, and its limits are compared in `complexity_exceeded` in
 `crates/engine/src/health/findings.rs`. Each rule below names the function it comes from, and says
 where fallow departs from SonarSource 1.7, the text SCORE-1 started from. Plan 1 built these rules,
-apart from the cases SCORE-12 names, which plan 3 fixes. Session's call throughout, as SCORE-1 was:
-the owner handed the counting over.
+apart from the cases SCORE-12 names, which plan 3 fixes. The amendment replaces SCORE-1 (SCORE-5,
+SCORE-13) and amends VS-1 and VS-7 (SCORE-11). An approved spec's text is never rewritten, so those
+requirements above carry no mark of it: read them with this section. Session's call throughout, as
+SCORE-1 was: the owner handed the counting over.
 
 - **SCORE-5** SCORE-6 to SCORE-10 are the counting rules, and SCORE-11 the comparison of a score
   with its limit. They replace SCORE-1's starting rules. Replaces `SCORE-1`. Where they differ from
@@ -572,7 +575,8 @@ the owner handed the counting over.
   a `??` in it counts there; the default itself adds nothing. Code outside every function counts
   toward no function: fallow scores it as `<module>`, which it never reports (`visit_program`). Code
   in a class's static block, or in a class field's value that is not a function, counts toward the
-  function around the class, if there is one.
+  function around the class, if there is one, at the nesting the class sits at there: a class opens
+  no level.
 - **SCORE-7** Cyclomatic complexity is 1 (`push_function`), plus 1 for each:
   - `if`, and each `else if` (`visit_if_chain`);
   - `for`, `for…in`, `for…of`, `while` and `do…while` (`visit_for_statement` and its siblings);
@@ -606,7 +610,7 @@ the owner handed the counting over.
   `return`, `throw`, `?.`, `!`, `&&=`, `||=`, `??=` and JSX add nothing and open no level. A
   recursive call adds nothing, which departs from SonarSource: fallow never detects recursion.
 - **SCORE-9** A run of boolean operators (`visit_logical_expression`, `handle_logical_operator`).
-  Each function keeps the last operator it counted, at first none. Each `&&`, `||` or `??`, met
+  Each function keeps the last operator it met, at first none. Each `&&`, `||` or `??`, met
   before its sides are walked, adds 1 to cognitive complexity when its operator is not the last
   one, and becomes the last one. After its sides are walked, the last operator is forgotten where
   neither side is itself an `&&`, `||` or `??`; parentheses are not seen through. So `a && b && c`
@@ -623,7 +627,10 @@ the owner handed the counting over.
     `React.useState(…)` adds nothing.
   - **The React name** is not FN-4's name path, but fallow's (`visit_variable_declarator`,
     `visit_object_property`, `visit_property_definition`, `visit_method_definition`,
-    `visit_export_default_declaration`, `visit_function`). A variable declared to a plain name, an
+    `visit_export_default_declaration`, `visit_function`). fallow's walk visits the syntax tree depth
+    first, each node before its children and the children in source order, so the first function
+    it reaches beneath a node is the first to start in the source. A variable declared to a plain
+    name (an identifier, not a destructuring pattern such as `const { a } = …`), an
     object's or a class's key, and `export default` each hold their name for the first function
     fallow's walk reaches beneath them, wherever it sits in the value; that function takes the name,
     and nothing is held after it. A key or a variable inside the value holds its own name in place
@@ -640,7 +647,9 @@ the owner handed the counting over.
     when its own body, outside any function nested in it, holds a JSX element or fragment. Where
     one does, and its first parameter is an object pattern with no default value, as `({ a, b, c,
     d, e })`, that takes more than 4 properties apart, it adds 1 to cognitive complexity for each
-    property past 4, once; a rest element (`...rest`) is not counted.
+    property past 4, once. Only the pattern's own properties count, each once, whether or not it
+    has a default value or a pattern of its own (`{ a = 1, b: { c, d } }` takes 2 apart); a rest
+    element (`...rest`) is not counted.
 - **SCORE-11** A function is over a limit when its score is greater than the limit, on either
   measure (`complexity_exceeded`), as the spec's terms already say. fallow's
   `health.cyclomaticPolicy: "literal-membership"`, which counts some `||` chains as one for its
@@ -660,8 +669,8 @@ the owner handed the counting over.
   to what holds the call, so it names the first cases' last arrow `Panel` and stops at the `?:`, the
   `||` or the array in the others. Plan 3 fixes it before the comparison is judged, with these
   fixtures failing first (design PROOF-5).
-- **SCORE-13** SCORE-1 stays as the starting rules SCORE-2's reading began from, which SCORE-2's
-  "departs from SCORE-1" refers to; where its rules differ from SCORE-6 to SCORE-10, as on recursion
-  and optional chaining, they no longer apply. Where the spec above names SCORE-1 as the counting
+- **SCORE-13** SCORE-1 no longer says how anything is counted: its text stays above only because
+  approved text is not rewritten, as the record of the rules SCORE-2's reading began from, which
+  SCORE-2's "departs from SCORE-1" refers to. Where the spec above names SCORE-1 as the counting
   rules, in its terms (the entry for cyclomatic and cognitive complexity) and in CASE-1, it means
   SCORE-6 to SCORE-10, and CASE-1's fixture for each counting rule covers SCORE-11's comparison too.
