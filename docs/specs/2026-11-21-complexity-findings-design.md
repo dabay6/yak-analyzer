@@ -83,8 +83,9 @@ Terms:
 - **A limit** is a positive whole number a declaration states: `cyclomaticLimit` or
   `cognitiveLimit` (the reading spec's KEY-1). A function is **over** a limit when its score is
   greater than the limit; a score equal to the limit is not over it. That is fallow's comparison too:
-  in the run VS-4 describes, no function scoring exactly 15 cognitive or exactly 20 cyclomatic was
-  flagged for that measure. The pack's fallow configuration states the limits as
+  in the run VS-4 describes, nine functions scoring exactly 15 cognitive were listed (over the CRAP
+  threshold) and none was flagged for cognitive, and two scoring exactly 20 cyclomatic were listed
+  and flagged only for cognitive. The pack's fallow configuration states the limits as
   `health.maxCyclomatic` and `health.maxCognitive`.
 - **The named repositories** are the four repositories, six roots, the comparison spec's CMP-2
   names. Two are private, so this spec doesn't name them (CONTRIBUTING.md).
@@ -148,21 +149,28 @@ Terms:
 - **FN-3** A function is scored in the same parse that finds the file's imports. The file is not
   parsed a second time. For each function, the reading (what the analyzer holds of a project once it
   has read it, `Reading` in `src/reading.rs`) keeps only the function's name path, location and two
-  scores. Session's call: the cost is the parse, and it is already paid.
+  scores. `graph` prints none of it, so no `graph` fixture changes; the `complexity` command is where
+  the functions and their scores are read. Session's call: the cost is the parse, and it is already
+  paid.
 - **FN-4** A function's own name is the first of these that applies: the name of a function
   declaration or a named function expression; the variable a function is assigned to where it is
   declared (`const read = () => …`); the key of the object property or class member it is (a computed
   key has no name), with `get ` or `set ` before an accessor's (`get value`, `set value`); the whole
-  left side it is assigned to, as written (`a.b.read = function () {…}` gives `a.b.read`). Otherwise
-  it is unnamed.
+  left side it is assigned to (`a.b.read = function () {…}` gives `a.b.read`); `default` for an
+  anonymous default export. Otherwise it is unnamed.
 
   A function passed as an argument to a call, with no name by those rules, takes its name from the
-  call: the callee as written, with `()`, and inside the parentheses the call's first argument when
-  that is a string literal. So `computed(() => …)` is `computed()`, `items.map(item => …)` is
+  call: the callee, with `()`, and inside the parentheses the call's first argument when that is a
+  string literal or a template literal with no substitutions. So `computed(() => …)` is `computed()`, `items.map(item => …)` is
   `items.map()`, and `it("reads a file", () => …)` is `it("reads a file")`. A test's callback, a Vue
   `computed` or `watch`, and an array method's callback are the common unnamed functions, and this
   keeps an added one from shifting the others' places. Only calls of the same callee with no string
-  first argument still share a count. Session's call: design IF-4 says a function's own name or its
+  first argument still share a count.
+
+  A left side or a callee is written as its chain of names joined by `.`, with `[]` for a computed
+  member, whatever spacing, line breaks, comments or optional chaining the source has. A string
+  argument is written as its value in double quotes, whatever quotes the source uses. So a
+  formatter's rewrap or quote change moves no fingerprint. Session's call: design IF-4 says a function's own name or its
   place, and the call it is passed to is the nearest thing to a name such a function has.
 - **FN-5** A function's name path is the names of what encloses it, from the outside in, then its
   own. What encloses it is each class and function around it, and each object literal around it. A
@@ -186,7 +194,10 @@ Terms:
   A renamed function, or one moved under another enclosing name, is a different function. An unnamed
   function added before an existing one changes the existing one's place, so the two can swap
   fingerprints. The same holds for a function of a repeated name, and for an unnamed class or object
-  literal that gains its first function. Each has a fixture (CASE-1) and
+  literal that gains its first function. Removing an earlier sibling shifts the later ones the same
+  way. With NEW-1's comparison of scores, a shifted function can be compared with a removed
+  sibling's base scores, and a function that got worse can be marked inherited. Each has a fixture
+  (CASE-1) and
   is looked for among the branch audits (VS-5). A file
   git finds renamed keeps its functions (the dead-code spec's INH-2). Session's call: a fingerprint
   that guessed past these would be design IF-4 changed, and nothing yet shows the cost is worth it.
@@ -222,12 +233,16 @@ Terms:
   license is checked before its source is read. If the license doesn't allow reading, the plan uses
   fallow's documentation and fixtures run through fallow instead. Session's call: PROOF-4 measures
   the analyzer against fallow, and a score has no truth in the code apart from the rule chosen.
-- **SCORE-3** A rule the comparison shows fallow applies inconsistently, against its own
-  documentation or its own other cases, is written down in the judged list. The analyzer keeps the
-  documented rule. Session's call.
+- **SCORE-3** Where fallow's code departs from its own documentation, its code wins, as SCORE-2 says,
+  and the difference is written in the plan's rule list. Where fallow counts one construct
+  differently in different places, the analyzer follows the way it counts it in most of the
+  comparison's cases, and the others are written down in the judged list, not counted as misses.
+  Session's call.
 - **SCORE-4** The rule list SCORE-2's reading yields comes back to this spec as an amendment, with
   each rule's source, and is approved before the comparison starts. So the rules that decide new
-  against inherited are reviewed as requirements, not left as plan notes. Session's call.
+  against inherited are reviewed as requirements, not left as plan notes. A rule changed later, by a
+  fix during the comparison, is a further amendment to this spec, written before the fix is planned
+  (the comparison spec's CURE-4). Session's call.
 
 ### The limits
 
@@ -248,8 +263,9 @@ Terms:
   it covers the function as it later stands on the same branch, whichever measure moves (design
   IF-4). Session's call: design FIND-1 lists one kind. fallow's three rules (one per measure, and one
   for a function over both) all describe one function.
-- **CPX-2** Its location is the function's start: its name where it has one, otherwise the first
-  character of the function. Its message names the function's readable name path and each measure
+- **CPX-2** Its location is the function's start: its name where the name is the function's own
+  (a declaration, a named expression, a method or property key), otherwise the first character of
+  the function, as for a callback named from its call. Its message names the function's readable name path and each measure
   that is over, with its score and limit, then the other measure's score. For example: "`Parser >
   read` has cognitive complexity 23, over the limit of 15 (cyclomatic 12)." Session's call.
 - **CPX-3** Its result carries a SARIF property bag, `properties.complexity`, with `function` (the
@@ -286,10 +302,10 @@ Terms:
   nothing. Session's call.
 - **NEW-4** Any file skipped at the base leaves the other complexity findings compared as NEW-1
   says, unlike the dead-code kinds. A skipped script has no functions at the base, so its findings
-  are new. A skipped `package.json` or tsconfig (each a `file-skipped` notice, like a script) affects
-  no function's scores. One function's scores don't depend on any other file. This amends the
-  dead-code spec's COMMIT-4 for this rule only, and the notice COMMIT-4 gives says that complexity
-  findings outside the skipped scripts were still compared. Session's call: under COMMIT-4 as it
+  are new. A skipped `package.json`, workspace list or tsconfig (each a `file-skipped` notice, like a
+  script) affects no function's scores. One function's scores don't depend on any other file. This amends the
+  dead-code spec's COMMIT-4 for this rule only, and the notice COMMIT-4 gives adds that complexity
+  findings were still compared, those in a skipped script marked new. Session's call: under COMMIT-4 as it
   stands, one broken file at the base would make every over-limit function in the repository new,
   which is the anti-goal.
 - **NEW-5** FN-5 gives each function of a file a name path of its own, so no two functions on one
@@ -355,8 +371,11 @@ Terms:
   - FN-5's passed-over object literal with no function in it, and a string key spelled like a
     readable place (`'read #2'`);
   - each base case: a function absent at the base, one under at the base, one worse, one the same,
-    one better, one in a renamed file, one in a script skipped at the base, and a `package.json` and
-    a tsconfig skipped at the base;
+    one better, one in a renamed file, one in a script skipped at the base, and a `package.json`, a
+    workspace list and a tsconfig skipped at the base;
+  - a removed earlier sibling, unnamed and of a repeated name, with the later function made worse;
+  - a formatter's rewrap of an assignment and a callee, and a quote change in a string argument;
+  - an anonymous default export;
   - LIMIT-1's precedence, LIMIT-2's one limit and no limit, and a score equal to its limit;
   - CPX-5's data, generated and `.d.ts` files, and FN-2's Vue blocks and MDX document;
   - the command, with and without `--all` and with and without limits.
@@ -380,7 +399,7 @@ Terms:
   fallow's `health.maxCyclomatic` and `health.maxCognitive` are set to them (design FIND-8).
   Session's call for the version: the gate's findings are the ones to keep.
 - **VS-2** Two findings are the same when they are in the same file and name the same function. A
-  function is matched by its start line, since fallow names an unnamed function `<arrow>` and the
+  function is matched by its start line, and by its column where two start on one line, since fallow names an unnamed function `<arrow>` and the
   analyzer by its place. A function both tools report with different scores is shared, and the
   difference is judged too, since a score decides new against inherited (NEW-1). Session's call.
 - **VS-3** Each finding only one tool reports is traced to the counting rule that differs and judged
@@ -402,7 +421,7 @@ Terms:
 - **VS-5** Branch audits run as the comparison spec's BRA-1 to BRA-3 run them, two merged pull
   requests per repository at the least. They include, where the merges hold one, a branch that makes
   an over-limit function worse, one that takes a function from under to over, and one that adds an
-  unnamed function before another (FN-6). The audits also check how fallow decides that a complexity
+  unnamed function before another, or removes one (FN-6). The audits also check how fallow decides that a complexity
   finding was introduced. A difference that comes only from fallow's rule and design BASE-5 is written down,
   as BRA-3 says, and is not a miss.
 - **VS-6** The time `audit --base` takes on the named root with the most files is measured before and
@@ -415,7 +434,9 @@ Terms:
   spec's BAR-4); the pinned commits, fallow's version and both tools' settings; per root, the counts
   shared, analyzer-only and fallow-only, and each judgment; VS-4's section apart; the branch audits;
   VS-6's times; and each fix with its fixture. The owner reads it before the item closes (design
-  PROOF-3, PROOF-4).
+  PROOF-3, PROOF-4). The item also closes only once the owner's ruling of VS-4 is on the record, and
+  SOLO-5's amendment, with VS-4's release-notes line where it is owed, is in the yakshaver item or
+  written in the judged list as still owed there.
 
 ## Alternatives considered
 
@@ -453,8 +474,8 @@ Terms:
   3's work in yakshaver). The command's `limits` field and its notice show the state to a person or
   an agent.
 - **Unnamed functions are misread when a sibling is added before them.** FN-4 names callbacks from
-  their call, which leaves the shift only among calls of the same callee with no string argument. A wrongly inherited finding
-  passes in silence. FN-6 writes the case down, CASE-1 fixes its behaviour, and VS-5 looks for it on
+  their call, which leaves the shift only among calls of the same callee with no string argument. A
+  removed sibling shifts places too. A wrongly inherited finding passes in silence. FN-6 writes the case down, CASE-1 fixes its behaviour, and VS-5 looks for it on
   real branches. If it shows up there, the judged list says so, and changing design IF-4 is the
   owner's call.
 - **fallow's counting can't be read, or changes between versions.** SCORE-2 falls back to its
@@ -466,6 +487,8 @@ Terms:
   measures it. A cost found too high goes to the speed item, not here.
 - **The speed item may change the same parse.** `2026-11-19-match-fallow-speed` is still an idea.
   Whichever item lands second rebases onto the other. Neither changes the other's requirements.
+- **Work owed outside this repository is forgotten.** SOLO-5's amendment and VS-4's release-notes
+  line are yakshaver's. VS-7 makes the item's close wait for them to be filed or written down as owed.
 - **CRAP findings leave the gate at the swap.** If VS-4 finds the gate shows them today, the owner
   learns how many before the swap, from the judged list.
 
