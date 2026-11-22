@@ -141,8 +141,9 @@ Terms:
   scored. A fallow finding in one of them is set apart (VS-4). Session's call: none of fallow's 178
   health findings on yakshaver (the run VS-4 describes) was in such a file.
 - **FN-3** A function is scored in the same parse that finds the file's imports. The file is not
-  parsed a second time, and for each function the reading keeps only its name path, its location and
-  its two scores. Session's call: the cost is the parse, and it is already paid.
+  parsed a second time. For each function, the reading (what the analyzer holds of a project once it
+  has read it, `Reading` in `src/reading.rs`) keeps only the function's name path, location and two
+  scores. Session's call: the cost is the parse, and it is already paid.
 - **FN-4** A function's own name is the first of these that applies: the name of a function
   declaration or a named function expression; the variable a function is assigned to where it is
   declared (`const read = () => …`); the key of the object property or class member it is (a computed
@@ -152,7 +153,9 @@ Terms:
 - **FN-5** A function's name path is the names of what encloses it, from the outside in, then its
   own. What encloses it is each class and function around it, and each object literal around it. A
   class expression or an object literal takes its name by FN-4's rules for a function (the variable,
-  property or left side it is assigned to), so `const Parser = class {…}` is `Parser`.
+  property or left side it is assigned to), so `const Parser = class {…}` is `Parser`. A class
+  declaration's name is its own. A Vue component's script blocks are one file for this count, in
+  source order.
   Only a class or object literal with a function somewhere inside it takes part in a name path; one
   with none, such as a plain data argument, is passed over and takes no place.
   Each part of a name path is a name and a number. Within one enclosing class, function, object
@@ -187,8 +190,10 @@ Terms:
     Campbell, version 1.7). It adds 1 for each `if`, `else if`, `else`, ternary, `switch`, loop and
     `catch`, and for each run of the same boolean operator (`a && b && c` adds 1, `a && b || c` adds
     2). It adds 1 for a `break` or `continue` to a label, and 1 for a direct recursive call. An `if`,
-    ternary, `switch`, loop or `catch` also adds its nesting depth: how many of those, and how many
-    `try`s, already enclose it inside the function.
+    ternary, `switch`, loop or `catch` also adds its nesting depth: how many of these blocks already
+    enclose it inside the function: the body of an `if`, `else if` or `else`, a ternary's branches, a
+    `switch`, a loop, or a `catch`. An `else if` or `else` adds 1 but no nesting depth. A `try` adds
+    nothing and is not a level of nesting.
 - **SCORE-2** Where fallow's counting departs from SCORE-1, fallow's counting wins, rule by rule, so
   the gate's findings stay the same across the swap. Optional chaining, `??`, default parameters,
   `case` fall-through, labelled jumps, nested functions and JSX are the likely places. The plan's
@@ -221,8 +226,9 @@ Terms:
 
 - **CPX-1** `audit` reports a function over either limit as one finding under the rule `complexity`
   (design FIND-1). It is one finding per function, whichever measures are over. So a reason given for
-  it covers the function, whichever measure moves later (design IF-4). Session's call: design FIND-1
-  lists one kind, and fallow's three rules come from one function too.
+  it covers the function as it later stands on the same branch, whichever measure moves (design
+  IF-4). Session's call: design FIND-1 lists one kind. fallow's three rules (one per measure, and one
+  for a function over both) all describe one function.
 - **CPX-2** Its location is the function's start: its name where it has one, otherwise the first
   character of the function. Its message names the function's readable name path and each measure
   that is over, with its score and limit, then the other measure's score. For example: "`Parser >
@@ -237,8 +243,8 @@ Terms:
   the scores and the limit reach yak). Session's call for the names.
 - **CPX-4** Its fingerprint is made, as design IF-4 says, from the rule, the file's path and the
   function's name path (FN-5), under the existing scheme `yakAnalyzer/v1`. Each part of the name path
-  gives two parts of the digest, its name (empty for an unnamed part) and its number, each
-  length-prefixed as `src/findings.rs` does today. So a name holding ` > ` or ` #2` can't collide
+  gives two parts of the digest, its name (empty for an unnamed part) and its number written
+  in decimal digits, each length-prefixed as `src/findings.rs` does today. So a name holding ` > ` or ` #2` can't collide
   with another path. FN-4's and FN-5's rules are part of the scheme, and are drafts until the swap
   (VER-1). The run's list of rules gains `complexity`, after the five.
 - **CPX-5** No function in a file declared data or generated, or in a `.d.ts` file, is reported
@@ -280,8 +286,8 @@ Terms:
   owner for `--all`.
 - **SOLO-2** The document holds `interfaceVersion`, `limits` (`cyclomatic` and `cognitive`, each a
   number or `null`), `functions` and `notices`. Each entry of `functions` holds `path`, `line`,
-  `column`, `function` (the readable name path), `fingerprint` (the same value `audit` gives the same
-  function's finding), `cyclomatic`, `cognitive` and `over`. Entries are sorted by path, line and
+  `column`, `function` (the readable name path), `fingerprint` (the value `audit` gives, or would give, the
+  function's finding, so it is there for a function `--all` lists that is over nothing), `cyclomatic`, `cognitive` and `over`. Entries are sorted by path, line and
   column. Notices are written as `graph` writes them. Session's call.
 - **SOLO-3** By default, `functions` lists the functions over a limit. With `--all`, it lists every
   function scored, each with `over` empty where it is over nothing. That includes every function when
@@ -292,8 +298,8 @@ Terms:
   accepts names it.
 - **SOLO-5** It is a thin command over a function that `audit` and stage 5's MCP tool also use. The
   MCP tool's addition to design MCP-1, a seventh tool, is owed to the design spec as an amendment
-  (owner). It is made through the yakshaver work item that amends the design spec for stage 2, or its
-  successor, and not in this repository. The command's name, options and document are drafts until
+  (owner). It is made through the yakshaver work item `2026-11-18-analyzer-design-spec-stage-2-amendments`,
+  or its successor if that item has closed, and not in this repository. The command's name, options and document are drafts until
   stage 5 releases the MCP tool, as the declaration keys were drafts until stage 2 ended (the
   comparison spec's FREEZE-1). That stage fixes them with the tool, and may change them first. yak
   never runs the command (owner), so a change before then breaks nothing yak runs. Session's call.
@@ -340,8 +346,11 @@ Terms:
   "complexity" for "the five dead-code kinds": pinned commits (CMP-1), the same roots (CMP-2), clean
   worktrees and hand-written hand-off files (CMP-3), fallow's worktree installed with scripts off
   (CMP-4, CMP-4a), and each root run from that root (CMP-7). The commits are pinned afresh on the day
-  this comparison starts. fallow's version is the one the pack's fallow declaration runs that day,
-  installed as the comparison spec's CMP-6 installs it. fallow runs with its best-case configuration
+  this comparison starts. fallow's version is the one the pack pins that day in `tools/fallow.md`
+  (`install.version`; 3.39.0 when this spec was written, the version stage 2 used), installed as the
+  comparison spec's CMP-6 installs it. SCORE-2 reads that same version. The whole-tree runs use
+  `fallow health --format json`, since `fallow audit` reports only the files a branch changed. The
+  branch audits use `fallow audit --base <ref> --format json`, as the gate does (VS-5). fallow runs with its best-case configuration
   for each repository (the comparison spec's CMP-5), except that both tools use limits of 20
   cyclomatic and 15 cognitive whatever that configuration says: the hand-off files declare them, and
   fallow's `health.maxCyclomatic` and `health.maxCognitive` are set to them (design FIND-8).
@@ -358,7 +367,7 @@ Terms:
 - **VS-4** Set apart and not counted as misses, each listed with its count, as the comparison spec's
   JDG-5 lists what it sets apart: fallow's findings on a Vue `<template>`, its `<component>` rollups,
   its findings in MDX documents and HTML pages (FN-2), and its findings over its CRAP threshold alone.
-  On yakshaver's `main` on 2026-11-22, `fallow health --format json` (fallow 3.15.0, yakshaver's own
+  On yakshaver's `main` on 2026-11-21, `fallow health --format json` (fallow 3.15.0, yakshaver's own
   configuration) gave 178 health findings, and 105 of them were over the CRAP threshold alone.
   The plan's first step checks whether `fallow audit`'s JSON, which the pack maps today, includes
   those. If it does, the gate shows them today, and the judged list says how many leave the gate at
@@ -369,9 +378,12 @@ Terms:
   unnamed function before another (FN-6). The audits also check how fallow decides that a complexity
   finding was introduced. A difference that comes only from fallow's rule and design BASE-5 is written down,
   as BRA-3 says, and is not a miss.
-- **VS-6** The time `audit` takes on the largest named root is measured before and after this item's
-  change: five warm runs each, with the median written in the judged list. No bar is set. The numbers
-  go to `2026-11-19-match-fallow-speed`. Session's call.
+- **VS-6** The time `audit --base` takes on the named root with the most files is measured before and
+  after this item's change, on its pinned commit with that commit's first parent as the base. Each is
+  five warm runs: runs straight after a first run, with the files in the operating system's cache, as
+  `docs/specs/2026-11-19-cold-warm-measurements-design.md` defines them. The median goes in the
+  judged list. No bar is set. The numbers go to this repository's work item
+  `2026-11-19-match-fallow-speed`. Session's call.
 - **VS-7** The judged list holds, at the top, which bar holds and each case left (the comparison
   spec's BAR-4); the pinned commits, fallow's version and both tools' settings; per root, the counts
   shared, analyzer-only and fallow-only, and each judgment; VS-4's section apart; the branch audits;
@@ -385,7 +397,7 @@ Terms:
   design BASE-5 (owner). Until yakshaver tracks inherited functions, it let a branch make an existing
   function arbitrarily worse with nothing at the gate. It also needed a design-spec amendment, and it
   would have ruled differently from design BASE-5's rules for cycles and duplication.
-- **Two rule names, one per measure, as fallow has.** A reason given for the cognitive finding
+- **A rule name per measure, as fallow has (fallow adds a third for both).** A reason given for the cognitive finding
   wouldn't cover the same function going over on cyclomatic, and design FIND-1 lists one kind.
   Rejected (session's call).
 - **SonarSource's definition as the only arbiter.** Every place fallow differs would move findings at
