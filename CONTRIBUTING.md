@@ -71,8 +71,8 @@ node scripts/check-floor.mjs
   entry points with what made each one, the files they reach, the uses of each export, and the
   notices. `yak-analyzer graph --hand-off <file>` reads the project the hand-off file names, with
   its declarations. A run that cannot go on prints one line on standard error and exits 1.
-- `yak-analyzer audit` reads the project as `graph` does and prints one SARIF 2.1.0 report of the
-  five dead-code kinds, with the notices as the run's notifications. `yak-analyzer audit
+- `yak-analyzer audit` reads the project as `graph` does and prints one SARIF 2.1.0 report of six
+  kinds, the five dead-code kinds and complexity, with the notices as the run's notifications. `yak-analyzer audit
   --hand-off <file> --base <commit>` reads with the hand-off file's declarations, reads the base
   commit from git as well, and marks each finding new or unchanged. A command line it refuses
   exits 2.
@@ -94,8 +94,11 @@ reports, `unused-file`, `unused-export`, `unused-type`, `unresolved-import`,
 raises the interface version, which `interface` prints and yak checks before it runs the analyzer.
 A change that only adds, such as a new rule name, does not raise it.
 
-The rules that name a function in a `complexity` finding's fingerprint, its name path, are part of
-the scheme and a draft until the swap, the pack release that replaces fallow with the analyzer in
+A `complexity` finding carries its function's scores in its property bag, `complexity`:
+`function`, `cyclomatic`, `cognitive`, `cyclomaticLimit`, `cognitiveLimit` and `over`, and with a
+base `base`. Interface version 1 covers those names and meanings, since the engine will read them,
+and the rules that name a function in the finding's fingerprint, its name path, as part of the
+scheme. Both are a draft until the swap, the pack release that replaces fallow with the analyzer in
 yak: nothing yak runs reads them before then, so changing them raises nothing. From the swap they
 are fixed, and a change that breaks them raises the interface version.
 
