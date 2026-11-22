@@ -1728,6 +1728,14 @@ fn a_function_added_or_removed_before_another_can_take_its_place() {
                     body(4)
                 ),
             ),
+            (
+                "src/dropped.js",
+                &format!(
+                    "export const dropped = {{ go(a) {}, go(a) {} }};\n",
+                    body(6),
+                    body(4)
+                ),
+            ),
         ],
     );
 
@@ -1763,6 +1771,10 @@ fn a_function_added_or_removed_before_another_can_take_its_place() {
             "src/removed.ts",
             &format!("export const removed = [(a) => {}];\n", body(5)),
         )
+        .write(
+            "src/dropped.js",
+            &format!("export const dropped = {{ go(a) {} }};\n", body(5)),
+        )
         .commit();
 
     let hand_off = limited(&project);
@@ -1775,6 +1787,7 @@ fn a_function_added_or_removed_before_another_can_take_its_place() {
     assert_eq!(
         complexities(&run),
         [
+            ("src/dropped.js", "dropped > go", Some("unchanged")),
             ("src/gained.ts", "<anonymous 2> > run", Some("new")),
             ("src/removed.ts", "<anonymous 1>", Some("unchanged")),
             ("src/renamed.ts", "after", Some("new")),
@@ -1798,6 +1811,22 @@ fn a_function_added_or_removed_before_another_can_take_its_place() {
     // The one left is compared with the removed one's scores, which were higher.
     assert_eq!(
         removed["properties"]["complexity"]["base"],
+        json!({ "cyclomatic": 7, "cognitive": 6 })
+    );
+
+    let dropped = run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .find(|result| {
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                == json!("src/dropped.js")
+        })
+        .expect("the finding in src/dropped.js");
+
+    // So is a later function of a repeated name, once the earlier one of that name is removed.
+    assert_eq!(
+        dropped["properties"]["complexity"]["base"],
         json!({ "cyclomatic": 7, "cognitive": 6 })
     );
 }
