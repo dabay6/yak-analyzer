@@ -31,6 +31,8 @@ test('the guide names the commands, and says how a fixture is written and run (s
     'entry points with what made each one',
     '`yak-analyzer audit` reads the project as `graph` does',
     '--hand-off <file> --base <commit>`',
+    '`yak-analyzer complexity` reads the project as `audit` does',
+    '`yak-analyzer complexity --hand-off <file> --all`',
     'not part of the interface\nversion',
     '## Fixtures',
     '`tests/support/project.rs`',
@@ -40,14 +42,16 @@ test('the guide names the commands, and says how a fixture is written and run (s
   }
 });
 
-test('the guide says what interface version 1 covers, and that a change to it raises the number (comparison spec FREEZE-1)', () => {
+test('the guide says what interface version 1 covers, and that a change that breaks it raises the number (comparison spec FREEZE-1; complexity spec VER-1)', () => {
   for (const said of [
     'Interface version 1 covers',
     '`entries`, `data`, `generated`, `internal`',
     '`configEntries`, `scriptCommands` and `commandFiles`',
-    '`unused-file`, `unused-export`, `unused-type`,\n`unresolved-import` and `circular-dependency`',
+    '`unused-file`, `unused-export`, `unused-type`, `unresolved-import`,\n`circular-dependency` and `complexity`',
     '`yakAnalyzer/v1`',
-    'A change to any of them raises\nthe interface version',
+    'A change that breaks any of them\nraises the interface version',
+    'A change that only adds, such as a new rule name, does not raise it.',
+    'a draft until the swap',
   ]) {
     assert.ok(guide.replaceAll('\r\n', '\n').includes(said), said);
   }
