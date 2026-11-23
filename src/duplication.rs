@@ -5,7 +5,6 @@
 //! SHOW-1 to SHOW-5).
 
 use std::collections::{BTreeSet, HashMap};
-use std::fmt::Write as _;
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
@@ -425,7 +424,7 @@ impl<'r> Text<'r> {
             .first()?
             .1
             .iter()
-            .map(|item| hex(&item.digest))
+            .map(|item| findings::hex(&item.digest))
             .collect();
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
 
@@ -584,18 +583,6 @@ fn place(path: &str, run: &[Item]) -> Place {
         start: first.map_or(0, |item| item.start),
         end: last.map_or(0, |item| item.end),
     }
-}
-
-/// A digest in lower-case hexadecimal digits.
-fn hex(digest: &[u8]) -> String {
-    let mut digits = String::with_capacity(digest.len() * 2);
-
-    for byte in digest {
-        // Writing into a String cannot fail.
-        let _ = write!(digits, "{byte:02x}");
-    }
-
-    digits
 }
 
 /// The groups left once each that lies inside another is dropped: one whose every copy lies inside a

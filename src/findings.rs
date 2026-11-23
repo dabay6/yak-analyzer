@@ -206,9 +206,14 @@ pub fn fingerprint(rule: Rule, parts: &[&str]) -> String {
         hasher.update(part.as_bytes());
     }
 
-    let mut digits = String::with_capacity(FINGERPRINT_DIGITS);
+    hex(&hasher.finalize()[..FINGERPRINT_DIGITS / 2])
+}
 
-    for byte in hasher.finalize().iter().take(FINGERPRINT_DIGITS / 2) {
+/// Bytes in lower-case hexadecimal digits, two to a byte.
+pub fn hex(bytes: &[u8]) -> String {
+    let mut digits = String::with_capacity(bytes.len() * 2);
+
+    for byte in bytes {
         // Writing into a String cannot fail.
         let _ = write!(digits, "{byte:02x}");
     }
