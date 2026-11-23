@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/dabay6/yak-analyzer/compare/v0.12.0...v0.12.1) (2026-11-23)
+
+
+### Performance Improvements
+
+* **reading:** read the working copy's scripts ahead on several threads ([f36aea1](https://github.com/dabay6/yak-analyzer/commit/f36aea140abbb3f7dfe349c038c36bdc76442f9c))
+
 ## [0.12.0](https://github.com/dabay6/yak-analyzer/compare/v0.11.0...v0.12.0) (2026-11-23)
 
 
