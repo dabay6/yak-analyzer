@@ -799,3 +799,205 @@ fn finds_copies_in_scripts_and_vue_blocks_only() {
         [vec![("src/Panel.vue", 7, 11), ("src/util.ts", 2, 6)]]
     );
 }
+
+#[test]
+fn finds_a_run_of_members_two_classes_share() {
+    let project = Project::new("duplication-class-body");
+
+    project
+        .write(
+            "src/shapes.ts",
+            r#"export class Square {
+  width = 10;
+  height = 20;
+  area() { return this.width * this.height; }
+  name() { return "square"; }
+}
+export class Plate {
+  width = 10;
+  height = 20;
+  area() { return this.width * this.height; }
+  name() { return "plate"; }
+}
+"#,
+        )
+        .commit();
+
+    // A class's body is a list, so its members join a run (spec COPY-1).
+    assert_eq!(
+        groups(&looking(&project, &json!({ "duplicationMinimum": 5 }))),
+        [vec![("src/shapes.ts", 2, 4), ("src/shapes.ts", 8, 10)]]
+    );
+}
+
+#[test]
+fn reads_types_as_code() {
+    let project = Project::new("duplication-types");
+
+    project
+        .write(
+            "src/count.ts",
+            r#"export function first(items: number[], offset: number) {
+  const total: number = items.length + offset;
+}
+export function second(items: number[], offset: number) {
+  const total: Count = items.length + offset;
+}
+export function third(items: number[], offset: number) {
+  const total: number = items.length + offset;
+}
+"#,
+        )
+        .write(
+            "src/point.ts",
+            "export interface Point { x: number; y: number; label: string }\n",
+        )
+        .write(
+            "src/place.ts",
+            "export interface Point { x: number; y: number; label: string }\n",
+        )
+        .commit();
+
+    // `second`'s statement differs only in its annotation, so it is no copy of the others; the
+    // interfaces are copies (spec COPY-1, SAME-1).
+    assert_eq!(
+        groups(&looking(&project, &json!({ "duplicationMinimum": 5 }))),
+        [
+            vec![("src/count.ts", 2, 2), ("src/count.ts", 8, 8)],
+            vec![("src/place.ts", 1, 1), ("src/point.ts", 1, 1)],
+        ]
+    );
+}
+
+#[test]
+fn compares_a_tagged_template_with_an_invalid_escape_by_its_raw_text() {
+    let project = Project::new("duplication-raw-template");
+
+    project
+        .write(
+            "src/tex.ts",
+            r"export function one(value: string) {
+  const shown = latex`\unit{${value}} and \xyz`;
+  return shown;
+}
+export function two(value: string) {
+  const shown = latex`\unit{${value}} and \xyz`;
+  return shown;
+}
+export function three(value: string) {
+  const shown = latex`\unit{${value}} and \xzw`;
+  return shown;
+}
+",
+        )
+        .commit();
+
+    // The pieces have no cooked value, so their raw text is compared: `three`'s differs (spec SAME-1).
+    assert_eq!(
+        groups(&looking(&project, &json!({ "duplicationMinimum": 5 }))),
+        [vec![("src/tex.ts", 2, 3), ("src/tex.ts", 6, 7)]]
+    );
+}
+
+#[test]
+fn loosens_strings_alone_and_numbers_alone() {
+    let project = Project::new("duplication-loosened-alone");
+
+    project
+        .write(
+            "src/s.ts",
+            r#"export function alpha(size: number) {
+  const label = format("first", size);
+  return describe(label, "first");
+}
+export function beta(size: number) {
+  const label = format("second", size);
+  return describe(label, "second");
+}
+"#,
+        )
+        .write(
+            "src/n.ts",
+            r#"export function gamma(label: string) {
+  const size = measure(label, 10);
+  return describe(label, size * 10);
+}
+export function delta(label: string) {
+  const size = measure(label, 20);
+  return describe(label, size * 20);
+}
+"#,
+        )
+        .commit();
+
+    let found = |ignore: Value| {
+        groups(&looking(
+            &project,
+            &json!({ "duplicationMinimum": 5, "duplicationIgnore": ignore }),
+        ))
+        .into_iter()
+        .map(|group| {
+            group
+                .into_iter()
+                .map(|(path, first, last)| (path.to_owned(), first, last))
+                .collect()
+        })
+        .collect::<Vec<Vec<(String, u64, u64)>>>()
+    };
+    let at = |path: &str, first: u64, last: u64| (path.to_owned(), first, last);
+
+    // Each word loosens only its own kind of value (spec SAME-2).
+    assert_eq!(found(json!([])), Vec::<Vec<(String, u64, u64)>>::new());
+    assert_eq!(
+        found(json!(["strings"])),
+        [vec![at("src/s.ts", 2, 3), at("src/s.ts", 6, 7)]]
+    );
+    assert_eq!(
+        found(json!(["numbers"])),
+        [vec![at("src/n.ts", 2, 3), at("src/n.ts", 6, 7)]]
+    );
+}
+
+#[test]
+fn jsx_reindented_and_rewrapped_is_the_same_copy() {
+    let compact = "export function One({ items }) {\n  const visible = items.filter((item) => item.shown);\n  return <ul className=\"list\">{visible.map((item) => <li key={item.id}>Item {item.name}</li>)}</ul>;\n}\n";
+    let rewrapped = r#"export function Two({ items }) {
+    const visible = items.filter(
+        (item) => item.shown,
+    );
+    return (
+        <ul className="list">
+            {visible.map((item) => (
+                <li key={item.id}>
+                    Item {item.name}
+                </li>
+            ))}
+        </ul>
+    );
+}
+"#;
+    let alike = Project::new("duplication-jsx-alike");
+    let wrapped = Project::new("duplication-jsx-rewrapped");
+
+    alike
+        .write("src/a.tsx", compact)
+        .write("src/b.tsx", &compact.replace("One", "Two"))
+        .commit();
+    wrapped
+        .write("src/a.tsx", compact)
+        .write("src/b.tsx", rewrapped)
+        .commit();
+
+    let pack = json!({ "duplicationMinimum": 5 });
+    let first = looking(&alike, &pack);
+    let second = looking(&wrapped, &pack);
+
+    assert_eq!(
+        groups(&second),
+        [vec![("src/a.tsx", 2, 3), ("src/b.tsx", 2, 13)]]
+    );
+    // Indentation and wrapping change neither the fingerprint nor the counts (spec SAME-1, SIZE-1).
+    for key in ["fingerprint", "tokens", "lines"] {
+        assert_eq!(first["groups"][0][key], second["groups"][0][key], "{key}");
+    }
+}
