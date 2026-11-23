@@ -8,8 +8,8 @@ answers no issue.
 **Amends:**
 
 - `docs/specs/2026-11-11-reading-a-project-design.md` (**the reading spec** below), its KEY-1 and
-  KEY-3: `duplicationMinimum` gets its unit, four keys are added, and one list key replaces where
-  the others join (TUNE-1 to TUNE-5 below).
+  KEY-3: `duplicationMinimum` gets its unit, five keys are added, three of them lists of text that
+  are neither globs nor paths, and one list key replaces where the others join (TUNE-1 to TUNE-6 below).
 - `docs/specs/2026-11-21-complexity-findings-design.md` (**the complexity spec** below), its
   Non-goals: duplication, left there to "a later item", is this item.
 
@@ -51,31 +51,52 @@ Terms:
 - **yakshaver**, **yak**, **the engine**, **the pack**, **the gate**, **the base**, **inherited**,
   **the swap**, **the plan**, **the hand-off file**, **the named repositories**, **the judged list**
   and **the report folder** are as the complexity spec defines them.
+- **The dead-code spec** is `docs/specs/2026-11-13-dead-code-findings-design.md`. Its COMMIT-4
+  notice is the one `src/inherit.rs` gives today, as the complexity spec's NEW-4 changed it.
+- **A source** of a declaration is the pack or the project: the hand-off file keeps the two apart for
+  each stack.
 - **fallow** is the tool yak runs today for dead code, complexity and duplication (open source,
   `fallow-rs/fallow`). Its duplication finder reports **clone groups**: runs of tokens, which can
   start and end mid-line, that appear in two or more places. Its `duplicates.mode` setting says how
   loosely tokens match; all four named repositories set `weak`, which ignores the values of string
-  literals, and keep fallow's defaults otherwise: at least 50 tokens, 5 lines and 2 copies. Its
-  `ignoredClones` setting silences a group a person has reviewed.
+  literals, and keep fallow's defaults otherwise: at least 50 tokens, 5 lines and 2 copies. (Read
+  by this item's brainstorm from the four repositories' fallow configurations and fallow 3.39.0's
+  defaults on 2026-11-23, and on the work item's record; YARD-1's first step reads them again on
+  the pinned commits.) Its `ignoredClones` setting silences a group a person has reviewed. Its
+  tokens are its own lexer's, which need not count as SIZE-1 does, so "50 tokens" in the two tools
+  is not one size.
 - **A statement list** is a list of statements in the source: a file's top level, a block's body
   (a function's, a loop's, an `if`'s and so on), a `switch` case's statements, or a class's body,
-  whose members count as its statements. Vue components' script blocks are one file, in source
-  order.
-- **A run** is one or more statements next to each other in one statement list. **A copy** is a run
+  whose members count as its statements. A Vue component's `<script>` and `<script setup>` blocks
+  are one file for finding copies, but each block's top level is a statement list of its own, so no
+  run crosses from one block into the other.
+- **A run** is one or more statements next to each other in one statement list. (One execution of
+  the analyzer is called an invocation here, so the word isn't used twice.) **A copy** is a run
   that is the same as another run (SAME-1 to SAME-4). **A group** is all the copies of one run,
   two or more.
 - **A token** is a piece of source as ECMAScript's lexical grammar counts it: an identifier or
   keyword, a punctuator, a literal, each piece of a template literal, and a JSX text. Comments and
-  white space are not tokens.
+  white space are not tokens, and neither are the semicolons and trailing commas a formatter may
+  add or drop, nor parentheses that change nothing (SAME-1), so a formatter's pass moves no count.
 - **Names** are identifiers: the names of variables, parameters, functions, classes, properties,
-  object keys, members and labels, and JSX tag and attribute names. Keywords, `this` and operators
-  are not names.
+  object keys, members and labels, type names and type parameters, and JSX tag and attribute names.
+  Keywords, `this` and operators are not names.
+- **Types are code** for this item: type annotations, type arguments and `as` or `satisfies`
+  expressions are part of a statement's shape and its tokens, and type-only statements (`type`
+  aliases, interfaces, `declare` statements) join runs like any other. Session's call: a repeated
+  type is as much a refactor candidate as repeated code, and leaving types out would make two runs
+  that differ only in types one group.
+- **A callee chain** is what a call calls, written as the complexity spec's FN-4 writes a callee:
+  its names joined by `.`, a call inside the chain as `()` without its arguments, and a tagged
+  template inside the chain as ``` `` ``` without its contents. So `it.each(rows)("x", fn)` calls
+  the chain `it.each()`, ``it.each`a | b`("x", fn)`` the chain ``it.each`` ``, and
+  `test.only("x", fn)` the chain `test.only`.
 - **A test callee** is a call that runs a test, such as `it(…)` or `test(…)`, named by a
   declaration (TUNE-5), never by the analyzer's code (CONTRIBUTING.md: a tool's convention is a
   declaration).
 - IDs with no prefix word, such as COPY-1, are this spec's. No prefix of this spec is used by the
-  design spec or an earlier spec of this repository. Design IDs carry "design"; the complexity
-  spec's and the reading spec's carry those words.
+  design spec or an earlier spec of this repository. Design IDs carry "design", as "design DECL-2";
+  the complexity spec's, the reading spec's and the dead-code spec's carry those words.
 
 ## Goals, non-goals and anti-goals
 
@@ -131,7 +152,9 @@ Terms:
   imports repeat across files by nature, and the fix for them is not a shared function. Session's
   call.
 - **COPY-3** A statement that holds a call to a test callee (TUNE-5) anywhere inside it never joins
-  a run as a whole, and nothing inside a test callee's callback is looked at. Runs are still looked
+  a run as a whole, and nothing inside a test callee's callback is looked at. A test callee's
+  callback is any function passed as an argument to the call, or to any call in its callee chain:
+  in `it.each(rows)("x", (row) => {…})` the arrow is one. Runs are still looked
   for in the statement's other statement lists, outside those callbacks: so in
   `describe("x", () => { beforeEach(() => {…}); it("y", () => {…}); })`, the `beforeEach` call can
   join a run with another `describe`'s, and its callback's body is searched, while the `it` call and
@@ -151,7 +174,11 @@ Terms:
 
 - **SAME-1** Two runs are the same when they have the same number of statements and each pair of
   statements has the same syntax: the same kinds of node in the same shape, whatever the
-  formatting, comments, quotes, optional semicolons or trailing commas. Within that, by default:
+  formatting, comments, quotes, optional semicolons or trailing commas. Parentheses that change
+  nothing are not part of the shape: `(a + b)` and `a + b` alone as a statement are the same, while
+  `(a + b) * c` and `a + b * c` are not, since their trees differ. A property key or a member is
+  its name, written bare or quoted (`{ a: 1 }` and `{ "a": 1 }` are the same); a computed key
+  (`{ [a]: 1 }`) is not a name. Within that, by default:
   each name must be the same name, each string the same value, and each number the same value
   (design FIND-9: "the same once whitespace and comments are dropped"). Session's call for syntax
   over tokens: a formatter's rewrap or a quote change then never splits a group.
@@ -174,7 +201,8 @@ Terms:
 - **SIZE-1** A run's size is its tokens and its lines. Its tokens are counted in each copy, and the
   group's is the fewest of its copies. Its lines are those of each copy from the first statement's
   first line to the last statement's last line that hold a token, and the group's is the fewest of
-  its copies. Session's call: a blank or comment line doesn't make a run bigger.
+  its copies. Session's call: a blank or comment line doesn't make a run bigger. So a copy's span,
+  from its first line to its last, can be longer than the group's line count.
 - **SIZE-2** A group is reported when its tokens are at least `duplicationMinimum`, its lines are at
   least `duplicationMinimumLines` where that is declared, and it has at least `duplicationCopies`
   copies (TUNE-1 to TUNE-3). Session's call.
@@ -194,38 +222,41 @@ Terms:
   says what SAME-2 loosens. Without it, nothing is loosened. Another word can't be used, and the line
   that refuses it names the three. Where the project states it, the project's list replaces the
   pack's, an empty list included, unlike every other list key, which joins (the reading spec's
-  KEY-3). Among stacks of one source, the later stack's list wins, as for a number (the complexity
+  KEY-3). Among stacks of one source (Terms), the later stack's list wins, as for a number (the complexity
   spec's LIMIT-1). Session's call: the pack's default is expected to loosen `strings`, and a list
   that joined could never take it back. A list of words is used, not three true-or-false keys,
   because the hand-off format lets a project state only a list of text or a positive whole number.
-- **TUNE-5** `duplicationTestCallees`, a list of names, names the test callees (COPY-3). A call is a
-  test callee's when the first name of its callee chain is in the list: with `it` listed, `it(…)`,
-  `it.only(…)`, `it.skip(…)` and `it.each(rows)(…)` all are. A name that is empty or holds white
-  space or a `.` can't be used. The pack's and the project's lists join, as lists do. Without it,
-  no call is a test callee's. Session's call, for the rule that a tool's convention is a declaration.
+- **TUNE-5** `duplicationTestCallees`, a list of callee chains (Terms), names the test callees
+  (COPY-3). A call is a test callee's when its callee chain is exactly one in the list: with `it`,
+  `it.only` and `it.each()` listed, `it(…)`, `it.only(…)` and `it.each(rows)(…)` are, and `it.skip(…)`
+  is not. So `test.beforeEach(…)` and `test.describe(…)` are not test callees unless listed, and hooks
+  keep counting. An entry that is not a callee chain as Terms writes one can't be used. The pack's
+  and the project's lists join, as lists do. Without it, no call is a test callee's. Session's call,
+  for the rule that a tool's convention is a declaration: the pack lists each form its test
+  frameworks use.
 - **TUNE-6** `duplicationAccepted`, a list of text, holds the groups a person has accepted (QUIET-1).
-  Each entry is a group's fingerprint, a `/`, and its number of copies, as `1f0a…9b/3`. An entry of
-  another shape can't be used. The lists join, as lists do. Session's call for the shape (owner: keyed
+  Each entry is a group's fingerprint, as `audit` writes one (lower-case hexadecimal digits, as many
+  as `src/findings.rs` gives every fingerprint), a `/`, and its number of copies, a whole number of 2
+  or more, as `1f0a…9b/3`. An entry of another shape can't be used, and the line that refuses it
+  gives the shape. The lists join, as lists do. Session's call for the shape (owner: keyed
   by the fingerprint and the copy count).
-- **TUNE-7** Every number key takes one value for the run: the project's over the pack's, and among
+- **TUNE-7** Every number key takes one value for the invocation: the project's over the pack's, and among
   values from the same source the later stack's (the complexity spec's LIMIT-1). Both sides of a
   comparison use the declarations in force now (design BASE-3).
 
 ### The finding
 
 - **DUP-1** `audit` reports each group as one finding under the rule `duplication` (design FIND-1).
-  The run's list of rules gains `duplication`, after `complexity`.
-- **DUP-2** Its first location is the first of its copies by path and line, or with a base, the copy
+  The SARIF report's list of rules gains `duplication`, after `complexity`.
+- **DUP-2** Its first location is the first of its copies by path and line; for a new group, the copy
   FRESH-3 names. Its related locations are the other copies, by path and line (design IF-2). Each
   location has the copy's first line; its region runs to the copy's last line. Its message says how
-  many copies there are, the size, and where each copy is, with no code: "3 copies of a 14-line run
-  (82 tokens): `src/a.ts` lines 10–23, `src/b.ts` lines 40–53, `src/c.ts` lines 7–20." Session's
-  call.
+  many copies there are, the size (SIZE-1's counts), and where each copy is, as its span from first
+  line to last, with no code: "3 copies of a 12-line run (82 tokens): `src/a.ts` lines 10–23,
+  `src/b.ts` lines 40–53, `src/c.ts` lines 7–20." Session's call.
 - **DUP-3** Its result carries a SARIF property bag, `properties.duplication`, with `tokens` and
   `lines` (the group's size, SIZE-1), and `copies`, a list of `{ "path", "startLine", "endLine" }` in
-  the order of DUP-2's locations. With a base, it also carries `changed`, the list of copies, by
-  their place in `copies`, that hold a line the branch added or changed. Session's call for the
-  names. Like the complexity spec's CPX-3, the names are a draft until the swap (VERS-1).
+  the order of DUP-2's locations. Session's call for the names. Like the complexity spec's CPX-3, the names are a draft until the swap (VERS-1).
 - **DUP-4** Its fingerprint is made, as design IF-4 says, from the rule and the run itself, under the
   existing scheme `yakAnalyzer/v1`: SAME-1's form of the run's statements, with what SAME-2 loosens
   written as a placeholder, so two runs SAME-1 and SAME-2 count the same give the same fingerprint
@@ -233,47 +264,73 @@ Terms:
   move or a copy is added. The form written into the digest is the builder's (Left to the builder);
   once the swap is made it is part of the scheme, and changing it breaks every recorded reason and
   every accepted group.
+- **DUP-5** The fingerprint and every exact form (FRESH-1) are the same on every machine for the same
+  code: they are built from the syntax tree's values, never from slices of the source, and every
+  line ending inside a string, template piece or JSX text is written as one line feed, so a checkout
+  with CRLF line endings and one with LF give the same fingerprints. Session's call: accepted groups
+  are shared through the project's declarations, and a reason through the work item, across
+  machines.
 
 ### Accepted groups
 
 - **QUIET-1** A group whose fingerprint and number of copies are an entry of `duplicationAccepted` is
   not reported by `audit`, at the base or on the branch. A group of the same run with another number
   of copies, or a run changed so that its fingerprint changes, is reported again (owner: "keyed by
-  the group's fingerprint and copy count").
-- **QUIET-2** An entry that matches no group found is named in a notice, so a person can remove it.
+  the group's fingerprint and copy count"). Acceptance applies after SAME-4: an accepted group still
+  keeps the smaller groups inside it from being reported, so accepting a function's group doesn't
+  bring its body's group to light. Session's call.
+- **QUIET-2** An entry that matches no group found is named in a notice, with its source (Terms), so
+  a person can remove it from the project's declarations, or ask for it to leave the pack's.
   Session's call.
 - **QUIET-3** Where a test's setup can't be shared, a person accepts its group the same way (owner).
+- **QUIET-4** A reason given at the gate doesn't do this job. It covers a finding on its own branch
+  (design IF-4), and under FRESH-1 any later branch that touches a copy of a reviewed group is held
+  again, with a new reason asked for each time. An accepted group stays silent on every branch while
+  its run and its number of copies stay as they were, and the decision is in the project's
+  declarations, where a reader of the code can see it. The owner chose it after fallow's
+  `ignoredClones` (owner).
 
 ### New against inherited
 
 - **FRESH-1** With a base, a group is `new` when the branch added or changed it, and `unchanged`
   otherwise (owner: "changing a copy should count too, because if you have to change a copy you
-  would most likely have to change the other copy as well"). The branch added or changed it when any
-  of these holds:
-  - one of its copies holds a line the branch added or changed;
-  - the base has no group that contains it: a group whose run holds this group's run, statement for
-    statement, with each of this group's copies lying in a copy of it in the same file, its path
-    moved through git's renames (design BASE-4, BASE-5);
-  - the base has such a group, and the branch changed or removed a line inside one of its copies, or
-    added lines between two of its lines, a whole copy removed included.
+  would most likely have to change the other copy as well"). It is `unchanged` when both of these
+  hold, and `new` otherwise:
+  - the base has a group with the same fingerprint (DUP-4) and the same number of copies, among the
+    base's groups as SAME-3, SAME-4 and SIZE-2 leave them, accepted ones included (QUIET-1): the
+    groups `audit` would report at the base before acceptance;
+  - each of its copies pairs with a different copy of that base group in the same file, its path
+    moved through git's renames (design BASE-4), and with the same **exact form**: SAME-1's form
+    with nothing loosened, whatever `duplicationIgnore` says.
 
-  So pasting a further copy is new, fixing one line in one of two old copies is new, and removing
-  one of three copies leaves the other two new (owner). A group the branch never touched, in its
-  copies or in its base group's, is unchanged, even where the branch's edits around it moved its
-  lines. This departs from design BASE-5, under which shortening an old duplicate is not new; the
-  amendment is owed (OWED-1).
-- **FRESH-2** Which lines the branch added, changed or removed is read from git: the difference
-  between the base commit and the working tree, uncommitted edits included, with renames found as
-  the dead-code spec's INH-2 finds them. Every line of a file git doesn't track, or that the base
-  doesn't have, is added. The analyzer runs no diff of its own. Session's call: git already holds the
-  answer, and the analyzer already asks it for renames.
-- **FRESH-3** A new group's first location is its first copy, by path and line, that holds a line the
-  branch added or changed, or its first copy where none does. Its message adds which copies the branch
-  added or changed, or, where it changed only the base's copies, which: "The branch changed the copy
-  at `src/c.ts` lines 7–20 at the base." Session's call.
+  So pasting a further copy is new (the count differs); fixing one line in one of two old copies is
+  new (the copies split into shorter runs, whose fingerprints the base lacks); removing one of three
+  copies leaves the other two new (the count differs); changing a string in one copy while
+  `strings` is loosened is new by the second test, though the fingerprint stays; and editing one copy
+  out of the group while pasting another elsewhere is new, since the pasted copy has no partner in
+  its file (owner). Moving a copy to another file makes the group new too. A group the branch never
+  touched is unchanged, even where the branch's edits around it moved its lines, since neither test
+  holds a line. A comment, or a formatter's pass or codemod that leaves the syntax as it was,
+  changes no exact form and no token count (SIZE-1), so it makes no group new, with one exception:
+  a rewrap can change a copy's line count, and a group that a rewrap takes over
+  `duplicationMinimumLines` is new, since the base had no such group (Risks). This departs from design BASE-5, under which shortening an
+  old duplicate is not new and inheritance is decided by a base run that contains the group; the
+  amendment is owed (OWED-1). Session's call for matching by fingerprint, count and exact forms,
+  close to the scheme `audit` already uses, over a containment test on the base's groups or the
+  lines git finds changed: the first maps lines between the two trees, and the second marks every
+  group new after a formatter's pass. Duplication's fingerprint holds no path, so this comparison
+  doesn't go through the dead-code kinds' count of fingerprints with their paths moved
+  (`Finding::moved` in `src/findings.rs`), as complexity's doesn't either.
+- **FRESH-2** FRESH-1 reads no line differences: it needs only the base's groups, found from the
+  base's files as `audit --base` already reads them, with the declarations in force now (design
+  BASE-2, BASE-3). Session's call.
+- **FRESH-3** A new group's first location is its first copy, by path and line, whose exact form no
+  copy of the base's group of the same fingerprint has, or its first copy where there is none. Its
+  message adds which copies are new or changed, or, where none is, what the base had: "At the base
+  this run had 3 copies." or "The base reports no group of this run." Session's call.
 - **FRESH-4** A file skipped at the base leaves the duplication findings compared, as the complexity
   spec's NEW-4 does for complexity. A script skipped at the base has no runs there, so a group with a
-  copy in it has no base group that contains it, and is new. A skipped `package.json`, workspace list
+  copy in it has fewer copies at the base, or none, and is new. A skipped `package.json`, workspace list
   or tsconfig changes no run. The notice the dead-code spec's COMMIT-4 gives says that duplication
   findings were compared too. Session's call: under COMMIT-4 one broken base file would make every
   group new, the second anti-goal.
@@ -284,8 +341,9 @@ Terms:
   and prints one JSON document on standard output. Each option is taken at most once, in either order.
   It takes no base. Session's call, after the complexity spec's SOLO-1.
 - **SHOW-2** The document holds `interfaceVersion`, `settings` (`minimumTokens`, `minimumLines`,
-  `copies` and `ignore`, as the declarations give them, `null` where one isn't declared), `groups`
-  and `notices`. Each group holds `fingerprint`, `tokens`, `lines`, `copies` (as DUP-3) and
+  `minimumCopies`, `ignore`, `testCallees` and `accepted`, each the value in force: as declared, or where a
+  key isn't declared, what TUNE-2 to TUNE-6 say holds without it, so `minimumCopies` is 2 and the lists are
+  empty; `minimumTokens` and `minimumLines` are `null` where undeclared), `groups` and `notices`. Each group holds `fingerprint`, `tokens`, `lines`, `copies` (as DUP-3) and
   `accepted`. Groups are sorted by their first copy's path and line. Notices are written as `graph`
   writes them. Session's call.
 - **SHOW-3** By default, `groups` lists the groups `audit` would report. With `--all`, it also lists
@@ -294,10 +352,9 @@ Terms:
   error when it couldn't run; 2 for a command line it refuses. The refusal's list of what the binary
   accepts names it.
 - **SHOW-5** It is a thin command over a function that `audit` also uses, and that stage 5's
-  duplicates tool (design MCP-1) will use. That tool, given a piece of code, finds its copies; given
-  none, it lists the groups as this command does. The second form is an addition to design MCP-1,
-  owed there (OWED-1). The command's name, options and document are drafts until stage 5 releases the
-  tool; yak never runs the command, so a change before then breaks nothing. Session's call, as the
+  duplicates tool (design MCP-1) can use. Whether that tool also lists every group is stage 5's to
+  decide; nothing is owed to MCP-1 now. The command's name, options and document are drafts until
+  stage 5; yak never runs the command, so a change before then breaks nothing. Session's call, as the
   complexity spec's SOLO-5.
 
 ### The interface version
@@ -326,9 +383,13 @@ Terms:
     unknown word in `duplicationIgnore`, a project's empty `duplicationIgnore` replacing the pack's,
     and a malformed `duplicationAccepted` entry;
   - QUIET-1's accepted group, the same run with one more copy, and QUIET-2's stale entry;
-  - each case of FRESH-1: a copy pasted, a copy edited, one of three copies removed, a group with
-    edits only around it, a group in a renamed file, and a group only one side has; FRESH-4's skipped
-    script;
+  - each case of FRESH-1: a copy pasted, a copy edited, one of three copies removed, one copy edited
+    away while another is pasted, a copy moved to another file, a group with edits only around it, a
+    group in a renamed file, a rewrap that leaves a group as it was and one that takes it over the
+    line minimum, and a group only one side has; FRESH-4's skipped script;
+  - DUP-5's same project with CRLF and with LF line endings, giving the same fingerprints;
+  - types as code: two runs differing only in a type annotation, and repeated interfaces; a tagged
+    template callee (``it.each`…`(…)``);
   - the command, with and without `--all`, and with and without the declarations.
 - **FIXT-2** No fixture copies code from fallow or from the named repositories (CONTRIBUTING.md).
 
@@ -337,28 +398,36 @@ Terms:
 - **YARD-1** The comparison runs as the complexity spec's VS-1 runs: pinned commits, the same roots,
   clean worktrees, hand-written hand-off files, fallow's version the one the pack pins that day, each
   root run from that root. fallow keeps each repository's own duplication settings (`weak`, with
-  fallow's defaults today) and its `ignoredClones`, and runs its duplication command with JSON output (`fallow dupes --format json`; the plan's first
-  step checks the name and flags on the pinned version). The
-  analyzer runs `yak-analyzer duplication --hand-off <file> --all` with the settings YARD-4 tries.
-  Session's call: the yardstick is what the gate shows today.
-- **YARD-2** Two groups are matched by place, not by tokens: a fallow group and an analyzer group are
-  the same area when each of the analyzer group's copies shares at least one line with a copy of the
-  fallow group, in the same file. Each group of either tool is then shared, fallow-only or
-  analyzer-only. Session's call: the two tools' copies start and end at different places by design
-  (COPY-1).
+  fallow's defaults today) with its `ignoredClones` emptied, and runs its duplication command with
+  JSON output (`fallow dupes --format json`; the plan's first step checks the name and flags on the
+  pinned version, and reads each repository's duplication settings and `ignoredClones` again). The
+  analyzer runs `yak-analyzer duplication --hand-off <file> --all` with the settings YARD-4 tries and
+  no accepted groups, so neither tool silences anything and the counts compare like for like. The
+  groups each repository's `ignoredClones` silenced are listed apart in the judged list, with the
+  analyzer groups they match (YARD-2), since they are what the gate shows today. Session's call: the
+  yardstick is fallow's detection, unsilenced.
+- **YARD-2** Two groups are matched by place, not by tokens: a fallow group and an analyzer group
+  match when at least two copies of one each share a line with a different copy of the other, in the
+  same file. The test is the same from either side. A group that matches one or more groups of the
+  other tool is shared; one that matches none is fallow-only or analyzer-only. Each group is counted
+  once, in its own tool's counts, however many it matches. Session's call: the two tools' copies
+  start and end at different places by design (COPY-1), and two shared copies are what make a
+  duplicate.
 - **YARD-3** Each fallow-only and analyzer-only group is judged by reading the code, with a reason: a
   refactor candidate, or not one. The judged list holds every judgment. The owner reads them and
   judges a sample of at least ten of each kind per repository, or all where there are fewer; where the
-  owner and the session disagree, the owner's judgment stands, and the session's other judgments of
+  owner and the comparing session (YARD-4) disagree, the owner's judgment stands, and its other judgments of
   that shape are read again (owner: the owner judges a sample, and differences are not failures).
-- **YARD-4** The defaults come from the comparison: the session tries settings, starting from fallow's
-  (`strings` loosened, 50 tokens, 5 lines, 2 copies), and proposes the set whose analyzer-only groups
-  are refactor candidates and whose fallow-only areas are not, as far as one set allows. The owner
-  chooses. The values chosen go to the pack through OWED-1, and are written in the judged list.
+- **YARD-4** The defaults come from the comparison: the agent session that runs it (not the session
+  that wrote this spec) tries settings, starting from fallow's (`strings` loosened, 50 tokens, 5
+  lines, 2 copies), and proposes the set with the fewest judged misses: analyzer-only groups judged
+  no refactor candidate, plus fallow-only groups judged one. A tie goes to the set nearer fallow's.
+  The owner chooses. The values chosen go to the pack through OWED-1, and are written in the judged list.
   Session's call (owner: defaults set from the comparison).
-- **YARD-5** A fallow-only area the owner judges a refactor candidate is either fixed, with a failing
-  fixture of its shape first (design PROOF-5), or written down as accepted with the owner's reason,
-  such as a copy that starts mid-statement. An analyzer-only group the owner judges no refactor
+- **YARD-5** A fallow-only group the owner judges a refactor candidate is either fixed, with a
+  failing fixture of its shape first (design PROOF-5), or written in the judged list as left as it
+  is, with the owner's reason, such as a copy that starts mid-statement. (This is not a
+  `duplicationAccepted` entry, which is a project's.) An analyzer-only group the owner judges no refactor
   candidate is handled the same way. Nothing else is a failure. Branch audits run as the complexity
   spec's VS-5 runs them, two merged pull requests per repository at the least, each audited with both
   tools; each difference in what is marked new is judged, and one that comes from FRESH-1's stricter
@@ -379,10 +448,18 @@ Terms:
     its keys (TUNE-1 to TUNE-6), and fallow as a yardstick; and to PROOF-4: for duplication, the swap
     waits on YARD-5, not on matching fallow (owner);
   - an amendment to BASE-5's rule for a duplicated group, to FRESH-1's (owner);
-  - an amendment to DECL-2: `duplicationIgnore`, a list the project's value replaces (TUNE-4);
-  - MCP-1's duplicates tool also listing every group when given no code (SHOW-5);
-  - the pack's declarations of the new keys, with YARD-4's defaults and `it` and `test` as test
-    callees, and the engine's way for a person to add an entry to `duplicationAccepted`.
+  - an amendment to design DECL-2, which says a project's list adds to the stack's:
+    `duplicationIgnore` is a list the project's value replaces (TUNE-4);
+  - the pack's declarations of the new keys, with YARD-4's defaults and each form of `it` and `test` as test
+    callees, and the engine's way for a person to add an entry to `duplicationAccepted`;
+  - a line in the notes of any pack release that changes the default `duplicationIgnore` or
+    `duplicationTestCallees`, saying that accepted groups and recorded reasons for duplication can
+    stop matching (Risks);
+  - a check that yak passes a project's `duplicationIgnore`, `duplicationTestCallees` and
+    `duplicationAccepted` lists to the analyzer unchanged, an empty list included, though their
+    entries are neither globs nor paths, and a change to the hand-off schema's description, which
+    says a project's list holds "globs or paths" (`tests/hand-off/hand-off-1.schema.json`). The
+    schema's type already allows any list of text, so the format version stays 1.
 
   The item closes only once each is filed in that yakshaver item or written in the judged list as
   still owed there. Session's call, as the complexity spec's VS-7.
@@ -406,9 +483,9 @@ Terms:
 - **Three true-or-false keys for the loosening.** Clearer to read, but the hand-off format lets a
   project state only a list of text or a positive whole number, so a project couldn't set them
   without a format change in yakshaver. Rejected for TUNE-4's list (session's call).
-- **A line diff of the analyzer's own for FRESH-1.** It needs no git call, but it is a second answer
-  to a question git already answers, with renames found the same way. Rejected for FRESH-2 (session's
-  call).
+- **Lines the branch changed, read from git, for FRESH-1.** It catches every edit inside a copy, but
+  a formatter's pass or a codemod would mark every group it touched new, though SAME-1 sees no
+  change. Rejected for FRESH-1's exact forms (session's call).
 - **Including the copied code in the finding.** It would make the message easier to act on, but it
   can carry a string the project would not want in a report. Rejected (session's call): the places
   are enough to open.
@@ -424,12 +501,27 @@ Terms:
 - **FRESH-1 marks many groups new on ordinary branches,** since any edit inside a copy does. That is
   the owner's choice; the gate's count of new duplication is in the branch audits (YARD-5), and an
   accepted group is the way out.
-- **A group wrongly marked inherited,** where the containment test of FRESH-1 matches a base group
-  that is not the same one. Each case of FRESH-1 has a fixture, and the branch audits look for it.
+- **A group wrongly marked inherited,** where FRESH-1's fingerprint, count and exact forms match a
+  base group that a person would call a different one. Each case of FRESH-1 has a fixture, and the
+  branch audits look for it.
+- **Code that calls its own function named like a test callee** (`test(…)` in a script that is no
+  test) has that call's callbacks left out of detection (COPY-3). It is rare, and a project can
+  leave the name out of its declarations; the comparison notes any it meets.
 - **Duplication doubles work at each audit,** since both trees are read and grouped. COPY-5 keeps it
   inside the parse, and YARD-6 measures it. A cost found too high goes to the speed work, not here.
 - **The fingerprint's form is hard to change after the swap,** since accepted groups and reasons hang
   on it. DUP-4 leaves the form a draft until the swap, and the comparison exercises it first.
+- **A rewrap takes a group over the line minimum** and makes it new on a branch that changed no
+  code (FRESH-1's exception). Only a group within a line or two of `duplicationMinimumLines` can be
+  moved this way, and the branch audits (YARD-5) count how often it happens; if it is common, the
+  line minimum is measured on the base's line count as well, a further amendment.
+- **Changing `duplicationIgnore` or `duplicationTestCallees` changes groups and fingerprints,** since
+  what is loosened is part of the run (DUP-4), and which statements join runs depends on the test
+  callees (COPY-3). A change to the pack's default or a project's list then reports every accepted group
+  again and voids the reasons recorded on branches in flight. It can't be avoided: copies that match
+  only once names are loosened have no common run without the loosening. QUIET-2's notice names
+  every entry that stopped matching, and the pack release that changes the default says so in its
+  notes, owed with the defaults (OWED-1).
 - **Work owed outside this repository is forgotten.** OWED-1 makes the item's close wait for it.
 
 ## Left to the builder
@@ -439,6 +531,7 @@ Terms:
 - How tokens are counted, within SIZE-1: from the lexer, or from the syntax tree where that gives the
   same count.
 - The form of a run written into the fingerprint's digest (DUP-4).
-- The git command FRESH-2 uses, and how its output is read.
+- The form of a copy's exact form (FRESH-1): the same form as DUP-4's, with nothing loosened, or a
+  digest of it.
 - The exact wording of messages and notices, within DUP-2, FRESH-3, TUNE-1 and QUIET-2.
 - The order of keys in the command's JSON.
