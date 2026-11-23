@@ -14,6 +14,17 @@ use serde_json::{Value, json};
 
 use project::{Project, notices, printed};
 
+/// The sentence of the first notice of the kind given that a document holds.
+fn sentence<'d>(document: &'d Value, kind: &str) -> &'d str {
+    document["notices"]
+        .as_array()
+        .expect("a list of notices")
+        .iter()
+        .find(|notice| notice["kind"] == json!(kind))
+        .and_then(|notice| notice["sentence"].as_str())
+        .unwrap_or_default()
+}
+
 /// Two functions whose bodies are the same: lines 2 to 6, and lines 9 to 15 with a blank line and a
 /// comment among them.
 const BODIES: &str = r#"export function first(items: number[]) {
@@ -606,6 +617,109 @@ fn names_a_tagged_template_test_by_its_backticks() {
             &json!({ "duplicationMinimum": 5, "duplicationTestCallees": ["it.each``"] })
         )["groups"],
         json!([])
+    );
+}
+
+#[test]
+fn an_accepted_group_is_left_out_until_its_run_or_its_copies_change() {
+    let project = Project::new("duplication-accepted");
+
+    project.write("src/a.ts", BODIES).commit();
+
+    let found = looking(&project, &json!({ "duplicationMinimum": 5 }));
+    let fingerprint = found["groups"][0]["fingerprint"]
+        .as_str()
+        .expect("a fingerprint")
+        .to_owned();
+    let accepted = format!("{fingerprint}/2");
+    let stale = format!("{}/2", "0".repeat(32));
+    let hand_off = declaring(
+        &project,
+        &json!({ "duplicationMinimum": 5, "duplicationAccepted": [stale] }),
+        &json!({ "duplicationAccepted": [accepted] }),
+    );
+    let document = duplication(&project, &["--hand-off", &hand_off]);
+
+    // The accepted group is left out, and the entry that matches no group is named, with who states it
+    // (spec QUIET-1, QUIET-2).
+    assert_eq!(document["groups"], json!([]));
+    assert_eq!(
+        notices(&document)
+            .iter()
+            .filter(|kind| **kind == "accepted-group-not-found")
+            .count(),
+        1
+    );
+    assert!(
+        sentence(&document, "accepted-group-not-found").contains(&format!("`{stale}`"))
+            && sentence(&document, "accepted-group-not-found").contains("the pack"),
+        "{document}"
+    );
+
+    // With `--all` it is listed, marked accepted (spec SHOW-3).
+    let all = duplication(&project, &["--hand-off", &hand_off, "--all"]);
+
+    assert_eq!(
+        groups(&all),
+        [vec![("src/a.ts", 2, 6), ("src/a.ts", 9, 15)]]
+    );
+    assert_eq!(all["groups"][0]["accepted"], json!(true));
+    assert_eq!(all["settings"]["accepted"], json!([stale, accepted]));
+
+    // A third copy makes it a group of three, which the entry does not name, so it is reported again.
+    project
+        .write(
+            "src/b.ts",
+            "export function third(items: number[]) {\n  const total = items.length;\n  if (total > 10) {\n    return total * 2;\n  }\n  return total;\n}\n",
+        )
+        .commit();
+
+    let document = duplication(&project, &["--hand-off", &hand_off]);
+
+    assert_eq!(
+        groups(&document),
+        [vec![
+            ("src/a.ts", 2, 6),
+            ("src/a.ts", 9, 15),
+            ("src/b.ts", 2, 6)
+        ]]
+    );
+    assert_eq!(document["groups"][0]["fingerprint"], json!(fingerprint));
+    assert_eq!(
+        notices(&document)
+            .iter()
+            .filter(|kind| **kind == "accepted-group-not-found")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn an_accepted_group_still_hides_the_groups_inside_it() {
+    let project = Project::new("duplication-accepted-inside");
+
+    project.write("src/a.ts", BODIES).commit();
+
+    let pack = json!({ "duplicationMinimum": 5, "duplicationIgnore": ["names"] });
+    let fingerprint = looking(&project, &pack)["groups"][0]["fingerprint"]
+        .as_str()
+        .expect("a fingerprint")
+        .to_owned();
+    let hand_off = declaring(
+        &project,
+        &pack,
+        &json!({ "duplicationAccepted": [format!("{fingerprint}/2")] }),
+    );
+
+    // The bodies' group lies inside the accepted functions' group, so it is not reported either (spec
+    // QUIET-1).
+    assert_eq!(
+        duplication(&project, &["--hand-off", &hand_off])["groups"],
+        json!([])
+    );
+    assert_eq!(
+        groups(&duplication(&project, &["--hand-off", &hand_off, "--all"])),
+        [vec![("src/a.ts", 1, 7), ("src/a.ts", 8, 16)]]
     );
 }
 

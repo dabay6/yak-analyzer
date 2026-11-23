@@ -1,7 +1,8 @@
 //! The `duplication` command, and the groups of copies a reading holds, which `audit` will report too:
 //! the settings the declarations give, the runs of statements that repeat, the groups they make with
-//! their sizes and fingerprints, and the document the command prints (duplication spec SAME-3, SAME-4,
-//! SIZE-1, SIZE-2, TUNE-1 to TUNE-7, DUP-4, SHOW-1 to SHOW-5).
+//! their sizes and fingerprints, the groups a person accepted, and the document the command prints
+//! (duplication spec SAME-3, SAME-4, SIZE-1, SIZE-2, TUNE-1 to TUNE-7, DUP-4, QUIET-1 to QUIET-4,
+//! SHOW-1 to SHOW-5).
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -25,6 +26,9 @@ use crate::tree::Tree;
 /// The kind of the notice for a run with no `duplicationMinimum` (spec TUNE-1).
 const NOT_CHECKED: &str = "duplication-not-checked";
 
+/// The kind of the notice for an accepted group no group matches (spec QUIET-2).
+const NOT_FOUND: &str = "accepted-group-not-found";
+
 /// The fewest copies a group needs where no declaration says (spec TUNE-3).
 const COPIES: u64 = 2;
 
@@ -41,6 +45,15 @@ pub struct Lens {
     pub test_callees: BTreeSet<String>,
 }
 
+/// An entry of `duplicationAccepted`, with who states it (spec TUNE-6, QUIET-2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Accepted {
+    /// The entry: a group's fingerprint, `/`, and its number of copies.
+    pub entry: String,
+    /// Who states it: `pack` or `project`.
+    pub source: &'static str,
+}
+
 /// The settings of duplication, one of each for the whole run (spec TUNE-1 to TUNE-7).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Settings {
@@ -54,7 +67,7 @@ pub struct Settings {
     /// What the parse loosens and which calls are test callees.
     pub lens: Lens,
     /// The entries of `duplicationAccepted`, the pack's before the project's.
-    pub accepted: Vec<String>,
+    pub accepted: Vec<Accepted>,
 }
 
 impl Settings {
@@ -80,10 +93,13 @@ impl Settings {
                 numbers: loosened("numbers"),
                 test_callees: test_callees.into_iter().collect(),
             },
-            accepted: [false, true]
+            accepted: [(false, "pack"), (true, "project")]
                 .into_iter()
-                .flat_map(|project| {
-                    joined(stacks, "duplicationAccepted", project).unwrap_or_default()
+                .flat_map(|(project, source)| {
+                    joined(stacks, "duplicationAccepted", project)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(move |entry| Accepted { entry, source })
                 })
                 .collect(),
         }
@@ -110,7 +126,11 @@ impl Settings {
     /// The settings as the command prints them (spec SHOW-2).
     fn printed(&self) -> Value {
         json!({
-            "accepted": self.accepted,
+            "accepted": self
+                .accepted
+                .iter()
+                .map(|accepted| accepted.entry.as_str())
+                .collect::<Vec<&str>>(),
             "ignore": self.ignored(),
             "minimumCopies": self.copies,
             "minimumLines": self.minimum_lines,
@@ -198,12 +218,14 @@ pub struct Group {
 }
 
 /// Every group of copies in the reading's own scripts and Vue components, each run as large as it goes,
-/// sorted by its first copy; none where no `duplicationMinimum` is declared. A file declared data or
-/// generated, and a type declaration file, holds no copy (spec COPY-4, SAME-3, SAME-4, SIZE-2).
-pub fn groups(reading: &Reading) -> Vec<Group> {
+/// sorted by its first copy and marked accepted where an entry names its fingerprint and copies, with a
+/// notice for each entry no group matches; none where no `duplicationMinimum` is declared. A file
+/// declared data or generated, and a type declaration file, holds no copy (spec COPY-4, SAME-3, SAME-4,
+/// SIZE-2, QUIET-1, QUIET-2).
+pub fn groups(reading: &Reading) -> (Vec<Group>, Vec<Notice>) {
     let settings = &reading.duplication;
     let Some(minimum) = settings.minimum_tokens else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let files: Vec<(&str, &[List])> = reading
         .files
@@ -227,15 +249,49 @@ pub fn groups(reading: &Reading) -> Vec<Group> {
         .filter_map(|(length, at)| text.group(length, at, settings, minimum))
         .collect();
     let mut groups = widest(found);
+    // Acceptance comes after the groups inside others are dropped, so an accepted group still hides
+    // them (spec QUIET-1).
+    let entries: BTreeSet<String> = groups.iter().map(accepting).collect();
+    let accepted: BTreeSet<&str> = settings
+        .accepted
+        .iter()
+        .map(|accepted| accepted.entry.as_str())
+        .collect();
+    let mut named = BTreeSet::new();
+    let notices = settings
+        .accepted
+        .iter()
+        .filter(|accepted| !entries.contains(&accepted.entry))
+        .filter(|accepted| named.insert((accepted.entry.as_str(), accepted.source)))
+        .map(|accepted| {
+            Notice::new(
+                NOT_FOUND,
+                None,
+                format!(
+                    "The accepted group `{}` that the {} states matches no group found, so the entry can be \
+                     removed.",
+                    accepted.entry, accepted.source
+                ),
+            )
+        })
+        .collect();
 
     for group in &mut groups {
         group
             .copies
             .sort_by(|a, b| (&a.path, a.start_line).cmp(&(&b.path, b.start_line)));
+        group.accepted = accepted.contains(accepting(group).as_str());
     }
 
     groups.sort_by(|a, b| order(a).cmp(&order(b)));
-    groups
+
+    (groups, notices)
+}
+
+/// The entry of `duplicationAccepted` that accepts a group: its fingerprint, `/`, and its number of
+/// copies (spec TUNE-6).
+fn accepting(group: &Group) -> String {
+    format!("{}/{}", group.fingerprint, group.copies.len())
 }
 
 /// What groups are sorted by: their first copy's path and lines, then their number of copies.
@@ -596,12 +652,14 @@ pub fn run(hand_off: Option<&Path>, all: bool) -> Result<String, Stop> {
         notices,
         &mut Stages::new(false),
     )?;
-    let listed: Vec<Value> = groups(&reading)
+    let (groups, found) = groups(&reading);
+    let listed: Vec<Value> = groups
         .iter()
         .filter(|group| all || !group.accepted)
         .map(entry)
         .collect();
 
+    reading.notices.extend(found);
     reading.notices.extend(reading.duplication.notice());
 
     let mut document = json!({
