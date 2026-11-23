@@ -30,6 +30,7 @@ test('the guide names the commands, and says how a fixture is written and run (s
     '`yak-analyzer graph --hand-off <file>`',
     'entry points with what made each one',
     '`yak-analyzer audit` reads the project as `graph` does',
+    'six\n  kinds, the five dead-code kinds and complexity',
     '--hand-off <file> --base <commit>`',
     '`yak-analyzer complexity` reads the project as `audit` does',
     '`yak-analyzer complexity --hand-off <file> --all`',
@@ -52,6 +53,8 @@ test('the guide says what interface version 1 covers, and that a change that bre
     'A change that breaks any of them\nraises the interface version',
     'A change that only adds, such as a new rule name, does not raise it.',
     'a draft until the swap',
+    'its property bag, `complexity`',
+    '`cyclomaticLimit`, `cognitiveLimit` and `over`',
   ]) {
     assert.ok(guide.replaceAll('\r\n', '\n').includes(said), said);
   }

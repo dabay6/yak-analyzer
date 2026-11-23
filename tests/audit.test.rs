@@ -1,7 +1,8 @@
 //! Runs the built binary's `audit` on made-up projects and checks the report it prints: its form, its
 //! notifications and how it stops (dead-code spec CMD-1, CMD-3, REPORT-1, REPORT-2, REPORT-4, FIX-3);
 //! and, with a base as a commit and a branch as later commits and edits, which findings are new and
-//! which inherited (dead-code spec CMD-2, COMMIT-1 to COMMIT-5, INH-1, FIX-4).
+//! which inherited (dead-code spec CMD-2, COMMIT-1 to COMMIT-5, INH-1, FIX-4), complexity findings by
+//! their scores (complexity spec CPX-1 to CPX-3, NEW-1 to NEW-5, FN-6, CASE-1).
 
 #[path = "support/project.rs"]
 mod project;
@@ -131,14 +132,18 @@ fn the_notices_of_a_run_are_the_notifications_of_its_invocation() {
     assert_eq!(
         notifications(&run),
         [
+            ("complexity-not-checked", None),
             ("no-hand-off-file", None),
             ("untracked-file-skipped", Some("src/not%20done.ts")),
         ]
     );
+    // Besides the notice of the limits it checks complexity against, which `graph` does not read
+    // (complexity spec LIMIT-2).
     assert_eq!(
         notifications(&run)
             .iter()
             .map(|(kind, _)| *kind)
+            .filter(|kind| *kind != "complexity-not-checked")
             .collect::<Vec<&str>>(),
         notices(&document)
     );
@@ -159,6 +164,7 @@ fn the_notices_of_a_run_are_the_notifications_of_its_invocation() {
     assert_eq!(
         notifications(&audit(&project, Some(&hand_off))),
         [
+            ("complexity-not-checked", None),
             ("glob-matches-nothing", None),
             ("untracked-file-skipped", Some("src/not%20done.ts")),
         ]
@@ -546,7 +552,11 @@ fn the_kinds_that_depend_on_entry_points_wait_for_a_detection_folder() {
     );
     assert_eq!(
         notifications(&run),
-        [("kinds-not-reported", None), ("kinds-not-reported", None),]
+        [
+            ("complexity-not-checked", None),
+            ("kinds-not-reported", None),
+            ("kinds-not-reported", None),
+        ]
     );
 
     let sentences: Vec<&str> = run["invocations"][0]["toolExecutionNotifications"]
@@ -561,7 +571,7 @@ fn the_kinds_that_depend_on_entry_points_wait_for_a_detection_folder() {
         .collect();
 
     assert_eq!(
-        sentences,
+        sentences[1..],
         [
             "1 file(s) the analyzer reads are in no package, so their unused files, exports and types are \
              not reported.",
@@ -594,12 +604,13 @@ fn a_computed_import_gives_a_notice_to_declare_what_it_loads() {
     assert_eq!(
         notifications(&run),
         [
+            ("complexity-not-checked", None),
             ("no-hand-off-file", None),
             ("computed-import", Some("src/index.ts")),
         ]
     );
     assert_eq!(
-        run["invocations"][0]["toolExecutionNotifications"][1]["message"]["text"],
+        run["invocations"][0]["toolExecutionNotifications"][2]["message"]["text"],
         json!(
             "2 call(s) of `import()` or `require()` load a file the analyzer cannot work out, so what they \
              load must be declared in `entries`."
@@ -1102,6 +1113,7 @@ fn names_the_base_commit_and_marks_the_notices_of_the_bases_reading() {
         marked(&run),
         [
             ("base", None, false),
+            ("complexity-not-checked", None, false),
             ("no-hand-off-file", None, false),
             (
                 "tsconfig-extends-left-out",
@@ -1191,6 +1203,7 @@ fn a_base_whose_files_cannot_be_read_skips_them_and_marks_every_finding_new() {
         [
             ("base", None, false),
             ("base-files-skipped", None, false),
+            ("complexity-not-checked", None, false),
             ("no-hand-off-file", None, false),
             ("file-skipped", Some("src/broken.ts"), true),
             ("file-skipped", Some("tsconfig.json"), true),
@@ -1198,8 +1211,9 @@ fn a_base_whose_files_cannot_be_read_skips_them_and_marks_every_finding_new() {
     );
     assert_eq!(
         sentence(&run, "base-files-skipped"),
-        "2 file(s) were skipped at the base, so no finding is marked unchanged: `tsconfig.json`, \
-         `src/broken.ts`."
+        "2 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
+         unchanged; complexity findings are still compared, and those in a skipped script are new: \
+         `tsconfig.json`, `src/broken.ts`."
     );
 }
 
@@ -1407,5 +1421,412 @@ fn a_cycle_the_base_has_is_unchanged_and_one_the_branch_joined_or_grew_is_new() 
         "These files import each other in a loop: `src/p.ts` → `src/q.ts` → `src/p.ts`. The loop is part \
          of a set of 3 files that each reach all the others. The branch added the import of `./p` on line \
          2 of `src/q.ts`, which leads to `src/p.ts`."
+    );
+}
+
+/// A function's body of as many `if`s as given, which scores that many for cognitive complexity and
+/// one more for cyclomatic.
+fn ifs(count: usize) -> String {
+    "if (a) {} ".repeat(count)
+}
+
+/// A hand-off file that gives the cyclomatic limit 10 and the cognitive limit 3, so that a body of
+/// `ifs(4)` or more is over only the cognitive one.
+fn limited(project: &Project) -> String {
+    project.hand_off(
+        &project.root,
+        &["."],
+        stack(
+            json!({}),
+            json!({ "cyclomaticLimit": 10, "cognitiveLimit": 3 }),
+        ),
+    )
+}
+
+/// The complexity findings of a run, in its order: each with its file as the report writes it, its
+/// function's readable name path, and whether it is new or inherited where the run says.
+fn complexities(run: &Value) -> Vec<(&str, &str, Option<&str>)> {
+    run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .filter(|result| result["ruleId"] == json!("complexity"))
+        .map(|result| {
+            (
+                result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                    .as_str()
+                    .expect("a file"),
+                result["properties"]["complexity"]["function"]
+                    .as_str()
+                    .expect("a name path"),
+                result["baselineState"].as_str(),
+            )
+        })
+        .collect()
+}
+
+/// The result of the complexity finding of the function given.
+fn complexity_of<'r>(run: &'r Value, function: &str) -> &'r Value {
+    run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .find(|result| result["properties"]["complexity"]["function"] == json!(function))
+        .unwrap_or_else(|| panic!("a finding of {function}"))
+}
+
+#[test]
+fn reports_a_function_over_a_limit_once_with_its_scores_and_limits() {
+    let project = Project::new("audit-complexity");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/index.ts" }"#,
+        )
+        .write(
+            "src/index.ts",
+            &format!(
+                "export function under(a) {{ {} }}\nexport function over(a) {{ {} }}\nexport function both(a) {{ {} }}\n",
+                ifs(3),
+                ifs(4),
+                ifs(10)
+            ),
+        )
+        .commit();
+
+    let hand_off = limited(&project);
+    let run = audit(&project, Some(&hand_off));
+    let over = complexity_of(&run, "over");
+
+    // One finding per function, whichever measures are over, at the function's name (complexity spec
+    // CPX-1, CPX-2).
+    assert_eq!(
+        complexities(&run),
+        [
+            ("src/index.ts", "over", None),
+            ("src/index.ts", "both", None),
+        ]
+    );
+    assert_eq!(
+        over["locations"][0]["physicalLocation"]["region"],
+        json!({ "startLine": 2, "startColumn": 17 })
+    );
+    assert_eq!(
+        over["message"]["text"],
+        json!("`over` has cognitive complexity 4, over the limit of 3 (cyclomatic 5).")
+    );
+    assert_eq!(
+        complexity_of(&run, "both")["message"]["text"],
+        json!(
+            "`both` has cyclomatic complexity 11, over the limit of 10, and cognitive complexity 10, over \
+             the limit of 3."
+        )
+    );
+    // Without a base, the property bag holds no `base` (complexity spec CPX-3).
+    assert_eq!(
+        over["properties"]["complexity"],
+        json!({
+            "function": "over",
+            "cyclomatic": 5,
+            "cognitive": 4,
+            "cyclomaticLimit": 10,
+            "cognitiveLimit": 3,
+            "over": ["cognitive"],
+        })
+    );
+    assert!(!notifications(&run).contains(&("complexity-not-checked", None)));
+
+    // With no limit declared, no complexity finding is reported, and a notice says so (complexity spec
+    // LIMIT-2).
+    let run = audit(&project, None);
+
+    assert_eq!(complexities(&run), []);
+    assert!(notifications(&run).contains(&("complexity-not-checked", None)));
+}
+
+#[test]
+fn a_complexity_finding_is_inherited_only_where_the_base_was_over_with_a_score_as_high() {
+    let body = |count| format!("{{ {} }}", ifs(count));
+    let project = branched(
+        "base-complexity",
+        &[
+            (
+                "package.json",
+                r#"{ "name": "app", "main": "./src/index.ts" }"#,
+            ),
+            (
+                "src/index.ts",
+                &format!(
+                    "import './moved';\nexport function under(a) {}\nexport function worse(a) {}\nexport function same(a) {}\nexport function better(a) {}\n",
+                    body(2),
+                    body(4),
+                    body(4),
+                    body(6)
+                ),
+            ),
+            (
+                "src/moved.ts",
+                &format!("export function kept(a) {}\n", body(4)),
+            ),
+        ],
+    );
+
+    project.git(&["mv", "src/moved.ts", "src/elsewhere.ts"]);
+    project
+        .write(
+            "src/index.ts",
+            &format!(
+                "import './elsewhere';\nexport function under(a) {}\nexport function worse(a) {}\nexport function same(a) {}\nexport function better(a) {}\nexport function added(a) {}\n",
+                body(4),
+                body(5),
+                body(4),
+                body(5),
+                body(4)
+            ),
+        )
+        .commit();
+
+    let hand_off = limited(&project);
+    let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
+
+    // Under at the base and over now, worse, and added are new; the same, better, and a function in a
+    // renamed file are inherited (complexity spec NEW-1; design BASE-5).
+    assert_eq!(
+        complexities(&run),
+        [
+            ("src/elsewhere.ts", "kept", Some("unchanged")),
+            ("src/index.ts", "under", Some("new")),
+            ("src/index.ts", "worse", Some("new")),
+            ("src/index.ts", "same", Some("unchanged")),
+            ("src/index.ts", "better", Some("unchanged")),
+            ("src/index.ts", "added", Some("new")),
+        ]
+    );
+    // A new finding's message says what the base had, and the property bag holds the base's scores,
+    // or `null` where the base does not have the function (complexity spec NEW-3, CPX-3).
+    assert_eq!(
+        complexity_of(&run, "under")["message"]["text"],
+        json!(
+            "`under` has cognitive complexity 4, over the limit of 3 (cyclomatic 5). At the base its \
+             cognitive complexity was 2, under the limit."
+        )
+    );
+    assert_eq!(
+        complexity_of(&run, "worse")["message"]["text"],
+        json!(
+            "`worse` has cognitive complexity 5, over the limit of 3 (cyclomatic 6). At the base its \
+             cognitive complexity was 4."
+        )
+    );
+    assert_eq!(
+        complexity_of(&run, "added")["message"]["text"],
+        json!("`added` has cognitive complexity 4, over the limit of 3 (cyclomatic 5).")
+    );
+    assert_eq!(
+        complexity_of(&run, "worse")["properties"]["complexity"]["base"],
+        json!({ "cyclomatic": 5, "cognitive": 4 })
+    );
+    assert_eq!(
+        complexity_of(&run, "added")["properties"]["complexity"]["base"],
+        json!(null)
+    );
+    assert_eq!(
+        complexity_of(&run, "same")["message"]["text"],
+        json!("`same` has cognitive complexity 4, over the limit of 3 (cyclomatic 5).")
+    );
+}
+
+#[test]
+fn a_file_skipped_at_the_base_leaves_the_other_complexity_findings_compared() {
+    let over = format!("{{ {} }}", ifs(4));
+    let project = branched(
+        "base-complexity-skipped",
+        &[
+            ("package.json", "{ broken"),
+            ("pnpm-workspace.yaml", "packages: ["),
+            ("tsconfig.json", "{ broken"),
+            (
+                "src/index.ts",
+                &format!("export function steady(a) {over}\n"),
+            ),
+            ("src/broken.ts", "const = ;\n"),
+        ],
+    );
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/index.ts" }"#,
+        )
+        .write("pnpm-workspace.yaml", "packages: []\n")
+        .write("tsconfig.json", "{}")
+        .write(
+            "src/broken.ts",
+            &format!("export function mended(a) {over}\n"),
+        )
+        .commit();
+
+    let hand_off = limited(&project);
+    let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
+    let skipped: Vec<Option<&str>> = marked(&run)
+        .into_iter()
+        .filter(|(kind, _, _)| *kind == "file-skipped")
+        .map(|(_, file, _)| file)
+        .collect();
+
+    // The skipped `package.json`, workspace list and tsconfig change no function's scores, and the
+    // skipped script had no functions there (complexity spec NEW-4).
+    assert_eq!(
+        skipped,
+        [
+            Some("package.json"),
+            Some("pnpm-workspace.yaml"),
+            Some("src/broken.ts"),
+            Some("tsconfig.json"),
+        ]
+    );
+    assert_eq!(
+        complexities(&run),
+        [
+            ("src/broken.ts", "mended", Some("new")),
+            ("src/index.ts", "steady", Some("unchanged")),
+        ]
+    );
+}
+
+#[test]
+fn a_function_added_or_removed_before_another_can_take_its_place() {
+    let body = |count| format!("{{ {} }}", ifs(count));
+    let project = branched(
+        "base-complexity-shifts",
+        &[
+            (
+                "src/unnamed.ts",
+                &format!("export const handlers = [(a) => {}];\n", body(4)),
+            ),
+            (
+                "src/repeated.js",
+                &format!("export const named = {{ go(a) {} }};\n", body(4)),
+            ),
+            (
+                "src/renamed.ts",
+                &format!("export function before(a) {}\n", body(4)),
+            ),
+            (
+                "src/gained.ts",
+                &format!(
+                    "export const rows = [{{ size: 1 }}, {{ run(a) {} }}];\n",
+                    body(4)
+                ),
+            ),
+            (
+                "src/removed.ts",
+                &format!(
+                    "export const removed = [(a) => {}, (a) => {}];\n",
+                    body(6),
+                    body(4)
+                ),
+            ),
+            (
+                "src/dropped.js",
+                &format!(
+                    "export const dropped = {{ go(a) {}, go(a) {} }};\n",
+                    body(6),
+                    body(4)
+                ),
+            ),
+        ],
+    );
+
+    project
+        .write(
+            "src/unnamed.ts",
+            &format!(
+                "export const handlers = [(a) => {}, (a) => {}];\n",
+                body(4),
+                body(4)
+            ),
+        )
+        .write(
+            "src/repeated.js",
+            &format!(
+                "export const named = {{ go(a) {}, go(a) {} }};\n",
+                body(4),
+                body(4)
+            ),
+        )
+        .write(
+            "src/renamed.ts",
+            &format!("export function after(a) {}\n", body(4)),
+        )
+        .write(
+            "src/gained.ts",
+            &format!(
+                "export const rows = [{{ size: 1, go() {{}} }}, {{ run(a) {} }}];\n",
+                body(4)
+            ),
+        )
+        .write(
+            "src/removed.ts",
+            &format!("export const removed = [(a) => {}];\n", body(5)),
+        )
+        .write(
+            "src/dropped.js",
+            &format!("export const dropped = {{ go(a) {} }};\n", body(5)),
+        )
+        .commit();
+
+    let hand_off = limited(&project);
+    let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
+
+    // The accepted consequences of naming a function by its place among the unnamed ones or the ones
+    // of its name: the function added first takes the place, and the base's scores, of the one that
+    // was there; a renamed function is a new one; and after an earlier one is removed, a later one
+    // made worse is compared with the removed one's scores (complexity spec FN-6).
+    assert_eq!(
+        complexities(&run),
+        [
+            ("src/dropped.js", "dropped > go", Some("unchanged")),
+            ("src/gained.ts", "<anonymous 2> > run", Some("new")),
+            ("src/removed.ts", "<anonymous 1>", Some("unchanged")),
+            ("src/renamed.ts", "after", Some("new")),
+            ("src/repeated.js", "named > go", Some("unchanged")),
+            ("src/repeated.js", "named > go #2", Some("new")),
+            ("src/unnamed.ts", "<anonymous 1>", Some("unchanged")),
+            ("src/unnamed.ts", "<anonymous 2>", Some("new")),
+        ]
+    );
+
+    let removed = run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .find(|result| {
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                == json!("src/removed.ts")
+        })
+        .expect("the finding in src/removed.ts");
+
+    // The one left is compared with the removed one's scores, which were higher.
+    assert_eq!(
+        removed["properties"]["complexity"]["base"],
+        json!({ "cyclomatic": 7, "cognitive": 6 })
+    );
+
+    let dropped = run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .find(|result| {
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                == json!("src/dropped.js")
+        })
+        .expect("the finding in src/dropped.js");
+
+    // So is a later function of a repeated name, once the earlier one of that name is removed.
+    assert_eq!(
+        dropped["properties"]["complexity"]["base"],
+        json!({ "cyclomatic": 7, "cognitive": 6 })
     );
 }
