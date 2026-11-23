@@ -12,10 +12,12 @@ use oxc_ast::AstKind;
 use oxc_ast::ast::{
     self, Argument, ArrowFunctionExpression, AssignmentExpression, AssignmentTarget,
     BindingIdentifier, BindingPattern, BreakStatement, CallExpression, CatchClause, ChainElement,
-    ChainExpression, Class, ConditionalExpression, ContinueStatement, DoWhileStatement, Expression,
-    ForInStatement, ForOfStatement, ForStatement, FormalParameters, IfStatement, JSXElement,
-    JSXFragment, LogicalExpression, LogicalOperator, MethodDefinitionKind, ObjectExpression,
-    Program, PropertyKey, PropertyKind, Statement, SwitchCase, SwitchStatement, WhileStatement,
+    ChainExpression, Class, ConditionalExpression, ContinueStatement, DoWhileStatement,
+    ExportDefaultDeclaration, Expression, ForInStatement, ForOfStatement, ForStatement,
+    FormalParameters, IfStatement, JSXElement, JSXFragment, LogicalExpression, LogicalOperator,
+    MethodDefinition, MethodDefinitionKind, ObjectExpression, ObjectProperty, Program,
+    PropertyDefinition, PropertyKey, PropertyKind, Statement, SwitchCase, SwitchStatement,
+    VariableDeclarator, WhileStatement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_semantic::{NodeId, ScopeFlags, Semantic};
@@ -155,6 +157,7 @@ pub fn units<'a>(program: &Program<'a>, semantic: &Semantic<'a>, lines: &Lines<'
         units: Vec::new(),
         open: Vec::new(),
         frames: Vec::new(),
+        held: None,
     };
 
     scorer.visit_program(program);
@@ -204,6 +207,9 @@ struct Scorer<'s, 'a> {
     open: Vec<usize>,
     /// The functions the walk is inside, innermost last.
     frames: Vec<Frame>,
+    /// The React name a declaration, a key or `export default` holds for the first function the walk
+    /// reaches beneath it (fallow's `pending_identity`; spec SCORE-10).
+    held: Option<String>,
 }
 
 impl<'a> Scorer<'_, 'a> {
@@ -242,7 +248,12 @@ impl<'a> Scorer<'_, 'a> {
                 self.units[*open].holds = true;
             }
 
-            let react = self.react(node, span, own);
+            // A function's own identifier wins over a held name, which is lost either way.
+            let held = self.held.take();
+            let react = own
+                .map(|identifier| identifier.name.to_string())
+                .or(held)
+                .is_some_and(|name| react(&name));
             let props = params
                 .and_then(|params| params.items.first())
                 .map_or(0, |first| match &first.pattern {
@@ -334,35 +345,12 @@ impl<'a> Scorer<'_, 'a> {
         (name, span.start)
     }
 
-    /// Whether a function's name is shaped like a React component's or hook's, read as fallow reads
-    /// it: its own identifier, or else what declares it, or the call it is passed to, by name; never a
-    /// name taken from a call (fallow's `frame_name_is_react_shaped`; spec SCORE-2).
-    fn react(&self, node: NodeId, span: Span, own: Option<&BindingIdentifier<'a>>) -> bool {
-        let mut node = node;
-        let mut span = span;
-        let name = own
-            .map(|identifier| identifier.name.to_string())
-            .or_else(|| {
-                loop {
-                    let (outer, holder) = self.holder(node, span);
-
-                    if let Some((name, _)) = declared(holder, outer) {
-                        break Some(name);
-                    }
-
-                    match holder {
-                        AstKind::CallExpression(call) if passed(&call.arguments, outer) => {
-                            node = call.node_id.get();
-                            span = call.span;
-                        }
-                        _ => break None,
-                    }
-                }
-            });
-
-        name.is_some_and(|name| {
-            name.starts_with(|first: char| first.is_ascii_uppercase()) || hook(&name)
-        })
+    /// Walks what the closure walks with the React name given held, and nothing held after it, whether
+    /// or not a function took it (spec SCORE-10).
+    fn hold(&mut self, name: Option<String>, walk: impl FnOnce(&mut Self)) {
+        self.held = name;
+        walk(self);
+        self.held = None;
     }
 
     /// The innermost function's frame, where the walk is inside one.
@@ -435,6 +423,12 @@ impl<'a> Scorer<'_, 'a> {
             None => {}
         }
     }
+}
+
+/// Whether a React name is a component's or a hook's: it begins with a capital letter, or is a hook's
+/// name (fallow's `frame_name_is_react_shaped`; spec SCORE-10).
+fn react(name: &str) -> bool {
+    name.starts_with(|first: char| first.is_ascii_uppercase()) || hook(name)
 }
 
 /// Whether a name is a React hook's: `use` and then a capital letter (fallow's `is_hook_callee`).
@@ -638,6 +632,44 @@ impl<'a> Visit<'a> for Scorer<'_, 'a> {
         self.enter(object.node_id.get(), object.span, None, None);
         walk::walk_object_expression(self, object);
         self.leave(false);
+    }
+
+    // A variable declared to a plain name, an object's or a class's key, and `export default` each
+    // hold a React name for the first function beneath them (fallow's `visit_variable_declarator`,
+    // `visit_object_property`, `visit_method_definition`, `visit_property_definition` and
+    // `visit_export_default_declaration`; spec SCORE-10).
+    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        if let BindingPattern::BindingIdentifier(identifier) = &declarator.id {
+            self.hold(Some(identifier.name.to_string()), |scorer| {
+                walk::walk_variable_declarator(scorer, declarator);
+            });
+        } else {
+            walk::walk_variable_declarator(self, declarator);
+        }
+    }
+
+    fn visit_object_property(&mut self, property: &ObjectProperty<'a>) {
+        self.hold(key_name(&property.key, property.computed), |scorer| {
+            walk::walk_object_property(scorer, property);
+        });
+    }
+
+    fn visit_method_definition(&mut self, method: &MethodDefinition<'a>) {
+        self.hold(key_name(&method.key, method.computed), |scorer| {
+            walk::walk_method_definition(scorer, method);
+        });
+    }
+
+    fn visit_property_definition(&mut self, property: &PropertyDefinition<'a>) {
+        self.hold(key_name(&property.key, property.computed), |scorer| {
+            walk::walk_property_definition(scorer, property);
+        });
+    }
+
+    fn visit_export_default_declaration(&mut self, declaration: &ExportDefaultDeclaration<'a>) {
+        self.hold(Some(DEFAULT.to_owned()), |scorer| {
+            walk::walk_export_default_declaration(scorer, declaration);
+        });
     }
 
     fn visit_if_statement(&mut self, statement: &IfStatement<'a>) {
