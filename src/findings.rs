@@ -17,7 +17,7 @@ use crate::resolve::Outcome;
 use crate::scripts;
 
 /// How many hexadecimal digits of the digest a fingerprint keeps (spec REPORT-3).
-const FINGERPRINT_DIGITS: usize = 32;
+pub const FINGERPRINT_DIGITS: usize = 32;
 
 /// How many files of a loop a circular dependency's message names before it says how many more there
 /// are (spec KIND-4).

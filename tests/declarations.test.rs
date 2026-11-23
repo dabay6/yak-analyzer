@@ -38,6 +38,11 @@ fn uses_every_key_it_knows_in_every_form_a_glob_may_take() {
         "cyclomaticLimit": 20,
         "cognitiveLimit": 15,
         "duplicationMinimum": 50,
+        "duplicationMinimumLines": 5,
+        "duplicationCopies": 2,
+        "duplicationIgnore": ["strings"],
+        "duplicationTestCallees": ["it", "it.each()", "test.each``", "describe.only", "suite[]"],
+        "duplicationAccepted": ["0123456789abcdef0123456789abcdef/2"],
         "configEntries": [
             {
                 "file": "runner.config.*",
@@ -71,7 +76,10 @@ fn uses_every_key_it_knows_in_every_form_a_glob_may_take() {
         "data": ["samples/**"],
         "generated": ["src/generated/**"],
         "internal": ["packages/app"],
-        "cyclomaticLimit": 25
+        "cyclomaticLimit": 25,
+        "duplicationIgnore": [],
+        "duplicationTestCallees": ["spec"],
+        "duplicationAccepted": ["fedcba9876543210fedcba9876543210/12"]
     });
 
     let output = run(&["graph", "--hand-off", &written(&place, &handed)]);
@@ -94,8 +102,9 @@ fn names_the_stack_the_key_and_who_states_it() {
         ),
         "yak-analyzer: cannot use the declaration `entrypoints` that the pack states for the stack `typescript`: \
          the analyzer knows no such key, only entries, data, generated, internal, cyclomaticLimit, \
-         cognitiveLimit, duplicationMinimum, configEntries, scriptCommands, commandFiles; change it in the \
-         pack"
+         cognitiveLimit, duplicationMinimum, duplicationMinimumLines, duplicationCopies, duplicationIgnore, \
+         duplicationTestCallees, duplicationAccepted, configEntries, scriptCommands, commandFiles; change it \
+         in the pack"
     );
     assert_eq!(
         refused(
@@ -156,6 +165,76 @@ fn refuses_a_value_that_is_not_of_its_keys_kind() {
     assert!(
         line.contains("`entries` that the project states")
             && line.contains(": its value must be a list of globs; "),
+        "{line}"
+    );
+}
+
+#[test]
+fn refuses_a_duplication_declaration_of_another_shape() {
+    let cases: [(Value, &str); 10] = [
+        (
+            json!({ "duplicationMinimumLines": 0 }),
+            ": its value must be a positive whole number; ",
+        ),
+        (
+            json!({ "duplicationCopies": 1 }),
+            ": its value must be a whole number of 2 or more",
+        ),
+        (
+            json!({ "duplicationIgnore": "strings" }),
+            ": its value must be a list of the words `names`, `strings` and `numbers`; ",
+        ),
+        (
+            json!({ "duplicationIgnore": ["strings", "comments"] }),
+            ": `comments` is not one of the words it takes, `names`, `strings` and `numbers`; ",
+        ),
+        (
+            json!({ "duplicationTestCallees": ["it", "it each"] }),
+            ": `it each` is not a callee chain, such as `it`, `it.only` or `it.each()`; ",
+        ),
+        (
+            json!({ "duplicationTestCallees": ["it."] }),
+            ": `it.` is not a callee chain",
+        ),
+        (
+            json!({ "duplicationTestCallees": ["1it"] }),
+            ": `1it` is not a callee chain",
+        ),
+        (
+            json!({ "duplicationAccepted": ["0123456789abcdef0123456789abcdef"] }),
+            ": `0123456789abcdef0123456789abcdef` is not a group's fingerprint, its 32 lower-case \
+             hexadecimal digits, then `/` and its number of copies, 2 or more; ",
+        ),
+        (
+            json!({ "duplicationAccepted": ["0123456789ABCDEF0123456789abcdef/2"] }),
+            "is not a group's fingerprint",
+        ),
+        (
+            json!({ "duplicationAccepted": ["0123456789abcdef0123456789abcdef/1"] }),
+            "is not a group's fingerprint",
+        ),
+    ];
+
+    for (index, (pack, expected)) in cases.into_iter().enumerate() {
+        let line = refused(
+            &format!("declarations-duplication-{index}"),
+            pack,
+            json!({}),
+        );
+
+        assert!(line.contains(expected), "{line}");
+    }
+
+    // A project may state each of them, and is refused the same way (duplication spec TUNE-4).
+    let line = refused(
+        "declarations-duplication-project",
+        json!({}),
+        json!({ "duplicationIgnore": ["names", "numbers", "names", "text"] }),
+    );
+
+    assert!(
+        line.contains("`duplicationIgnore` that the project states")
+            && line.contains("`text` is not one of the words it takes"),
         "{line}"
     );
 }

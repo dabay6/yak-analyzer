@@ -3,12 +3,13 @@
 //!
 //! The keys and their shapes are fixed under interface version 1 since stage 2 ended (comparison spec
 //! FREEZE-1): a change that breaks any raises the version, and one that only adds does not
-//! (complexity spec VER-1). This part checks them, the shapes of the three that
-//! describe what a tool does included (spec ENTRY-6a; comparison spec CI-1); the parts that read a
-//! project use them.
+//! (complexity spec VER-1), as the keys that tune duplication only add (duplication spec VERS-1). This
+//! part checks them, the shapes of the three that describe what a tool does included (spec ENTRY-6a;
+//! comparison spec CI-1); the parts that read a project use them.
 
 use serde_json::Value;
 
+use crate::findings::FINGERPRINT_DIGITS;
 use crate::glob::Glob;
 use crate::hand_off::{Stack, leaves_its_folder};
 use crate::stop::Stop;
@@ -22,6 +23,15 @@ enum Kind {
     Paths,
     /// A positive whole number.
     Number,
+    /// A whole number of 2 or more: the copies a group needs (duplication spec TUNE-3).
+    Copies,
+    /// A list of the words `duplicationIgnore` takes (duplication spec TUNE-4).
+    Words,
+    /// A list of callee chains (duplication spec TUNE-5).
+    Chains,
+    /// A list of accepted groups, each a fingerprint, `/` and a number of copies (duplication spec
+    /// TUNE-6).
+    Accepted,
     /// What a tool reads from its configuration file, which only a pack may state (spec ENTRY-6).
     ConfigEntries,
     /// The programs whose file arguments in scripts are entry points, which only a pack may state (spec
@@ -51,8 +61,13 @@ const OPTIONS_FIELDS: [&str; 3] = ["program", "names", "relativeTo"];
 /// The fields an object of `commandFiles` may hold, each required but `folder` (comparison spec CI-1).
 const COMMAND_FIELDS: [&str; 3] = ["file", "commands", "folder"];
 
-/// Every key the analyzer knows, with the kind of its value (spec KEY-1).
-const KEYS: [(&str, Kind); 10] = [
+/// The words `duplicationIgnore` takes, in the order the `duplication` command prints them (duplication
+/// spec TUNE-4, SHOW-2).
+pub const WORDS: [&str; 3] = ["names", "strings", "numbers"];
+
+/// Every key the analyzer knows, with the kind of its value (spec KEY-1; duplication spec TUNE-1 to
+/// TUNE-6).
+const KEYS: [(&str, Kind); 15] = [
     ("entries", Kind::Globs),
     ("data", Kind::Globs),
     ("generated", Kind::Globs),
@@ -60,6 +75,11 @@ const KEYS: [(&str, Kind); 10] = [
     ("cyclomaticLimit", Kind::Number),
     ("cognitiveLimit", Kind::Number),
     ("duplicationMinimum", Kind::Number),
+    ("duplicationMinimumLines", Kind::Number),
+    ("duplicationCopies", Kind::Copies),
+    ("duplicationIgnore", Kind::Words),
+    ("duplicationTestCallees", Kind::Chains),
+    ("duplicationAccepted", Kind::Accepted),
     ("configEntries", Kind::ConfigEntries),
     ("scriptCommands", Kind::ScriptCommands),
     ("commandFiles", Kind::CommandFiles),
@@ -136,6 +156,41 @@ fn problem(key: &str, value: &Value, source: Source) -> Option<String> {
         Kind::Number => match value.as_u64() {
             Some(number) if number > 0 => None,
             _ => Some("its value must be a positive whole number".to_owned()),
+        },
+        Kind::Copies => match value.as_u64() {
+            Some(number) if number >= 2 => None,
+            _ => Some(
+                "its value must be a whole number of 2 or more, since a group is two copies at the least"
+                    .to_owned(),
+            ),
+        },
+        Kind::Words => match texts(value) {
+            Some(words) => words.iter().find(|word| !WORDS.contains(*word)).map(|word| {
+                format!(
+                    "`{word}` is not one of the words it takes, `names`, `strings` and `numbers`"
+                )
+            }),
+            None => Some(
+                "its value must be a list of the words `names`, `strings` and `numbers`".to_owned(),
+            ),
+        },
+        Kind::Chains => match texts(value) {
+            Some(chains) => chains.iter().find(|chain| !is_chain(chain)).map(|chain| {
+                format!("`{chain}` is not a callee chain, such as `it`, `it.only` or `it.each()`")
+            }),
+            None => Some("its value must be a list of callee chains".to_owned()),
+        },
+        Kind::Accepted => match texts(value) {
+            Some(entries) => entries
+                .iter()
+                .find(|entry| !is_accepted(entry))
+                .map(|entry| {
+                    format!(
+                        "`{entry}` is not a group's fingerprint, its {FINGERPRINT_DIGITS} lower-case \
+                         hexadecimal digits, then `/` and its number of copies, 2 or more"
+                    )
+                }),
+            None => Some("its value must be a list of accepted groups".to_owned()),
         },
         Kind::ConfigEntries | Kind::ScriptCommands | Kind::CommandFiles
             if matches!(source, Source::Project) =>
@@ -349,6 +404,58 @@ fn is_word(text: &str) -> bool {
 /// The entries of a list of text, or nothing when the value is not one.
 fn texts(value: &Value) -> Option<Vec<&str>> {
     value.as_array()?.iter().map(Value::as_str).collect()
+}
+
+/// Whether a text is a callee chain as the duplication spec's terms write one: a name, then any number
+/// of `.` and a name (`#` and a name for a private one), `()` for a call, `[]` for a computed member,
+/// and two backticks for a tagged template (duplication spec TUNE-5).
+fn is_chain(text: &str) -> bool {
+    let Some(mut rest) = after_name(text) else {
+        return false;
+    };
+
+    while !rest.is_empty() {
+        rest = if let Some(after) = ["()", "[]", "``"]
+            .iter()
+            .find_map(|piece| rest.strip_prefix(piece))
+        {
+            after
+        } else if let Some(after) = rest.strip_prefix('.') {
+            match after_name(after.strip_prefix('#').unwrap_or(after)) {
+                Some(after) => after,
+                None => return false,
+            }
+        } else {
+            return false;
+        };
+    }
+
+    true
+}
+
+/// What follows the name a text starts with: one or more letters, digits, `_` or `$`, not starting with
+/// a digit; nothing where the text does not start with a name.
+fn after_name(text: &str) -> Option<&str> {
+    let end = text
+        .find(|letter: char| !(letter.is_alphanumeric() || letter == '_' || letter == '$'))
+        .unwrap_or(text.len());
+
+    (end > 0 && !text.starts_with(|letter: char| letter.is_ascii_digit())).then(|| &text[end..])
+}
+
+/// Whether a text is an accepted group: its fingerprint in lower-case hexadecimal digits, `/`, and its
+/// number of copies, 2 or more, written with no sign and no leading zero (duplication spec TUNE-6).
+fn is_accepted(text: &str) -> bool {
+    text.split_once('/').is_some_and(|(fingerprint, copies)| {
+        fingerprint.len() == FINGERPRINT_DIGITS
+            && fingerprint
+                .bytes()
+                .all(|digit| digit.is_ascii_digit() || (b'a'..=b'f').contains(&digit))
+            && !copies.is_empty()
+            && !copies.starts_with('0')
+            && copies.bytes().all(|digit| digit.is_ascii_digit())
+            && copies.parse::<u64>().is_ok_and(|copies| copies >= 2)
+    })
 }
 
 /// Why a path cannot be used, or nothing when it can.
