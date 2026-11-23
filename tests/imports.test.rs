@@ -50,6 +50,49 @@ fn types(specifier: &str, form: &str, line: usize) -> Value {
 }
 
 #[test]
+fn reads_a_chain_of_more_scripts_than_threads_in_the_list_order() {
+    // 64 scripts: more than the threads of any machine the tests run on, so the pre-read hands some
+    // thread several files (parallel reading spec PTEST-3).
+    let project = Project::new("imports-many");
+    let names: Vec<String> = (0..64)
+        .map(|number| format!("src/f{number:02}.ts"))
+        .collect();
+
+    for (number, name) in names.iter().enumerate() {
+        let next = number + 1;
+        let content = if next < names.len() {
+            format!(
+                "import {{ n{next} }} from './f{next:02}';\nexport const n{number} = n{next};\n"
+            )
+        } else {
+            format!("export const n{number} = {number};\n")
+        };
+
+        project.write(name, &content);
+    }
+
+    project.commit();
+
+    let document = project.graph();
+
+    assert_eq!(
+        paths(&document),
+        names.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+
+    for (number, name) in names.iter().enumerate() {
+        let next = number + 1;
+        let expected = if next < names.len() {
+            json!([plain(&format!("./f{next:02}"), "import", 1)])
+        } else {
+            json!([])
+        };
+
+        assert_eq!(own(&file(&document, name)["imports"]), expected, "{name}");
+    }
+}
+
+#[test]
 fn finds_every_form_of_import_with_its_line() {
     let project = Project::new("imports-forms");
 
