@@ -13,8 +13,8 @@ use std::fmt;
 use oxc_allocator::Vec as ArenaVec;
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
-    Argument, ArrowFunctionExpression, BindingPattern, CallExpression, ClassElement, Program,
-    PropertyKey, Statement, TemplateElement,
+    Argument, ArrowFunctionExpression, BindingPattern, CallExpression, ClassElement,
+    JSXAttributeValue, Program, PropertyKey, Statement, TemplateElement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::{Kind, Token};
@@ -88,6 +88,7 @@ pub fn lists(
         lists: Vec::new(),
         open: Vec::new(),
         chained: false,
+        attribute: false,
         dropped: Dropped::default(),
     };
 
@@ -143,18 +144,18 @@ fn rendered(text: &str) -> String {
         .join(" ")
 }
 
+/// A text with every line ending a line feed, so a checkout's line endings change no form (spec DUP-5).
+fn fed(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 /// A template piece's value: its cooked value, or its raw text where an invalid escape in a tagged
 /// template leaves it none, with every line ending a line feed (spec SAME-1, DUP-5).
 fn template(element: &TemplateElement<'_>) -> String {
-    element
-        .value
-        .cooked
-        .map_or_else(
-            || element.value.raw.as_str().to_owned(),
-            |cooked| cooked.display().to_string(),
-        )
-        .replace("\r\n", "\n")
-        .replace('\r', "\n")
+    fed(&element.value.cooked.map_or_else(
+        || element.value.raw.as_str().to_owned(),
+        |cooked| cooked.display().to_string(),
+    ))
 }
 
 /// The tokens the fixed form leaves out that only the tree tells apart (spec SIZE-1).
@@ -196,6 +197,8 @@ struct Former<'l> {
     /// Whether the walk is in the callee chain of a test callee's call, where each call is part of the
     /// test's (spec COPY-3).
     chained: bool,
+    /// Whether the walk is at a JSX attribute's string value.
+    attribute: bool,
     /// The tokens the size leaves out.
     dropped: Dropped,
 }
@@ -294,6 +297,11 @@ impl Former<'_> {
             AstKind::PrivateIdentifier(node) => self.name(node.name.as_str()),
             AstKind::JSXIdentifier(node) => self.name(node.name.as_str()),
             AstKind::TSIndexSignatureName(node) => self.name(node.name.as_str()),
+            // A JSX attribute's value written over lines keeps its line endings, as JSX has no escapes
+            // (spec DUP-5).
+            AstKind::StringLiteral(node) if self.attribute => {
+                self.string(&fed(&node.value.display().to_string()))
+            }
             AstKind::StringLiteral(node) => self.string(&node.value.display().to_string()),
             AstKind::TemplateElement(node) => {
                 self.string(&template(node));
@@ -581,6 +589,12 @@ impl<'a> Visit<'a> for Former<'_> {
 
         self.chained = chained;
         self.leave_node(kind);
+    }
+
+    fn visit_jsx_attribute_value(&mut self, value: &JSXAttributeValue<'a>) {
+        self.attribute = matches!(value, JSXAttributeValue::StringLiteral(_));
+        walk::walk_jsx_attribute_value(self, value);
+        self.attribute = false;
     }
 
     fn visit_property_key(&mut self, key: &PropertyKey<'a>) {

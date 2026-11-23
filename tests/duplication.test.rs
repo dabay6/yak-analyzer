@@ -393,6 +393,29 @@ fn gives_the_same_groups_whatever_a_checkout_s_line_endings() {
 }
 
 #[test]
+fn gives_the_same_groups_for_an_attribute_written_over_lines_whatever_the_line_endings() {
+    let text = "export function First() {\n  const size = 3;\n  return <div className=\"panel\n    wide\">{size}</div>;\n}\nexport function Second() {\n  const size = 3;\n  return <div className=\"panel\n    wide\">{size}</div>;\n}\n";
+    let unix = Project::new("duplication-attribute-lf");
+    let windows = Project::new("duplication-attribute-crlf");
+
+    unix.write("src/a.tsx", text).commit();
+    windows
+        .write("src/a.tsx", &text.replace('\n', "\r\n"))
+        .commit();
+
+    let pack = json!({ "duplicationMinimum": 5 });
+    let lf = looking(&unix, &pack);
+    let crlf = looking(&windows, &pack);
+
+    assert_eq!(
+        groups(&lf),
+        [vec![("src/a.tsx", 2, 4), ("src/a.tsx", 7, 9)]]
+    );
+    // The attribute's line ending is a line feed in both, so the fingerprint is the same (spec DUP-5).
+    assert_eq!(lf["groups"], crlf["groups"]);
+}
+
+#[test]
 fn loosens_names_strings_and_numbers_as_declared() {
     let project = Project::new("duplication-loosened");
 
