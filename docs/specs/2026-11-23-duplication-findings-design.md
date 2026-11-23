@@ -74,10 +74,13 @@ Terms:
   the analyzer is called an invocation here, so the word isn't used twice.) **A copy** is a run
   that is the same as another run (SAME-1 to SAME-4). **A group** is all the copies of one run,
   two or more.
-- **A token** is a piece of source as ECMAScript's lexical grammar counts it: an identifier or
-  keyword, a punctuator, a literal, each piece of a template literal, and a JSX text. Comments and
-  white space are not tokens, and neither are the semicolons and trailing commas a formatter may
-  add or drop, nor parentheses that change nothing (SAME-1), so a formatter's pass moves no count.
+- **A token** is a piece of a statement as ECMAScript's lexical grammar counts it: an identifier or
+  keyword, a punctuator, a literal, each piece of a template literal, and a JSX text that holds more
+  than white space. Tokens are counted on the statement's syntax tree written out in one fixed
+  form, not on its source: so nothing a formatter may add or drop counts, such as semicolons,
+  trailing commas, parentheses that change nothing (SAME-1), the parentheses around a lone arrow
+  parameter, or the empty `()` of `new Foo`. Comments and white space are not tokens. Session's
+  call: a formatter's pass then moves no count.
 - **Names** are identifiers: the names of variables, parameters, functions, classes, properties,
   object keys, members and labels, type names and type parameters, and JSX tag and attribute names.
   Keywords, `this` and operators are not names.
@@ -180,7 +183,13 @@ Terms:
   its name, written bare or quoted (`{ a: 1 }` and `{ "a": 1 }` are the same); a computed key
   (`{ [a]: 1 }`) is not a name. Within that, by default:
   each name must be the same name, each string the same value, and each number the same value
-  (design FIND-9: "the same once whitespace and comments are dropped"). Session's call for syntax
+  (design FIND-9: "the same once whitespace and comments are dropped"). A string is its value after
+  escapes are read; a template piece is its cooked value, or its raw text where the cooked value is
+  undefined (an invalid escape in a tagged template). A JSX text is compared as JSX renders it: each
+  line trimmed of the white space at its ends, lines that hold only white space dropped, and the
+  rest joined by one space, so re-indenting JSX changes nothing; a JSX text that holds only white
+  space is not part of the shape. The arrow and `new` forms a formatter chooses between
+  (`x => x` and `(x) => x`, `new Foo` and `new Foo()`) are the same shape. Session's call for syntax
   over tokens: a formatter's rewrap or a quote change then never splits a group.
 - **SAME-2** Each word `duplicationIgnore` lists (TUNE-4) loosens SAME-1: with `names`, any name
   matches any name; with `strings`, any string literal, template piece or JSX text matches any
@@ -210,7 +219,9 @@ Terms:
 ### The declarations
 
 - **TUNE-1** `duplicationMinimum`, a key the reading spec's KEY-1 already names, is the smallest run
-  reported, in tokens. No pack declares it today, so giving it a unit breaks nothing. Without it, no
+  reported, in tokens. No pack declares it today (a search of the yakshaver pack's repository for
+  the key, on 2026-11-23 while this spec was written, found none), so giving it a unit breaks
+  nothing. Without it, no
   duplication is reported at all, and a notice names the key, as the complexity spec's LIMIT-2 does
   for a limit (design FIND-8).
 - **TUNE-2** `duplicationMinimumLines`, a positive whole number, is the smallest run reported, in
@@ -221,8 +232,8 @@ Terms:
 - **TUNE-4** `duplicationIgnore`, a list holding any of the words `names`, `strings` and `numbers`,
   says what SAME-2 loosens. Without it, nothing is loosened. Another word can't be used, and the line
   that refuses it names the three. Where the project states it, the project's list replaces the
-  pack's, an empty list included, unlike every other list key, which joins (the reading spec's
-  KEY-3). Among stacks of one source (Terms), the later stack's list wins, as for a number (the complexity
+  pack's, an empty list included, unlike every other list key but TUNE-5's, which join (the reading
+  spec's KEY-3). Among stacks of one source (Terms), the later stack's list wins, as for a number (the complexity
   spec's LIMIT-1). Session's call: the pack's default is expected to loosen `strings`, and a list
   that joined could never take it back. A list of words is used, not three true-or-false keys,
   because the hand-off format lets a project state only a list of text or a positive whole number.
@@ -230,8 +241,11 @@ Terms:
   (COPY-3). A call is a test callee's when its callee chain is exactly one in the list: with `it`,
   `it.only` and `it.each()` listed, `it(…)`, `it.only(…)` and `it.each(rows)(…)` are, and `it.skip(…)`
   is not. So `test.beforeEach(…)` and `test.describe(…)` are not test callees unless listed, and hooks
-  keep counting. An entry that is not a callee chain as Terms writes one can't be used. The pack's
-  and the project's lists join, as lists do. Without it, no call is a test callee's. Session's call,
+  keep counting. An entry that is not a callee chain as Terms writes one can't be used. The lists
+  of one source join across stacks, unlike TUNE-4's, since two stacks can each bring a test
+  framework of their own. Where the project states it in any stack, the project's joined list
+  replaces the pack's joined list, so a project can take out a name it uses for its own function.
+  Session's call for the joining. Without it, no call is a test callee's. Session's call,
   for the rule that a tool's convention is a declaration: the pack lists each form its test
   frameworks use.
 - **TUNE-6** `duplicationAccepted`, a list of text, holds the groups a person has accepted (QUIET-1).
@@ -310,7 +324,8 @@ Terms:
   out of the group while pasting another elsewhere is new, since the pasted copy has no partner in
   its file (owner). Moving a copy to another file makes the group new too. A group the branch never
   touched is unchanged, even where the branch's edits around it moved its lines, since neither test
-  holds a line. A comment, or a formatter's pass or codemod that leaves the syntax as it was,
+  holds a line. An edit next to every copy that makes the run longer (SAME-4) touches the group, and
+  the longer group is new. A comment, or a formatter's pass or codemod that leaves the syntax as it was,
   changes no exact form and no token count (SIZE-1), so it makes no group new, with one exception:
   a rewrap can change a copy's line count, and a group that a rewrap takes over
   `duplicationMinimumLines` is new, since the base had no such group (Risks). This departs from design BASE-5, under which shortening an
@@ -330,8 +345,13 @@ Terms:
   this run had 3 copies." or "The base reports no group of this run." Session's call.
 - **FRESH-4** A file skipped at the base leaves the duplication findings compared, as the complexity
   spec's NEW-4 does for complexity. A script skipped at the base has no runs there, so a group with a
-  copy in it has fewer copies at the base, or none, and is new. A skipped `package.json`, workspace list
-  or tsconfig changes no run. The notice the dead-code spec's COMMIT-4 gives says that duplication
+  copy in it has fewer copies at the base, or none, and is new. A script skipped at the base that
+  the branch removed or changed is different: a copy the branch took out of it can't be seen at the
+  base, so a group that lost it would look unchanged. So where the branch removed or changed any
+  script skipped at the base (its content differs from the base's), every duplication group is new,
+  and the notice says why and names the scripts. Where the branch left each skipped script as it
+  was, the groups are compared as FRESH-1 says. A skipped `package.json`, workspace list or tsconfig
+  changes no run. The notice the dead-code spec's COMMIT-4 gives says that duplication
   findings were compared too. Session's call: under COMMIT-4 one broken base file would make every
   group new, the second anti-goal.
 
@@ -388,6 +408,11 @@ Terms:
     group in a renamed file, a rewrap that leaves a group as it was and one that takes it over the
     line minimum, and a group only one side has; FRESH-4's skipped script;
   - DUP-5's same project with CRLF and with LF line endings, giving the same fingerprints;
+  - JSX re-indented and rewrapped, an arrow's parameter with and without parentheses, `new Foo` and
+    `new Foo()`, each giving the same group, fingerprint and counts; a template with an invalid
+    escape in a tagged template;
+  - FRESH-4's skipped script the branch changed, and one it left as it was; a project's
+    `duplicationTestCallees` replacing the pack's;
   - types as code: two runs differing only in a type annotation, and repeated interfaces; a tagged
     template callee (``it.each`…`(…)``);
   - the command, with and without `--all`, and with and without the declarations.
@@ -422,7 +447,16 @@ Terms:
   that wrote this spec) tries settings, starting from fallow's (`strings` loosened, 50 tokens, 5
   lines, 2 copies), and proposes the set with the fewest judged misses: analyzer-only groups judged
   no refactor candidate, plus fallow-only groups judged one. A tie goes to the set nearer fallow's.
-  The owner chooses. The values chosen go to the pack through OWED-1, and are written in the judged list.
+  The owner chooses.
+
+  The sets tried are the starting set and each set that changes one setting from it: tokens 35 or
+  70; lines 3 or 8; `strings` not loosened; `names` loosened; `numbers` loosened. That is eight
+  sets; copies stay 2. A further set is tried only where two changes each lowered the misses, and
+  then the two together. A group is judged once: a group of another set with the same copies
+  (YARD-2's match, both ways) keeps its judgment, and only groups no earlier set had are judged
+  afresh. The owner's sample (YARD-3) is taken on the starting set, and again on the chosen set's
+  groups the first sample didn't reach. Session's call: one change at a time shows what each
+  setting does, and judging each group once keeps the work to the groups that differ. The values chosen go to the pack through OWED-1, and are written in the judged list.
   Session's call (owner: defaults set from the comparison).
 - **YARD-5** A fallow-only group the owner judges a refactor candidate is either fixed, with a
   failing fixture of its shape first (design PROOF-5), or written in the judged list as left as it
@@ -449,7 +483,8 @@ Terms:
     waits on YARD-5, not on matching fallow (owner);
   - an amendment to BASE-5's rule for a duplicated group, to FRESH-1's (owner);
   - an amendment to design DECL-2, which says a project's list adds to the stack's:
-    `duplicationIgnore` is a list the project's value replaces (TUNE-4);
+    `duplicationIgnore` and `duplicationTestCallees` are lists the project's value replaces
+    (TUNE-4, TUNE-5);
   - the pack's declarations of the new keys, with YARD-4's defaults and each form of `it` and `test` as test
     callees, and the engine's way for a person to add an entry to `duplicationAccepted`;
   - a line in the notes of any pack release that changes the default `duplicationIgnore` or
@@ -506,7 +541,12 @@ Terms:
   branch audits look for it.
 - **Code that calls its own function named like a test callee** (`test(…)` in a script that is no
   test) has that call's callbacks left out of detection (COPY-3). It is rare, and a project can
-  leave the name out of its declarations; the comparison notes any it meets.
+  state its own `duplicationTestCallees` without the name, which replaces the pack's (TUNE-5); the
+  comparison notes any it meets.
+- **The reading holds more for each file.** COPY-5 keeps something for every statement at every
+  depth, which grows with deep nesting, on both trees at each audit. The builder keeps a digest
+  and counts per statement, not its written form, and YARD-6's measurement includes the memory the
+  largest named root takes before and after.
 - **Duplication doubles work at each audit,** since both trees are read and grouped. COPY-5 keeps it
   inside the parse, and YARD-6 measures it. A cost found too high goes to the speed work, not here.
 - **The fingerprint's form is hard to change after the swap,** since accepted groups and reasons hang
@@ -528,8 +568,8 @@ Terms:
 
 - The names of the modules, types and functions, and where in the parse the runs are read.
 - How groups are found (hashing, a suffix array or another way), within SAME-3 and SAME-4.
-- How tokens are counted, within SIZE-1: from the lexer, or from the syntax tree where that gives the
-  same count.
+- The fixed form a statement's tree is written out in to count its tokens (Terms, "A token"), within
+  the rule that nothing a formatter may add or drop counts.
 - The form of a run written into the fingerprint's digest (DUP-4).
 - The form of a copy's exact form (FRESH-1): the same form as DUP-4's, with nothing loosened, or a
   digest of it.
