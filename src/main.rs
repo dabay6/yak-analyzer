@@ -3,17 +3,19 @@
 //! It answers its version and its interface version, and reads a project: its hand-off file, its files,
 //! its packages, its scripts' imports and where they lead, its entry points, and which export of which
 //! file is used. `graph` prints what was read, `audit` prints a report of the findings it shows,
-//! compared with a base commit where it is given one, and `complexity` prints the scores of each
-//! function.
+//! compared with a base commit where it is given one, `complexity` prints the scores of each function,
+//! and `duplication` prints the groups of copies.
 
 mod audit;
 mod cli;
 mod command_files;
 mod complexity;
 mod declarations;
+mod duplication;
 mod entries;
 mod files;
 mod findings;
+mod forms;
 mod functions;
 mod git;
 mod glob;
@@ -123,6 +125,9 @@ fn run() -> ExitCode {
         }
         Ok(Command::Complexity { hand_off, all }) => {
             ended(complexity::run(hand_off.as_deref(), all))
+        }
+        Ok(Command::Duplication { hand_off, all }) => {
+            ended(duplication::run(hand_off.as_deref(), all))
         }
         Err(refusal) => {
             eprintln!("{}", stop::line(&refusal));

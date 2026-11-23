@@ -38,17 +38,20 @@ pub enum Rule {
     CircularDependency,
     /// A function whose complexity is over a declared limit (complexity spec CPX-1).
     Complexity,
+    /// A group of runs of statements that are the same (duplication spec DUP-1).
+    Duplication,
 }
 
 impl Rule {
     /// Every rule, in the report's order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::UnusedFile,
         Self::UnusedExport,
         Self::UnusedType,
         Self::UnresolvedImport,
         Self::CircularDependency,
         Self::Complexity,
+        Self::Duplication,
     ];
 
     /// The rule's name in the report.
@@ -60,6 +63,7 @@ impl Rule {
             Self::UnresolvedImport => "unresolved-import",
             Self::CircularDependency => "circular-dependency",
             Self::Complexity => "complexity",
+            Self::Duplication => "duplication",
         }
     }
 
@@ -74,6 +78,7 @@ impl Rule {
             Self::Complexity => {
                 "A function whose cyclomatic or cognitive complexity is over its limit."
             }
+            Self::Duplication => "Runs of statements that are the same in two or more places.",
         }
     }
 

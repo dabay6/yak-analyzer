@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use crate::duplication::Lens;
+use crate::forms;
 use crate::functions;
 use crate::imports::{self, Broken, DEFAULT, EVERY, Form, Import, Name, Read, Used};
 
@@ -33,7 +35,7 @@ pub enum Skipped {
 /// The component's default export is the component, which is never reported, so it is not among its
 /// exports. A name its template holds uses the export of that name, and the binding of that name that
 /// an import of a `<script setup>` block makes (spec USE-4).
-pub fn vue(text: &str) -> Result<(Read, Vec<Skipped>), Broken> {
+pub fn vue(text: &str, lens: Option<&Lens>) -> Result<(Read, Vec<Skipped>), Broken> {
     let mut read = Read::default();
     let mut skipped = Vec::new();
     let blocks = blocks(text);
@@ -66,7 +68,7 @@ pub fn vue(text: &str) -> Result<(Read, Vec<Skipped>), Broken> {
             .count();
         let lang = block.tag.attribute("lang");
 
-        match imports::read_block(&text[block.content.clone()], lang) {
+        match imports::read_block(&text[block.content.clone()], lang, lens) {
             None => skipped.push(Skipped::Language {
                 line,
                 language: lang.unwrap_or_default().to_owned(),
@@ -85,6 +87,13 @@ pub fn vue(text: &str) -> Result<(Read, Vec<Skipped>), Broken> {
                 }));
                 read.computed += found.computed;
                 functions::append(&mut read.units, found.units, above, indent);
+                // A block's statements are counted in the file (duplication spec COPY-4).
+                forms::append(
+                    &mut read.lists,
+                    found.lists,
+                    above,
+                    u32::try_from(block.content.start).unwrap_or(u32::MAX),
+                );
 
                 for export in found.exports {
                     if export.name != DEFAULT

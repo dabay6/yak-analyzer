@@ -141,9 +141,9 @@ pub struct Detail {
     pub base: Option<Option<Scores>>,
 }
 
-/// The value of a limit's key that wins: the last stack's that the project states it for, or else the
-/// last stack's that the pack states it for.
-fn declared(stacks: &[Stack], key: &str) -> Option<u64> {
+/// The value of a number key that wins: the last stack's that the project states it for, or else the
+/// last stack's that the pack states it for (spec LIMIT-1; duplication spec TUNE-7).
+pub fn declared(stacks: &[Stack], key: &str) -> Option<u64> {
     let last = |project: bool| {
         stacks.iter().rev().find_map(|stack| {
             let declarations = if project { &stack.project } else { &stack.pack };

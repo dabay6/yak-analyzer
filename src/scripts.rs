@@ -14,6 +14,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
+use crate::duplication::Lens;
 use crate::files::{File, Kind};
 use crate::imports::{self, Broken, Read};
 use crate::notice::Notice;
@@ -49,10 +50,14 @@ enum Unread {
 /// time spent reading goes into `scriptsRead`: on the working copy the wall-clock time of the pre-read,
 /// on the base each file's read, summed. The time spent parsing goes into `scriptsParse`, summed over
 /// the files (spec TIME-2, TIME-2b; parallel reading spec CLOCK-1).
+///
+/// With a lens, each script's and Vue block's statement lists are read through it (duplication spec
+/// COPY-4, COPY-5).
 pub fn read(
     tree: &Tree,
     files: &[File],
     data: &BTreeSet<String>,
+    lens: Option<&Lens>,
     notices: &mut Vec<Notice>,
     stages: &mut Stages,
 ) -> Result<Scripts, Stop> {
@@ -77,7 +82,7 @@ pub fn read(
             None => stages.time("scriptsRead", || tree.read(&file.path)),
         };
 
-        match stages.time("scriptsParse", || one(file, bytes)) {
+        match stages.time("scriptsParse", || one(file, bytes, lens)) {
             Ok((read, skipped)) => {
                 notices.extend(
                     skipped
@@ -214,8 +219,13 @@ fn passed_over(path: &str, skipped: Skipped) -> Notice {
 }
 
 /// Finds the imports of one file from what reading it from its tree gave, with what its reader passed
-/// over.
-fn one(file: &File, bytes: io::Result<Vec<u8>>) -> Result<(Read, Vec<Skipped>), Unread> {
+/// over. A script's and a Vue component's statement lists are read through the lens, and no other
+/// file's (duplication spec COPY-4).
+fn one(
+    file: &File,
+    bytes: io::Result<Vec<u8>>,
+    lens: Option<&Lens>,
+) -> Result<(Read, Vec<Skipped>), Unread> {
     let path = file.path.as_str();
     let bytes = bytes.map_err(|error| match error.kind() {
         ErrorKind::NotFound => Unread::Gone,
@@ -235,12 +245,16 @@ fn one(file: &File, bytes: io::Result<Vec<u8>>) -> Result<(Read, Vec<Skipped>), 
 
     // An MDX document and an HTML page hold nothing that fails to parse (spec PARSE-2).
     match file.kind {
-        Kind::Vue => pages::vue(text).map_err(broken),
+        Kind::Vue => pages::vue(text, lens).map_err(broken),
         Kind::Mdx => Ok(pages::mdx(text)),
         Kind::Page => Ok((pages::html(text), Vec::new())),
-        _ => imports::read(path, text)
-            .map(|read| (read, Vec::new()))
-            .map_err(broken),
+        _ => imports::read(
+            path,
+            text,
+            lens.filter(|_| matches!(file.kind, Kind::Script)),
+        )
+        .map(|read| (read, Vec::new()))
+        .map_err(broken),
     }
 }
 

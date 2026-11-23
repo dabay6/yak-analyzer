@@ -24,13 +24,18 @@ const BASE_OPTION: &str = "--base";
 /// The command that reads a project and prints each function's complexity (complexity spec SOLO-1).
 const COMPLEXITY_COMMAND: &str = "complexity";
 
-/// The option of `complexity` that lists every function, not only those over a limit (complexity spec
-/// SOLO-3).
+/// The command that reads a project and prints its groups of copies (duplication spec SHOW-1).
+const DUPLICATION_COMMAND: &str = "duplication";
+
+/// The option of `complexity` that lists every function, not only those over a limit, and of
+/// `duplication` that lists every group, the accepted ones too (complexity spec SOLO-3; duplication
+/// spec SHOW-3).
 const ALL_OPTION: &str = "--all";
 
 /// What the binary accepts, for the line that refuses anything else.
 const ACCEPTED: &str = "--version, interface, graph [--hand-off <file>], audit [--hand-off <file>] \
-                        [--base <commit>], and complexity [--hand-off <file>] [--all]";
+                        [--base <commit>], complexity [--hand-off <file>] [--all], and duplication \
+                        [--hand-off <file>] [--all]";
 
 /// One thing the binary can be asked to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -53,6 +58,12 @@ pub enum Command {
         hand_off: Option<PathBuf>,
         all: bool,
     },
+    /// Read the project and print its groups of copies, with a hand-off file or without one: those a
+    /// person has not accepted, or with `all` every group (duplication spec SHOW-1).
+    Duplication {
+        hand_off: Option<PathBuf>,
+        all: bool,
+    },
 }
 
 /// Reads the arguments after the program's name. The error is the text of the refusal.
@@ -67,7 +78,12 @@ pub fn parse(args: &[OsString]) -> Result<Command, String> {
             hand_off: Some(PathBuf::from(&args[2])),
         }),
         [AUDIT_COMMAND, ..] => audit(args),
-        [COMPLEXITY_COMMAND, ..] => complexity(args),
+        [COMPLEXITY_COMMAND, ..] => {
+            listing(args).map(|(hand_off, all)| Command::Complexity { hand_off, all })
+        }
+        [DUPLICATION_COMMAND, ..] => {
+            listing(args).map(|(hand_off, all)| Command::Duplication { hand_off, all })
+        }
         [] => Err(format!("nothing to do; it answers {ACCEPTED}")),
         _ => Err(refused(args)),
     }
@@ -106,8 +122,9 @@ fn audit(args: &[OsString]) -> Result<Command, String> {
     Ok(Command::Audit { hand_off, base })
 }
 
-/// `complexity` and its options, each at most once, in either order (complexity spec SOLO-1).
-fn complexity(args: &[OsString]) -> Result<Command, String> {
+/// The options of `complexity` and of `duplication`, each at most once, in either order: the hand-off
+/// file, and whether to list everything (complexity spec SOLO-1; duplication spec SHOW-1).
+fn listing(args: &[OsString]) -> Result<(Option<PathBuf>, bool), String> {
     let mut hand_off = None;
     let mut all = false;
     let mut words = args[1..].iter();
@@ -126,7 +143,7 @@ fn complexity(args: &[OsString]) -> Result<Command, String> {
         }
     }
 
-    Ok(Command::Complexity { hand_off, all })
+    Ok((hand_off, all))
 }
 
 /// The refusal of a command line the binary does not answer.

@@ -75,6 +75,10 @@ path = "tests/timings.test.rs"
 name = "complexity"
 path = "tests/complexity.test.rs"
 
+[[test]]
+name = "duplication"
+path = "tests/duplication.test.rs"
+
 [dependencies]
 # Parse scripts into syntax trees, walk them, and tie each reference to the binding it names
 # (`oxc_semantic`, spec USE-1); released together, so pinned together (spec AN-2, DEP-3).
