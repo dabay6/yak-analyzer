@@ -13,8 +13,8 @@ use std::fmt;
 use oxc_allocator::Vec as ArenaVec;
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
-    ArrowFunctionExpression, BindingPattern, ClassElement, Program, PropertyKey, Statement,
-    TemplateElement,
+    Argument, ArrowFunctionExpression, BindingPattern, CallExpression, ClassElement, Program,
+    PropertyKey, Statement, TemplateElement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::{Kind, Token};
@@ -22,6 +22,7 @@ use oxc_span::{GetSpan, Span};
 use sha2::{Digest, Sha256};
 
 use crate::duplication::Lens;
+use crate::functions;
 use crate::imports::Lines;
 
 /// How many bytes of the SHA-256 digest of a statement's form it keeps.
@@ -86,6 +87,7 @@ pub fn lists(
         stream: Vec::new(),
         lists: Vec::new(),
         open: Vec::new(),
+        chained: false,
         dropped: Dropped::default(),
     };
 
@@ -191,6 +193,9 @@ struct Former<'l> {
     lists: Vec<Vec<Raw>>,
     /// The statements the walk is inside, by their list and their place in it.
     open: Vec<(usize, usize)>,
+    /// Whether the walk is in the callee chain of a test callee's call, where each call is part of the
+    /// test's (spec COPY-3).
+    chained: bool,
     /// The tokens the size leaves out.
     dropped: Dropped,
 }
@@ -532,6 +537,50 @@ impl<'a> Visit<'a> for Former<'_> {
                 former.visit_class_element(element);
             });
         }
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        let test = self.chained
+            || functions::callee(&call.callee)
+                .is_some_and(|chain| self.lens.test_callees.contains(&chain));
+
+        if !test {
+            walk::walk_call_expression(self, call);
+
+            return;
+        }
+
+        // A statement that holds a test callee's call joins no run (spec COPY-3).
+        if !self.chained {
+            for &(list, index) in &self.open {
+                self.lists[list][index].joins = false;
+            }
+        }
+
+        let kind = AstKind::CallExpression(self.alloc(call));
+        let chained = self.chained;
+
+        self.enter_node(kind);
+        self.chained = true;
+        self.visit_expression(&call.callee);
+        self.chained = false;
+
+        if let Some(arguments) = &call.type_arguments {
+            self.visit_ts_type_parameter_instantiation(arguments);
+        }
+
+        // Nothing inside a test callee's callback is looked at (spec COPY-3).
+        for argument in call.arguments.iter().filter(|argument| {
+            !matches!(
+                argument,
+                Argument::FunctionExpression(_) | Argument::ArrowFunctionExpression(_)
+            )
+        }) {
+            self.visit_argument(argument);
+        }
+
+        self.chained = chained;
+        self.leave_node(kind);
     }
 
     fn visit_property_key(&mut self, key: &PropertyKey<'a>) {

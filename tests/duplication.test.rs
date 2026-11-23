@@ -518,6 +518,98 @@ fn an_import_never_joins_a_run() {
 }
 
 #[test]
+fn counts_hooks_and_helpers_in_tests_but_no_test_s_body() {
+    let project = Project::new("duplication-tests");
+
+    project
+        .write(
+            "src/panel.test.ts",
+            r#"describe("panel", () => {
+  beforeEach(() => {
+    const store = createStore({ size: 3 });
+    store.reset(true);
+  });
+  it("opens", () => {
+    const store = createStore({ size: 3 });
+    store.reset(true);
+  });
+});
+describe("drawer", () => {
+  beforeEach(() => {
+    const store = createStore({ size: 3 });
+    store.reset(true);
+  });
+  it.each([1, 2])("closes %i", (count) => {
+    const store = createStore({ size: 3 });
+    store.reset(true);
+  });
+});
+"#,
+        )
+        .commit();
+
+    let found = |callees: Value| {
+        let document = looking(
+            &project,
+            &json!({ "duplicationMinimum": 5, "duplicationTestCallees": callees }),
+        );
+
+        groups(&document)
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .map(|(_, first, last)| (first, last))
+                    .collect()
+            })
+            .collect::<Vec<Vec<(u64, u64)>>>()
+    };
+
+    // Each form of a test callee is named: the hooks count, the tests' bodies do not (spec COPY-3).
+    assert_eq!(found(json!(["it", "it.each()"])), [vec![(2, 5), (12, 15)]]);
+    // `it` alone does not name `it.each(…)(…)`, so that test's body counts (spec TUNE-5).
+    assert_eq!(
+        found(json!(["it"])),
+        [vec![(2, 5), (12, 15)], vec![(3, 4), (13, 14), (17, 18)]]
+    );
+    // With no test callee, every body counts.
+    assert_eq!(
+        found(json!([])),
+        [
+            vec![(2, 5), (12, 15)],
+            vec![(3, 4), (7, 8), (13, 14), (17, 18)]
+        ]
+    );
+}
+
+#[test]
+fn names_a_tagged_template_test_by_its_backticks() {
+    let project = Project::new("duplication-tagged");
+
+    project
+        .write(
+            "src/table.test.ts",
+            "describe(\"table\", () => {\n  it.each`\n    a | b\n  `(\"adds $a\", ({ a, b }) => {\n    const store = createStore({ size: 3 });\n    store.reset(true);\n  });\n  helper(() => {\n    const store = createStore({ size: 3 });\n    store.reset(true);\n  });\n});\n",
+        )
+        .commit();
+
+    assert_eq!(
+        groups(&looking(&project, &json!({ "duplicationMinimum": 5 }))),
+        [vec![
+            ("src/table.test.ts", 5, 6),
+            ("src/table.test.ts", 9, 10)
+        ]]
+    );
+    assert_eq!(
+        looking(
+            &project,
+            &json!({ "duplicationMinimum": 5, "duplicationTestCallees": ["it.each``"] })
+        )["groups"],
+        json!([])
+    );
+}
+
+#[test]
 fn finds_copies_in_scripts_and_vue_blocks_only() {
     let project = Project::new("duplication-files");
     let body =
