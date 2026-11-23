@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.12.0](https://github.com/dabay6/yak-analyzer/compare/v0.11.0...v0.12.0) (2026-11-23)
+
+
+### Features
+
+* **complexity:** fallow's React name, and the comparison with fallow ([fd5da69](https://github.com/dabay6/yak-analyzer/commit/fd5da69f0f923e6b90ba33f12145a31dd68d1574))
+* **complexity:** mark a finding inherited by its scores at the base ([55a22c7](https://github.com/dabay6/yak-analyzer/commit/55a22c76b816fd65cf1d554351b08be60c9fc1ac))
+* **complexity:** report complexity findings in audit and compare them with the base ([60a065a](https://github.com/dabay6/yak-analyzer/commit/60a065aca8273ed05691d790049024d8d96b4dc0))
+* **complexity:** report functions over a limit in audit ([7b7beb8](https://github.com/dabay6/yak-analyzer/commit/7b7beb8f0256097b08ebd84730c772106531e4fa))
+* **complexity:** score functions and add the complexity command ([ba27ec2](https://github.com/dabay6/yak-analyzer/commit/ba27ec28c510511134c9ed4907630db8448dcc3d))
+
+
+### Bug Fixes
+
+* **complexity:** give a function the React name fallow's walk holds ([7dd3e58](https://github.com/dabay6/yak-analyzer/commit/7dd3e589fb66938cb0e31c3efa7f4a7814d0269c))
+
 ## [0.11.0](https://github.com/dabay6/yak-analyzer/compare/v0.10.0...v0.11.0) (2026-11-22)
 
 
