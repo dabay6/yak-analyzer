@@ -325,8 +325,9 @@ const KEYS: [(&str, Kind); 10] = [
     ("cognitiveLimit", Kind::Number),
     ("duplicationMinimum", Kind::Number),
 =======
-/// The words `duplicationIgnore` takes (duplication spec TUNE-4).
-const WORDS: [&str; 3] = ["names", "strings", "numbers"];
+/// The words `duplicationIgnore` takes, in the order the `duplication` command prints them (duplication
+/// spec TUNE-4, SHOW-2).
+pub const WORDS: [&str; 3] = ["names", "strings", "numbers"];
 
 /// Every key the analyzer knows, with the kind of its value (spec KEY-1; duplication spec TUNE-1 to
 /// TUNE-6).
@@ -1722,7 +1723,8 @@ impl Counted {
                     kept[index - 1] = false;
                 }
                 Kind::JSXText => {
-                    let piece = text.get(token.start() as usize..token.end() as usize);
+                    let offset = |at: u32| usize::try_from(at).unwrap_or(usize::MAX);
+                    let piece = text.get(offset(token.start())..offset(token.end()));
 
                     if piece.is_none_or(|piece| piece.trim().is_empty()) {
                         kept[index] = false;
@@ -1804,6 +1806,7 @@ use serde_json::{Map, Value, json};
 
 use crate::INTERFACE_VERSION;
 use crate::complexity;
+use crate::declarations::WORDS;
 use crate::files::{self, Kind};
 use crate::findings::{self, Rule};
 use crate::forms::{DIGEST, Item, List};
@@ -1816,9 +1819,6 @@ use crate::tree::Tree;
 
 /// The kind of the notice for a run with no `duplicationMinimum` (spec TUNE-1).
 const NOT_CHECKED: &str = "duplication-not-checked";
-
-/// The words `duplicationIgnore` takes, in the order the command prints them (spec TUNE-4).
-const IGNORABLE: [&str; 3] = ["names", "strings", "numbers"];
 
 /// The fewest copies a group needs where no declaration says (spec TUNE-3).
 const COPIES: u64 = 2;
@@ -1914,9 +1914,9 @@ impl Settings {
         })
     }
 
-    /// The words loosened, in the order `IGNORABLE` gives them.
+    /// The words loosened, in the order `WORDS` gives them.
     fn ignored(&self) -> Vec<&'static str> {
-        IGNORABLE
+        WORDS
             .into_iter()
             .zip([self.lens.names, self.lens.strings, self.lens.numbers])
             .filter_map(|(word, loosened)| loosened.then_some(word))
@@ -3118,34 +3118,38 @@ pub fn callee(expression: &Expression<'_>) -> Option<String> {
 /// An expression as `chain` writes it; with `tagged`, a tagged template is written as its tag and two
 /// backticks, and without it, it is no chain, so complexity's names do not change.
 fn written(expression: &Expression<'_>, tagged: bool) -> Option<String> {
-    let after =
-        |object: &Expression<'_>, text: &str| written(object, tagged).map(|object| format!("{object}{text}"));
+    // The chain of an object with the text given after it, written the same way.
+    let followed = |object: &Expression<'_>, text: &str| {
+        written(object, tagged).map(|object| format!("{object}{text}"))
+    };
 
     match expression {
         Expression::Identifier(identifier) => Some(identifier.name.to_string()),
         Expression::ThisExpression(_) => Some("this".to_owned()),
         Expression::Super(_) => Some("super".to_owned()),
         Expression::StaticMemberExpression(member) => {
-            after(&member.object, &format!(".{}", member.property.name))
+            followed(&member.object, &format!(".{}", member.property.name))
         }
-        Expression::ComputedMemberExpression(member) => after(&member.object, "[]"),
+        Expression::ComputedMemberExpression(member) => followed(&member.object, "[]"),
         Expression::PrivateFieldExpression(member) => {
-            after(&member.object, &format!(".#{}", member.field.name))
+            followed(&member.object, &format!(".#{}", member.field.name))
         }
-        Expression::CallExpression(call) => after(&call.callee, "()"),
-        Expression::TaggedTemplateExpression(template) if tagged => after(&template.tag, "``"),
+        Expression::CallExpression(call) => followed(&call.callee, "()"),
+        Expression::TaggedTemplateExpression(template) if tagged => {
+            followed(&template.tag, "``")
+        }
         Expression::NewExpression(call) => {
             written(&call.callee, tagged).map(|callee| format!("new {callee}()"))
         }
         Expression::ChainExpression(chained) => match &chained.expression {
-            ChainElement::CallExpression(call) => after(&call.callee, "()"),
+            ChainElement::CallExpression(call) => followed(&call.callee, "()"),
             ChainElement::TSNonNullExpression(wrapped) => written(&wrapped.expression, tagged),
             ChainElement::StaticMemberExpression(member) => {
-                after(&member.object, &format!(".{}", member.property.name))
+                followed(&member.object, &format!(".{}", member.property.name))
             }
-            ChainElement::ComputedMemberExpression(member) => after(&member.object, "[]"),
+            ChainElement::ComputedMemberExpression(member) => followed(&member.object, "[]"),
             ChainElement::PrivateFieldExpression(member) => {
-                after(&member.object, &format!(".#{}", member.field.name))
+                followed(&member.object, &format!(".#{}", member.field.name))
             }
         },
         Expression::ParenthesizedExpression(wrapped) => written(&wrapped.expression, tagged),
@@ -3554,10 +3558,7 @@ pub fn groups(reading: &Reading) -> (Vec<Group>, Vec<Notice>) {
     let mut groups = widest(found);
     // Acceptance comes after the groups inside others are dropped, so an accepted group still hides
     // them (spec QUIET-1).
-    let entries: BTreeSet<String> = groups
-        .iter()
-        .map(|group| format!("{}/{}", group.fingerprint, group.copies.len()))
-        .collect();
+    let entries: BTreeSet<String> = groups.iter().map(accepting).collect();
     let accepted: BTreeSet<&str> = settings
         .accepted
         .iter()
@@ -3586,13 +3587,18 @@ pub fn groups(reading: &Reading) -> (Vec<Group>, Vec<Notice>) {
         group
             .copies
             .sort_by(|a, b| (&a.path, a.start_line).cmp(&(&b.path, b.start_line)));
-        group.accepted = accepted
-            .contains(format!("{}/{}", group.fingerprint, group.copies.len()).as_str());
+        group.accepted = accepted.contains(accepting(group).as_str());
     }
 
     groups.sort_by(|a, b| order(a).cmp(&order(b)));
 
     (groups, notices)
+}
+
+/// The entry of `duplicationAccepted` that accepts a group: its fingerprint, `/`, and its number of
+/// copies (spec TUNE-6).
+fn accepting(group: &Group) -> String {
+    format!("{}/{}", group.fingerprint, group.copies.len())
 }
 >>>>>>> replace
 <<<<<<< find
@@ -3668,6 +3674,7 @@ Expected: one commit.
 =======
     'its property bag, `complexity`',
     '`cyclomaticLimit`, `cognitiveLimit` and `over`',
+    // What duplication adds (duplication spec VERS-1).
     'Duplication adds to interface version 1 and breaks nothing in it',
     'the rule name `duplication`',
     '`duplicationMinimumLines`, `duplicationCopies`, `duplicationIgnore`, `duplicationTestCallees` and',
