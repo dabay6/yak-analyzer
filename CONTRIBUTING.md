@@ -83,6 +83,13 @@ node scripts/check-floor.mjs
   and lists every function. A command line it refuses exits 2. yak never runs it: it is for a
   person or an agent, and its name, options and document are a draft until the analyzer's stage 5
   releases it as an MCP tool.
+- `yak-analyzer duplication` reads the project as `audit` does and prints one JSON document: the
+  settings the declarations give duplication, each group of copies with its size, its copies and the
+  fingerprint of its finding, and the notices.
+  `yak-analyzer duplication --hand-off <file> --all` reads with the hand-off file's declarations and
+  lists the groups a person accepted too. A command line it refuses exits 2. yak never runs it: it is
+  for a person or an agent, and its name, options and document are a draft until the analyzer's
+  stage 5.
 
 Interface version 1 covers what yak relies on, fixed when the analyzer's stage 2 ended on
 2026-11-17: the hand-off format the analyzer reads; the declaration keys and their shapes,
@@ -101,6 +108,14 @@ and the rules that name a function in the finding's fingerprint, its name path, 
 scheme. Both are a draft until the swap, the pack release that replaces fallow with the analyzer in
 yak: nothing yak runs reads them before then, so changing them raises nothing. From the swap they
 are fixed, and a change that breaks them raises the interface version.
+
+Duplication adds to interface version 1 and breaks nothing in it: the rule name `duplication`; the
+unit of `duplicationMinimum`, tokens, which no pack declared before; and the keys
+`duplicationMinimumLines`, `duplicationCopies`, `duplicationIgnore`, `duplicationTestCallees` and
+`duplicationAccepted`.
+The form of a run that a group's fingerprint is made from is part of the fingerprint scheme, and a
+draft until the swap: from then, a change that breaks it raises the interface version, since it stops
+every accepted group and recorded reason from matching.
 
 What `graph` prints is the builder's and the tests' view of a reading, not part of the interface
 version; its form may change. When it does, the fixtures' written-down output changes in the same
