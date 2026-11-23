@@ -3668,13 +3668,17 @@ Expected: one commit.
     '`yak-analyzer duplication --hand-off <file> --all`',
 >>>>>>> replace
 <<<<<<< find
+test('the guide says what interface version 1 covers, and that a change that breaks it raises the number (comparison spec FREEZE-1; complexity spec VER-1)', () => {
+=======
+test('the guide says what interface version 1 covers, and that a change that breaks it raises the number (comparison spec FREEZE-1; complexity spec VER-1; duplication spec VERS-1)', () => {
+>>>>>>> replace
+<<<<<<< find
     'its property bag, `complexity`',
     '`cyclomaticLimit`, `cognitiveLimit` and `over`',
   ]) {
 =======
     'its property bag, `complexity`',
     '`cyclomaticLimit`, `cognitiveLimit` and `over`',
-    // What duplication adds (duplication spec VERS-1).
     'Duplication adds to interface version 1 and breaks nothing in it',
     'the rule name `duplication`',
     '`duplicationMinimumLines`, `duplicationCopies`, `duplicationIgnore`, `duplicationTestCallees` and',
