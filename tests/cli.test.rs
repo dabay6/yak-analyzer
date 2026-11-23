@@ -108,7 +108,7 @@ fn audit_without_a_hand_off_file_prints_one_sarif_report_and_exits_zero() {
     assert_eq!(run["tool"]["driver"]["name"], json!("yak-analyzer"));
     assert_eq!(
         run["tool"]["driver"]["rules"].as_array().map(Vec::len),
-        Some(5)
+        Some(6)
     );
     assert_eq!(run["results"], json!([]));
     assert_eq!(notifications.as_array().map(Vec::len), Some(1));
@@ -144,7 +144,7 @@ fn refuses_anything_else_with_one_line_on_standard_error() {
         assert!(error.starts_with("yak-analyzer: cannot do `"), "{args:?}");
         assert!(error.contains(&args.join(" ")), "{args:?}");
         assert!(
-            error.contains("--version, interface, graph [--hand-off <file>], and audit"),
+            error.contains("and complexity [--hand-off <file>] [--all]"),
             "{args:?}"
         );
     }
@@ -192,7 +192,7 @@ fn refuses_no_argument_at_all_the_same_way() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert_eq!(error.lines().count(), 1);
-    assert!(error.contains("--version, interface, graph [--hand-off <file>], and audit"));
+    assert!(error.contains("and complexity [--hand-off <file>] [--all]"));
 }
 
 #[test]

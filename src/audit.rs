@@ -1,7 +1,7 @@
 //! The `audit` command: reads the project, and with a base the base commit too, and prints what the
 //! reading shows as one SARIF 2.1.0 document with one run (spec CMD-1, REPORT-1, COMMIT-1, INH-4).
 //!
-//! The run names the tool and lists the five rules, the findings and the notices.
+//! The run names the tool and lists its rules, the findings and the notices.
 
 use std::fmt::Write as _;
 use std::path::Path;

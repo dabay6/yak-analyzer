@@ -35,16 +35,19 @@ pub enum Rule {
     UnresolvedImport,
     /// Files that import each other in a loop.
     CircularDependency,
+    /// A function whose complexity is over a declared limit (complexity spec CPX-1).
+    Complexity,
 }
 
 impl Rule {
     /// Every rule, in the report's order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::UnusedFile,
         Self::UnusedExport,
         Self::UnusedType,
         Self::UnresolvedImport,
         Self::CircularDependency,
+        Self::Complexity,
     ];
 
     /// The rule's name in the report.
@@ -55,6 +58,7 @@ impl Rule {
             Self::UnusedType => "unused-type",
             Self::UnresolvedImport => "unresolved-import",
             Self::CircularDependency => "circular-dependency",
+            Self::Complexity => "complexity",
         }
     }
 
@@ -66,6 +70,9 @@ impl Rule {
             Self::UnusedType => "A type a file exports that no other file uses.",
             Self::UnresolvedImport => "An import that leads to no file.",
             Self::CircularDependency => "Files that import each other in a loop.",
+            Self::Complexity => {
+                "A function whose cyclomatic or cognitive complexity is over its limit."
+            }
         }
     }
 
@@ -180,8 +187,8 @@ impl Finding {
 
 /// The fingerprint of a finding: the first digits of the SHA-256 digest of its rule and its parts, each
 /// written after its length in bytes and a colon, so that no two lists of parts give the same input
-/// (spec REPORT-3).
-fn fingerprint(rule: Rule, parts: &[&str]) -> String {
+/// (spec REPORT-3; complexity spec CPX-4).
+pub fn fingerprint(rule: Rule, parts: &[&str]) -> String {
     let mut hasher = Sha256::new();
 
     for part in std::iter::once(rule.name()).chain(parts.iter().copied()) {

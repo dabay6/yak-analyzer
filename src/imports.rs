@@ -16,6 +16,8 @@ use oxc_parser::Parser;
 use oxc_semantic::{NodeId, Semantic, SemanticBuilder, SymbolId};
 use oxc_span::{GetSpan, SourceType, Span};
 
+use crate::functions::{self, Unit};
+
 /// The name an import or an export has for the whole of a file: its namespace, or all it exports.
 pub const EVERY: &str = "*";
 
@@ -139,6 +141,9 @@ pub struct Read {
     /// The uses a file makes of its own exports from outside its scripts, as a Vue component's
     /// template does (spec USE-4).
     pub named: Vec<Used>,
+    /// Its functions, classes and object literals, in source order, from which its functions' names
+    /// and scores are read (complexity spec FN-3).
+    pub units: Vec<Unit>,
 }
 
 /// Why a script did not parse: the line of the first syntax error, where there is one, and its message.
@@ -254,16 +259,20 @@ fn parse(text: &str, source_type: SourceType, component: bool) -> Result<Read, B
     finder.followed();
     finder.used();
 
+    // The functions are found and scored in the same parse (complexity spec FN-3).
+    let units = functions::units(&parsed.program, &semantic, &lines);
+
     Ok(Read {
         imports: finder.imports,
         computed: finder.computed,
         exports,
         named: Vec::new(),
+        units,
     })
 }
 
 /// Where each line of a text begins, to turn an offset into a line and a column.
-struct Lines<'t> {
+pub struct Lines<'t> {
     /// The text.
     text: &'t str,
     /// The offset each line begins at.
@@ -272,7 +281,7 @@ struct Lines<'t> {
 
 impl<'t> Lines<'t> {
     /// The starts of the lines of a text.
-    fn of(text: &'t str) -> Self {
+    pub fn of(text: &'t str) -> Self {
         Self {
             text,
             starts: std::iter::once(0)
@@ -290,7 +299,7 @@ impl<'t> Lines<'t> {
 
     /// The line an offset lies on and its column there, each counted from one, the column in UTF-16
     /// code units, as SARIF counts one.
-    fn place(&self, offset: u32) -> (usize, usize) {
+    pub fn place(&self, offset: u32) -> (usize, usize) {
         let line = self.at(offset);
         let start = self.starts[line - 1];
         let before = usize::try_from(offset)

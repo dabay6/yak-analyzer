@@ -76,15 +76,28 @@ node scripts/check-floor.mjs
   --hand-off <file> --base <commit>` reads with the hand-off file's declarations, reads the base
   commit from git as well, and marks each finding new or unchanged. A command line it refuses
   exits 2.
+- `yak-analyzer complexity` reads the project as `audit` does and prints one JSON document: the
+  limits the declarations give `cyclomaticLimit` and `cognitiveLimit`, each function over a limit
+  with its scores, the measures it is over and the fingerprint of its finding, and the notices.
+  `yak-analyzer complexity --hand-off <file> --all` reads with the hand-off file's declarations
+  and lists every function. A command line it refuses exits 2. yak never runs it: it is for a
+  person or an agent, and its name, options and document are a draft until the analyzer's stage 5
+  releases it as an MCP tool.
 
 Interface version 1 covers what yak relies on, fixed when the analyzer's stage 2 ended on
 2026-11-17: the hand-off format the analyzer reads; the declaration keys and their shapes,
 `entries`, `data`, `generated`, `internal`, `cyclomaticLimit`, `cognitiveLimit`,
 `duplicationMinimum`, `configEntries`, `scriptCommands` and `commandFiles`; the rule names `audit`
-reports, `unused-file`, `unused-export`, `unused-type`,
-`unresolved-import` and `circular-dependency`; the fingerprint scheme it marks each finding with,
-`yakAnalyzer/v1`; `audit`'s options; and what `interface` prints. A change to any of them raises
-the interface version, which `interface` prints and yak checks before it runs the analyzer.
+reports, `unused-file`, `unused-export`, `unused-type`, `unresolved-import`,
+`circular-dependency` and `complexity`; the fingerprint scheme it marks each finding with,
+`yakAnalyzer/v1`; `audit`'s options; and what `interface` prints. A change that breaks any of them
+raises the interface version, which `interface` prints and yak checks before it runs the analyzer.
+A change that only adds, such as a new rule name, does not raise it.
+
+The rules that name a function in a `complexity` finding's fingerprint, its name path, are part of
+the scheme and a draft until the swap, the pack release that replaces fallow with the analyzer in
+yak: nothing yak runs reads them before then, so changing them raises nothing. From the swap they
+are fixed, and a change that breaks them raises the interface version.
 
 What `graph` prints is the builder's and the tests' view of a reading, not part of the interface
 version; its form may change. When it does, the fixtures' written-down output changes in the same

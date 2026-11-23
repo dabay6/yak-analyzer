@@ -2,7 +2,8 @@
 //! file holds (spec KEY-1, KEY-2, KEY-5).
 //!
 //! The keys and their shapes are fixed under interface version 1 since stage 2 ended (comparison spec
-//! FREEZE-1): a change to any raises the version. This part checks them, the shapes of the three that
+//! FREEZE-1): a change that breaks any raises the version, and one that only adds does not
+//! (complexity spec VER-1). This part checks them, the shapes of the three that
 //! describe what a tool does included (spec ENTRY-6a; comparison spec CI-1); the parts that read a
 //! project use them.
 
