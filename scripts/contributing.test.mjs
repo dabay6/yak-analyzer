@@ -30,7 +30,7 @@ test('the guide names the commands, and says how a fixture is written and run (s
     '`yak-analyzer graph --hand-off <file>`',
     'entry points with what made each one',
     '`yak-analyzer audit` reads the project as `graph` does',
-    'six\n  kinds, the five dead-code kinds and complexity',
+    'seven\n  kinds, the five dead-code kinds, complexity and duplication',
     '--hand-off <file> --base <commit>`',
     '`yak-analyzer complexity` reads the project as `audit` does',
     '`yak-analyzer complexity --hand-off <file> --all`',
@@ -60,7 +60,9 @@ test('the guide says what interface version 1 covers, and that a change that bre
     'Duplication adds to interface version 1 and breaks nothing in it',
     'the rule name `duplication`',
     '`duplicationMinimumLines`, `duplicationCopies`, `duplicationIgnore`, `duplicationTestCallees` and',
-    'The form of a run that a group\'s fingerprint is made from is part of the fingerprint',
+    'a `duplication` finding\'s property bag, `duplication`',
+    'each copy\'s `path`, `startLine` and `endLine`',
+    'the form of a run that a group\'s fingerprint is made from, which is part',
   ]) {
     assert.ok(guide.replaceAll('\r\n', '\n').includes(said), said);
   }
