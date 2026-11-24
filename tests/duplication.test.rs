@@ -1094,6 +1094,34 @@ fn counts_every_line_a_token_written_over_lines_covers() {
 }
 
 #[test]
+fn a_jsx_text_s_blank_lines_add_no_line_to_a_run() {
+    let project = Project::new("duplication-jsx-blank-lines");
+    let text = "export function One() {\n  return (\n    <p>\n      Some text\n\n      here\n\n    </p>\n  );\n}\n";
+
+    project
+        .write("src/c.tsx", text)
+        .write("src/d.tsx", &text.replace("One", "Two"))
+        .commit();
+
+    let document = looking(&project, &json!({ "duplicationMinimum": 5 }));
+
+    assert_eq!(
+        groups(&document),
+        [vec![("src/c.tsx", 2, 9), ("src/d.tsx", 2, 9)]]
+    );
+    // Lines 2, 3, 4, 6 and 8 hold a token; the blank lines 5 and 7 inside the JSX text add none, as
+    // they add nothing to what JSX renders (spec SIZE-1, SAME-1).
+    assert_eq!(document["groups"][0]["lines"], json!(5));
+    assert!(
+        groups(&looking(
+            &project,
+            &json!({ "duplicationMinimum": 5, "duplicationMinimumLines": 6 })
+        ))
+        .is_empty()
+    );
+}
+
+#[test]
 fn a_computed_string_key_is_a_string_not_a_name() {
     let project = Project::new("duplication-computed-keys");
 

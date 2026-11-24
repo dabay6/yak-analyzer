@@ -659,8 +659,11 @@ struct Counted {
     starts: Vec<u32>,
     /// The line each starts on.
     on: Vec<usize>,
-    /// The line each ends on.
+    /// The line each ends on: for a JSX text, the last line it holds more than white space on.
     off: Vec<usize>,
+    /// How many lines past its first each holds: every line it covers, but for a JSX text only those
+    /// it holds more than white space on, as the rest add nothing to what JSX renders (spec SAME-1).
+    over: Vec<usize>,
     /// How many lines the tokens before each, and before the end, cover past the first line of the
     /// first of them: a token adds the lines it covers past its first, and its first where the token
     /// before it ends on another.
@@ -676,6 +679,7 @@ impl Counted {
             .iter()
             .filter(|token| !matches!(token.kind(), Kind::Skip | Kind::Eof))
             .collect();
+        let offset = |at: u32| usize::try_from(at).unwrap_or(usize::MAX);
         let mut kept = vec![true; tokens.len()];
 
         for (index, token) in tokens.iter().enumerate() {
@@ -700,7 +704,6 @@ impl Counted {
                     kept[index - 1] = false;
                 }
                 Kind::JSXText => {
-                    let offset = |at: u32| usize::try_from(at).unwrap_or(usize::MAX);
                     let piece = text.get(offset(token.start())..offset(token.end()));
 
                     if piece.is_none_or(|piece| piece.trim().is_empty()) {
@@ -722,12 +725,36 @@ impl Counted {
         let mut starts = Vec::new();
         let mut on = Vec::new();
         let mut off = Vec::new();
+        let mut over = Vec::new();
 
         for (token, kept) in tokens.iter().zip(kept) {
             if kept {
+                let first = lines.at(token.start());
+                let piece = (token.kind() == Kind::JSXText)
+                    .then(|| text.get(offset(token.start())..offset(token.end())))
+                    .flatten();
+                let (last, held) = match piece {
+                    Some(piece) => {
+                        let content = u32::try_from(piece.trim_end().len()).unwrap_or(u32::MAX);
+                        let held = piece
+                            .split('\n')
+                            .skip(1)
+                            .filter(|line| !line.trim().is_empty())
+                            .count();
+
+                        (lines.at(token.start() + content.saturating_sub(1)), held)
+                    }
+                    None => {
+                        let last = lines.at(token.end().saturating_sub(1).max(token.start()));
+
+                        (last, last - first)
+                    }
+                };
+
                 starts.push(token.start());
-                on.push(lines.at(token.start()));
-                off.push(lines.at(token.end().saturating_sub(1).max(token.start())));
+                on.push(first);
+                off.push(last);
+                over.push(held);
             }
         }
 
@@ -737,15 +764,16 @@ impl Counted {
 
         for (index, line) in on.iter().enumerate() {
             let new = index > 0 && off[index - 1] != *line;
-            let over = off[index] - line;
+            let held = u64::try_from(over[index]).unwrap_or(u64::MAX);
 
-            breaks.push(breaks[index] + u64::from(new) + u64::try_from(over).unwrap_or(u64::MAX));
+            breaks.push(breaks[index] + u64::from(new) + held);
         }
 
         Self {
             starts,
             on,
             off,
+            over,
             breaks,
         }
     }
@@ -766,9 +794,7 @@ impl Counted {
             lines: (after > first).then(|| Held {
                 first: self.on[first],
                 last: self.off[after - 1],
-                count: 1
-                    + u64::try_from(self.off[first] - self.on[first]).unwrap_or(u64::MAX)
-                    + self.breaks[after]
+                count: 1 + u64::try_from(self.over[first]).unwrap_or(u64::MAX) + self.breaks[after]
                     - self.breaks[first + 1],
             }),
             start: raw.span.start,
