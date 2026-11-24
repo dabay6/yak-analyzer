@@ -1092,3 +1092,45 @@ fn counts_every_line_a_token_written_over_lines_covers() {
         2
     );
 }
+
+#[test]
+fn a_computed_string_key_is_a_string_not_a_name() {
+    let project = Project::new("duplication-computed-keys");
+
+    project
+        .write(
+            "src/k.ts",
+            r#"export function one() {
+  const a = { ["x"]: 1 };
+  class B { ["x"]() { return a; } }
+  return B;
+}
+export function two() {
+  const a = { ["y"]: 1 };
+  class B { ["y"]() { return a; } }
+  return B;
+}
+"#,
+        )
+        .commit();
+
+    let found = |ignore: Value| {
+        groups(&looking(
+            &project,
+            &json!({ "duplicationMinimum": 5, "duplicationIgnore": ignore }),
+        ))
+        .into_iter()
+        .map(|group| {
+            group
+                .into_iter()
+                .map(|(_, first, last)| (first, last))
+                .collect()
+        })
+        .collect::<Vec<Vec<(u64, u64)>>>()
+    };
+
+    // The keys differ only in their strings, so loosening strings makes the bodies copies, and loosening
+    // names, which they don't hold, makes nothing a copy (spec SAME-1, SAME-2).
+    assert_eq!(found(json!(["strings"])), [vec![(2, 4), (7, 9)]]);
+    assert_eq!(found(json!(["names"])), Vec::<Vec<(u64, u64)>>::new());
+}

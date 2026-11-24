@@ -89,6 +89,7 @@ pub fn lists(
         open: Vec::new(),
         chained: false,
         attribute: false,
+        keys: Vec::new(),
         dropped: Dropped::default(),
     };
 
@@ -158,6 +159,21 @@ fn template(element: &TemplateElement<'_>) -> String {
     ))
 }
 
+/// Whether a node with a property key has its key computed; none for a node with no property key.
+fn computed(kind: AstKind<'_>) -> Option<bool> {
+    match kind {
+        AstKind::ObjectProperty(node) => Some(node.computed),
+        AstKind::AssignmentTargetPropertyProperty(node) => Some(node.computed),
+        AstKind::BindingProperty(node) => Some(node.computed),
+        AstKind::MethodDefinition(node) => Some(node.computed),
+        AstKind::PropertyDefinition(node) => Some(node.computed),
+        AstKind::AccessorProperty(node) => Some(node.computed),
+        AstKind::TSPropertySignature(node) => Some(node.computed),
+        AstKind::TSMethodSignature(node) => Some(node.computed),
+        _ => None,
+    }
+}
+
 /// The tokens the fixed form leaves out that only the tree tells apart (spec SIZE-1).
 #[derive(Default)]
 struct Dropped {
@@ -199,6 +215,9 @@ struct Former<'l> {
     chained: bool,
     /// Whether the walk is at a JSX attribute's string value.
     attribute: bool,
+    /// Whether each node with a property key the walk is inside has its key computed, the innermost
+    /// last.
+    keys: Vec<bool>,
     /// The tokens the size leaves out.
     dropped: Dropped,
 }
@@ -518,6 +537,7 @@ impl<'a> Visit<'a> for Former<'_> {
             _ => {
                 self.put(b'w', format!("{:?}", kind.ty()).as_bytes());
                 self.values(kind);
+                self.keys.extend(computed(kind));
             }
         }
     }
@@ -526,7 +546,13 @@ impl<'a> Visit<'a> for Former<'_> {
         match kind {
             AstKind::ParenthesizedExpression(_) | AstKind::TSParenthesizedType(_) => {}
             AstKind::JSXText(node) if rendered(node.value.as_str()).is_empty() => {}
-            _ => self.stream.push(CLOSE),
+            _ => {
+                if computed(kind).is_some() {
+                    self.keys.pop();
+                }
+
+                self.stream.push(CLOSE);
+            }
         }
     }
 
@@ -614,8 +640,10 @@ impl<'a> Visit<'a> for Former<'_> {
     }
 
     fn visit_property_key(&mut self, key: &PropertyKey<'a>) {
-        // A key written in quotes is the name it spells (spec SAME-1).
-        if let PropertyKey::StringLiteral(literal) = key {
+        // A key written in quotes is the name it spells; a computed key is not a name (spec SAME-1).
+        if let PropertyKey::StringLiteral(literal) = key
+            && self.keys.last() == Some(&false)
+        {
             self.put(b'w', b"IdentifierName");
             self.name(&literal.value.display().to_string());
             self.stream.push(CLOSE);
