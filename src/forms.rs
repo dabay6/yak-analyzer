@@ -328,6 +328,22 @@ impl Former<'_> {
                     &node.r#type
                 )
             )),
+            // A hole in an array's destructuring has no node of its own, so where each one sits is
+            // written here.
+            AstKind::ArrayAssignmentTarget(node) => self.flags(format_args!(
+                "{:?}",
+                node.elements
+                    .iter()
+                    .map(Option::is_some)
+                    .collect::<Vec<_>>()
+            )),
+            AstKind::ArrayPattern(node) => self.flags(format_args!(
+                "{:?}",
+                node.elements
+                    .iter()
+                    .map(Option::is_some)
+                    .collect::<Vec<_>>()
+            )),
             AstKind::ArrowFunctionExpression(node) => {
                 self.flags(format_args!("{}", node.r#async));
                 self.bare(node);

@@ -1001,3 +1001,49 @@ fn jsx_reindented_and_rewrapped_is_the_same_copy() {
         assert_eq!(first["groups"][0][key], second["groups"][0][key], "{key}");
     }
 }
+
+#[test]
+fn a_hole_in_an_array_s_destructuring_is_part_of_its_form() {
+    let project = Project::new("duplication-array-holes");
+
+    project
+        .write(
+            "src/h.ts",
+            r"export function alpha(t) {
+  const [a, , b] = t();
+  return a + b;
+}
+export function beta(t) {
+  const [a, b] = t();
+  return a + b;
+}
+export function gamma(t) {
+  let a, b;
+  [a, , b] = t();
+  return a + b;
+}
+export function delta(t) {
+  let a, b;
+  [a, b] = t();
+  return a + b;
+}
+export function epsilon(u) {
+  const [c, , d] = u();
+  return c + d;
+}
+",
+        )
+        .commit();
+
+    let document = looking(
+        &project,
+        &json!({ "duplicationMinimum": 5, "duplicationIgnore": ["names"] }),
+    );
+
+    // A pattern with a hole binds other elements than one without, so only the functions whose holes
+    // sit alike are copies (spec SAME-1).
+    assert_eq!(
+        groups(&document),
+        [vec![("src/h.ts", 1, 4), ("src/h.ts", 19, 22)]]
+    );
+}
