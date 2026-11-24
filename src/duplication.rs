@@ -199,6 +199,8 @@ pub struct Place {
     pub start: u32,
     /// The byte after its last.
     pub end: u32,
+    /// Its exact form: the fingerprint its run would have with nothing loosened (spec FRESH-1).
+    pub exact: String,
 }
 
 /// One group of copies (spec SAME-1 to SAME-4, SIZE-1).
@@ -446,16 +448,8 @@ impl<'r> Text<'r> {
             return None;
         }
 
-        let parts: Vec<String> = runs
-            .first()?
-            .1
-            .iter()
-            .map(|item| findings::hex(&item.digest))
-            .collect();
-        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
-
         Some(Group {
-            fingerprint: findings::fingerprint(Rule::Duplication, &parts),
+            fingerprint: fingerprint(runs.first()?.1, |item| &item.digest),
             tokens,
             lines,
             copies: runs.iter().map(|(path, run)| place(path, run)).collect(),
@@ -597,7 +591,15 @@ fn lines(run: &[Item]) -> u64 {
     count
 }
 
-/// Where a run is.
+/// The fingerprint of a run, made from one digest of each of its statements (spec DUP-4, FRESH-1).
+fn fingerprint(run: &[Item], digest: impl Fn(&Item) -> &[u8; DIGEST]) -> String {
+    let parts: Vec<String> = run.iter().map(|item| findings::hex(digest(item))).collect();
+    let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+
+    findings::fingerprint(Rule::Duplication, &parts)
+}
+
+/// Where a run is, with its exact form.
 fn place(path: &str, run: &[Item]) -> Place {
     let first = run.first();
     let last = run.last();
@@ -608,6 +610,7 @@ fn place(path: &str, run: &[Item]) -> Place {
         end_line: last.map_or(0, |item| item.end_line),
         start: first.map_or(0, |item| item.start),
         end: last.map_or(0, |item| item.end),
+        exact: fingerprint(run, |item| &item.exact),
     }
 }
 

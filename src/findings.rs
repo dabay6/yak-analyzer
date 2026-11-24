@@ -264,11 +264,9 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// The findings of a reading, in the report's order, and the notices that come with them.
 pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
-    let mut found = Vec::new();
+    let mut found = counted(reading);
     let mut notices = Vec::new();
 
-    unused(reading, &mut found);
-    unresolved(reading, &mut found);
     circular(reading, &mut found);
     complex(reading, &mut found);
     duplicated(reading, &mut found, &mut notices);
@@ -279,6 +277,17 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
     sort(&mut found);
 
     (found, notices)
+}
+
+/// The findings of the kinds a base marks by counting their fingerprints: the unused files, exports and
+/// types, and the unresolved imports (spec INH-1).
+pub fn counted(reading: &Reading) -> Vec<Finding> {
+    let mut found = Vec::new();
+
+    unused(reading, &mut found);
+    unresolved(reading, &mut found);
+
+    found
 }
 
 /// Puts findings in the report's order: by rule, then path, line and column, then fingerprint (spec
