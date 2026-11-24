@@ -706,7 +706,7 @@ fn computed(reading: &Reading, notices: &mut Vec<Notice>) {
 /// `duplicationAccepted` that matches no group and for a run with no `duplicationMinimum` (duplication
 /// spec DUP-1, TUNE-1, QUIET-1, QUIET-2).
 fn duplicated(reading: &Reading, found: &mut Vec<Finding>, notices: &mut Vec<Notice>) {
-    let (groups, accepted) = duplication::groups(reading);
+    let (groups, unmatched) = duplication::groups(reading);
 
     found.extend(
         groups
@@ -714,7 +714,7 @@ fn duplicated(reading: &Reading, found: &mut Vec<Finding>, notices: &mut Vec<Not
             .filter(|group| !group.accepted)
             .filter_map(Finding::grouped),
     );
-    notices.extend(accepted);
+    notices.extend(unmatched);
     notices.extend(reading.duplication.notice());
 }
 
@@ -1208,10 +1208,8 @@ fn a_file_skipped_at_the_base_leaves_the_groups_compared_unless_it_is_a_script()
     let changed = skipping(
         "base-duplication-script",
         "src/broken.ts",
-        "const = ;
-",
-        "export const mended = 1;
-",
+        "const = ;\n",
+        "export const mended = 1;\n",
     );
 
     // The branch changed the skipped script, where a copy it took out could not be seen at the base, so
