@@ -2244,3 +2244,36 @@ fn a_file_skipped_at_the_base_leaves_the_groups_compared_unless_it_is_a_script()
          seen, so every duplication finding is new: `src/broken.ts`."
     );
 }
+
+#[test]
+fn a_generated_script_skipped_at_the_base_leaves_the_groups_compared() {
+    let project = branched(
+        "base-duplication-generated",
+        &[
+            ("src/generated/api.ts", "const = ;\n"),
+            ("src/copy-1.ts", &counting("k1", 1)),
+            ("src/copy-2.ts", &counting("k2", 1)),
+        ],
+    );
+
+    project
+        .write("src/generated/api.ts", "export const api = 1;\n")
+        .commit();
+
+    let hand_off = declaring(
+        &project,
+        json!({ "duplicationMinimum": 10, "generated": ["src/generated/**"] }),
+    );
+    let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
+
+    // A generated script holds no copy at the base or on the branch, so skipping it there hides none,
+    // and the group is compared (duplication spec COPY-4, FRESH-4).
+    assert_eq!(
+        duplicates(&run),
+        [(
+            vec![("src/copy-1.ts", 2, 6), ("src/copy-2.ts", 2, 6)],
+            Some("unchanged")
+        )]
+    );
+    assert!(!marked(&run).contains(&("duplication-not-compared", None, false)));
+}

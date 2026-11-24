@@ -257,6 +257,8 @@ fn duplicated(
         .iter()
         .copied()
         .filter(|path| matches!(kinds.get(path), Some(Kind::Script | Kind::Vue)))
+        // A generated script holds no copy, at the base or on the branch (duplication spec COPY-4).
+        .filter(|path| !base.reading.marks.generated.contains(*path))
         .collect();
     let duplicates = found
         .iter_mut()
