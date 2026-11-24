@@ -194,6 +194,18 @@ fn result(finding: &Finding) -> Value {
         result["properties"] = json!({ "complexity": bag(detail) });
     }
 
+    // A duplication finding's copies are its locations, in their order (duplication spec DUP-3).
+    if let Some(group) = &finding.group {
+        result["properties"] = json!({ "duplication": {
+            "copies": std::iter::once(&finding.location)
+                .chain(&finding.related)
+                .map(|copy| json!({ "endLine": copy.end_line, "path": copy.path, "startLine": copy.line }))
+                .collect::<Vec<Value>>(),
+            "lines": group.lines,
+            "tokens": group.tokens,
+        } });
+    }
+
     if !finding.related.is_empty() {
         result["relatedLocations"] = finding
             .related
@@ -234,7 +246,8 @@ fn bag(detail: &Detail) -> Value {
     bag
 }
 
-/// A location as SARIF writes one: the file, and the line and column where there are some.
+/// A location as SARIF writes one: the file, and the line, the column and the last line where there are
+/// some.
 fn placed(location: &Location) -> Value {
     let mut physical = json!({ "artifactLocation": artifact(&location.path) });
 
@@ -243,6 +256,10 @@ fn placed(location: &Location) -> Value {
 
         if let Some(column) = location.column {
             physical["region"]["startColumn"] = json!(column);
+        }
+
+        if let Some(end) = location.end_line {
+            physical["region"]["endLine"] = json!(end);
         }
     }
 

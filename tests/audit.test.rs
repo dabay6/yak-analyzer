@@ -2,7 +2,8 @@
 //! notifications and how it stops (dead-code spec CMD-1, CMD-3, REPORT-1, REPORT-2, REPORT-4, FIX-3);
 //! and, with a base as a commit and a branch as later commits and edits, which findings are new and
 //! which inherited (dead-code spec CMD-2, COMMIT-1 to COMMIT-5, INH-1, FIX-4), complexity findings by
-//! their scores (complexity spec CPX-1 to CPX-3, NEW-1 to NEW-5, FN-6, CASE-1).
+//! their scores (complexity spec CPX-1 to CPX-3, NEW-1 to NEW-5, FN-6, CASE-1); and duplication findings
+//! (duplication spec DUP-1 to DUP-3, QUIET-1, QUIET-2).
 
 #[path = "support/project.rs"]
 mod project;
@@ -134,17 +135,18 @@ fn the_notices_of_a_run_are_the_notifications_of_its_invocation() {
         notifications(&run),
         [
             ("complexity-not-checked", None),
+            ("duplication-not-checked", None),
             ("no-hand-off-file", None),
             ("untracked-file-skipped", Some("src/not%20done.ts")),
         ]
     );
-    // Besides the notice of the limits it checks complexity against, which `graph` does not read
-    // (complexity spec LIMIT-2).
+    // Besides the notices of the limits it checks complexity against and of the smallest run it looks
+    // for, which `graph` does not read (complexity spec LIMIT-2; duplication spec TUNE-1).
     assert_eq!(
         notifications(&run)
             .iter()
             .map(|(kind, _)| *kind)
-            .filter(|kind| *kind != "complexity-not-checked")
+            .filter(|kind| !kind.ends_with("-not-checked"))
             .collect::<Vec<&str>>(),
         notices(&document)
     );
@@ -166,6 +168,7 @@ fn the_notices_of_a_run_are_the_notifications_of_its_invocation() {
         notifications(&audit(&project, Some(&hand_off))),
         [
             ("complexity-not-checked", None),
+            ("duplication-not-checked", None),
             ("glob-matches-nothing", None),
             ("untracked-file-skipped", Some("src/not%20done.ts")),
         ]
@@ -555,6 +558,7 @@ fn the_kinds_that_depend_on_entry_points_wait_for_a_detection_folder() {
         notifications(&run),
         [
             ("complexity-not-checked", None),
+            ("duplication-not-checked", None),
             ("kinds-not-reported", None),
             ("kinds-not-reported", None),
         ]
@@ -572,7 +576,7 @@ fn the_kinds_that_depend_on_entry_points_wait_for_a_detection_folder() {
         .collect();
 
     assert_eq!(
-        sentences[1..],
+        sentences[2..],
         [
             "1 file(s) the analyzer reads are in no package, so their unused files, exports and types are \
              not reported.",
@@ -606,12 +610,13 @@ fn a_computed_import_gives_a_notice_to_declare_what_it_loads() {
         notifications(&run),
         [
             ("complexity-not-checked", None),
+            ("duplication-not-checked", None),
             ("no-hand-off-file", None),
             ("computed-import", Some("src/index.ts")),
         ]
     );
     assert_eq!(
-        run["invocations"][0]["toolExecutionNotifications"][2]["message"]["text"],
+        run["invocations"][0]["toolExecutionNotifications"][3]["message"]["text"],
         json!(
             "2 call(s) of `import()` or `require()` load a file the analyzer cannot work out, so what they \
              load must be declared in `entries`."
@@ -1115,6 +1120,7 @@ fn names_the_base_commit_and_marks_the_notices_of_the_bases_reading() {
         [
             ("base", None, false),
             ("complexity-not-checked", None, false),
+            ("duplication-not-checked", None, false),
             ("no-hand-off-file", None, false),
             (
                 "tsconfig-extends-left-out",
@@ -1205,6 +1211,7 @@ fn a_base_whose_files_cannot_be_read_skips_them_and_marks_every_finding_new() {
             ("base", None, false),
             ("base-files-skipped", None, false),
             ("complexity-not-checked", None, false),
+            ("duplication-not-checked", None, false),
             ("no-hand-off-file", None, false),
             ("file-skipped", Some("src/broken.ts"), true),
             ("file-skipped", Some("tsconfig.json"), true),
@@ -1830,4 +1837,141 @@ fn a_function_added_or_removed_before_another_can_take_its_place() {
         dropped["properties"]["complexity"]["base"],
         json!({ "cyclomatic": 7, "cognitive": 6 })
     );
+}
+
+/// A function whose body is the same whatever its name: its statements are lines 2 to 6 of its file.
+fn body(name: &str) -> String {
+    format!(
+        "export function {name}(items: number[]) {{\n  const total = items.length;\n  if (total > 10) {{\n    return \
+         total * 2;\n  }}\n  return total;\n}}\n"
+    )
+}
+
+/// A hand-off file whose project declares what is given.
+fn declaring(project: &Project, declared: Value) -> String {
+    project.hand_off(&project.root, &["."], stack(json!({}), declared))
+}
+
+/// A copy of a group as a run's finding names it: its file as the report writes it, with its first and
+/// last lines.
+type Copy<'r> = (&'r str, u64, u64);
+
+/// The duplication findings of a run, in its order: each with its copies, its first location first, and
+/// whether it is new or inherited where the run says.
+fn duplicates(run: &Value) -> Vec<(Vec<Copy<'_>>, Option<&str>)> {
+    run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .filter(|result| result["ruleId"] == json!("duplication"))
+        .map(|result| {
+            let copies = result["locations"]
+                .as_array()
+                .into_iter()
+                .chain(result["relatedLocations"].as_array())
+                .flatten()
+                .map(|location| {
+                    let place = &location["physicalLocation"];
+
+                    (
+                        place["artifactLocation"]["uri"].as_str().expect("a file"),
+                        place["region"]["startLine"].as_u64().expect("a first line"),
+                        place["region"]["endLine"].as_u64().expect("a last line"),
+                    )
+                })
+                .collect();
+
+            (copies, result["baselineState"].as_str())
+        })
+        .collect()
+}
+
+#[test]
+fn reports_each_group_once_at_its_copies_with_its_size_in_its_property_bag() {
+    let project = Project::new("duplication-findings");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/index.ts" }"#,
+        )
+        .write(
+            "src/index.ts",
+            "import { a } from './a';\nimport { b } from './b';\nimport { c } from './c';\n\na([]);\nb([]);\nc([]);\n",
+        )
+        .write("src/a.ts", &body("a"))
+        .write("src/b.ts", &body("b"))
+        .write("src/c.ts", &body("c"))
+        .commit();
+
+    let hand_off = declaring(&project, json!({ "duplicationMinimum": 10 }));
+    let run = audit(&project, Some(&hand_off));
+    let result = run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .find(|result| result["ruleId"] == json!("duplication"))
+        .expect("a duplication finding");
+
+    // One finding for the group, at its first copy by path and line, with the others related; each
+    // location runs from the copy's first line to its last (duplication spec DUP-1, DUP-2).
+    assert_eq!(
+        duplicates(&run),
+        [(
+            vec![("src/a.ts", 2, 6), ("src/b.ts", 2, 6), ("src/c.ts", 2, 6)],
+            None
+        )]
+    );
+    assert_eq!(
+        result["message"]["text"],
+        json!(
+            "3 copies of a 5-line run (20 tokens): `src/a.ts` lines 2–6, `src/b.ts` lines 2–6, \
+             `src/c.ts` lines 2–6."
+        )
+    );
+    // Its property bag holds its size and its copies in the order of its locations (duplication spec
+    // DUP-3).
+    assert_eq!(
+        result["properties"]["duplication"],
+        json!({
+            "copies": [
+                { "endLine": 6, "path": "src/a.ts", "startLine": 2 },
+                { "endLine": 6, "path": "src/b.ts", "startLine": 2 },
+                { "endLine": 6, "path": "src/c.ts", "startLine": 2 },
+            ],
+            "lines": 5,
+            "tokens": 20,
+        })
+    );
+    // `audit` and `duplication` find the groups with the same function (duplication spec SHOW-5).
+    let document = printed(&project.start("duplication", |binary| {
+        binary.args(["--hand-off", &hand_off]);
+    }));
+    let fingerprint = result["partialFingerprints"]["yakAnalyzer/v1"]
+        .as_str()
+        .expect("a fingerprint");
+
+    assert_eq!(document["groups"][0]["fingerprint"], json!(fingerprint));
+    assert!(!notifications(&run).contains(&("duplication-not-checked", None)));
+
+    // An accepted group is not reported; an entry with another number of copies matches nothing, so the
+    // group is reported and the entry named in a notice (duplication spec QUIET-1, QUIET-2).
+    let accepting = |copies: usize| {
+        let hand_off = declaring(
+            &project,
+            json!({
+                "duplicationMinimum": 10,
+                "duplicationAccepted": [format!("{fingerprint}/{copies}")],
+            }),
+        );
+
+        audit(&project, Some(&hand_off))
+    };
+    let accepted = accepting(3);
+    let stale = accepting(2);
+
+    assert!(duplicates(&accepted).is_empty());
+    assert!(!notifications(&accepted).contains(&("accepted-group-not-found", None)));
+    assert_eq!(duplicates(&stale).len(), 1);
+    assert!(notifications(&stale).contains(&("accepted-group-not-found", None)));
 }

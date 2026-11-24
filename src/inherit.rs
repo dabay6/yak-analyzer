@@ -283,6 +283,7 @@ fn cycle(
         path: from.to_owned(),
         line: Some(line),
         column: None,
+        end_line: None,
     };
     finding.related = locations;
     let _ = write!(
