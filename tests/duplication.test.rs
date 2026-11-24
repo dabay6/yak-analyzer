@@ -1047,3 +1047,48 @@ export function epsilon(u) {
         [vec![("src/h.ts", 1, 4), ("src/h.ts", 19, 22)]]
     );
 }
+
+#[test]
+fn counts_every_line_a_token_written_over_lines_covers() {
+    let project = Project::new("duplication-tokens-over-lines");
+    let query = "export function one(db) {\n  const query = `\n    SELECT a\n    FROM b\n  `;\n  return db.run(query);\n}\n";
+    let text = "export function One() {\n  return (\n    <p>\n      Some text\n      here\n    </p>\n  );\n}\n";
+
+    project
+        .write("src/a.ts", query)
+        .write("src/b.ts", &query.replace("one", "two"))
+        .write("src/c.tsx", text)
+        .write("src/d.tsx", &text.replace("One", "Two"))
+        .commit();
+
+    let document = looking(&project, &json!({ "duplicationMinimum": 5 }));
+    let lines = |path: &str| {
+        document["groups"]
+            .as_array()
+            .expect("a list of groups")
+            .iter()
+            .find(|group| group["copies"][0]["path"] == json!(path))
+            .map(|group| group["lines"].clone())
+    };
+
+    assert_eq!(
+        groups(&document),
+        [
+            vec![("src/a.ts", 2, 6), ("src/b.ts", 2, 6)],
+            vec![("src/c.tsx", 2, 7), ("src/d.tsx", 2, 7)],
+        ]
+    );
+    // A template literal holds each line it is written over, and a JSX text each line it covers past
+    // the one it starts on; the last line holds only the parenthesis and the `;` the size leaves out
+    // (spec SIZE-1).
+    assert_eq!(lines("src/a.ts"), Some(json!(5)));
+    assert_eq!(lines("src/c.tsx"), Some(json!(5)));
+    assert_eq!(
+        groups(&looking(
+            &project,
+            &json!({ "duplicationMinimum": 5, "duplicationMinimumLines": 5 })
+        ))
+        .len(),
+        2
+    );
+}

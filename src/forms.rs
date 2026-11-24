@@ -39,7 +39,7 @@ pub struct List {
     pub items: Vec<Item>,
 }
 
-/// The lines of a statement that a token its size counts starts on (spec SIZE-1).
+/// The lines of a statement that a token its size counts covers, from its start to its end (spec SIZE-1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Held {
     /// The first such line, counted from one.
@@ -61,7 +61,7 @@ pub struct Item {
     pub joins: bool,
     /// How many tokens it holds, as its tree written out in the fixed form counts them (spec SIZE-1).
     pub tokens: u64,
-    /// The lines those tokens start on; none where it holds none.
+    /// The lines those tokens cover; none where it holds none.
     pub lines: Option<Held>,
     /// Its first byte in the file.
     pub start: u32,
@@ -625,14 +625,17 @@ impl<'a> Visit<'a> for Former<'_> {
     }
 }
 
-/// The tokens a size counts, with the lines they start on (spec SIZE-1).
+/// The tokens a size counts, with the lines they cover (spec SIZE-1).
 struct Counted {
     /// Where each starts, in order.
     starts: Vec<u32>,
     /// The line each starts on.
     on: Vec<usize>,
-    /// How many of the tokens before each, and before the end, start on a line the token before them
-    /// does not.
+    /// The line each ends on.
+    off: Vec<usize>,
+    /// How many lines the tokens before each, and before the end, cover past the first line of the
+    /// first of them: a token adds the lines it covers past its first, and its first where the token
+    /// before it ends on another.
     breaks: Vec<u64>,
 }
 
@@ -690,11 +693,13 @@ impl Counted {
 
         let mut starts = Vec::new();
         let mut on = Vec::new();
+        let mut off = Vec::new();
 
         for (token, kept) in tokens.iter().zip(kept) {
             if kept {
                 starts.push(token.start());
                 on.push(lines.at(token.start()));
+                off.push(lines.at(token.end().saturating_sub(1).max(token.start())));
             }
         }
 
@@ -703,12 +708,18 @@ impl Counted {
         breaks.push(0);
 
         for (index, line) in on.iter().enumerate() {
-            let new = index > 0 && on[index - 1] != *line;
+            let new = index > 0 && off[index - 1] != *line;
+            let over = off[index] - line;
 
-            breaks.push(breaks[index] + u64::from(new));
+            breaks.push(breaks[index] + u64::from(new) + u64::try_from(over).unwrap_or(u64::MAX));
         }
 
-        Self { starts, on, breaks }
+        Self {
+            starts,
+            on,
+            off,
+            breaks,
+        }
     }
 
     /// One statement, with its digest, its size and its place.
@@ -726,8 +737,11 @@ impl Counted {
             tokens: u64::try_from(after - first).unwrap_or(u64::MAX),
             lines: (after > first).then(|| Held {
                 first: self.on[first],
-                last: self.on[after - 1],
-                count: 1 + self.breaks[after] - self.breaks[first + 1],
+                last: self.off[after - 1],
+                count: 1
+                    + u64::try_from(self.off[first] - self.on[first]).unwrap_or(u64::MAX)
+                    + self.breaks[after]
+                    - self.breaks[first + 1],
             }),
             start: raw.span.start,
             end: raw.span.end,
