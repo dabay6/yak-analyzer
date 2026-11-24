@@ -1220,8 +1220,8 @@ fn a_base_whose_files_cannot_be_read_skips_them_and_marks_every_finding_new() {
     assert_eq!(
         sentence(&run, "base-files-skipped"),
         "2 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
-         unchanged; complexity and duplication findings are still compared, and those in a skipped \
-         script are new: `tsconfig.json`, `src/broken.ts`."
+         unchanged, and no duplication finding is compared; complexity findings are still compared, and \
+         those in a skipped script are new: `tsconfig.json`, `src/broken.ts`."
     );
 }
 
@@ -1700,6 +1700,13 @@ fn a_file_skipped_at_the_base_leaves_the_other_complexity_findings_compared() {
             ("src/broken.ts", "mended", Some("new")),
             ("src/index.ts", "steady", Some("unchanged")),
         ]
+    );
+    assert_eq!(
+        sentence(&run, "base-files-skipped"),
+        "4 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
+         unchanged, and no duplication finding is compared; complexity findings are still compared, and \
+         those in a skipped script are new: `package.json`, `pnpm-workspace.yaml`, `tsconfig.json`, \
+         `src/broken.ts`."
     );
 }
 
@@ -2219,6 +2226,12 @@ fn a_file_skipped_at_the_base_leaves_the_groups_compared_unless_it_is_a_script()
         )]
     );
     assert!(!marked(&kept).contains(&("duplication-not-compared", None, false)));
+    assert_eq!(
+        sentence(&kept, "base-files-skipped"),
+        "1 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
+         unchanged; complexity and duplication findings are still compared, and those in a skipped \
+         script are new: `tsconfig.json`."
+    );
 
     // A script skipped at the base is one the branch changed or removed, since one left as it was would
     // stop the working tree's reading.
@@ -2242,6 +2255,12 @@ fn a_file_skipped_at_the_base_leaves_the_groups_compared_unless_it_is_a_script()
         sentence(&changed, "duplication-not-compared"),
         "The branch changed or removed 1 script(s) skipped at the base, where a copy it took out cannot be \
          seen, so every duplication finding is new: `src/broken.ts`."
+    );
+    assert_eq!(
+        sentence(&changed, "base-files-skipped"),
+        "1 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
+         unchanged, and no duplication finding is compared; complexity findings are still compared, and \
+         those in a skipped script are new: `src/broken.ts`."
     );
 }
 

@@ -97,7 +97,9 @@ pub fn mark(working: &Reading, found: &mut [Finding], base: &Base) -> Vec<Notice
 
     // A copy depends on no other file, so a file skipped at the base leaves the duplication findings
     // compared, unless it is a script (duplication spec FRESH-4).
-    notices.extend(duplicated(found, base, moved, &skipped));
+    let (compared, notice) = duplicated(found, base, moved, &skipped);
+
+    notices.extend(notice);
 
     // One function's scores depend on no other file, so a file skipped at the base leaves the
     // complexity findings compared; a skipped script has no functions there (complexity spec NEW-4).
@@ -107,13 +109,21 @@ pub fn mark(working: &Reading, found: &mut [Finding], base: &Base) -> Vec<Notice
     // findings on the branch look inherited: so then every other finding is new (dead-code spec
     // COMMIT-4).
     if !skipped.is_empty() {
+        let (uncompared, still) = if compared {
+            ("", "complexity and duplication findings are")
+        } else {
+            (
+                ", and no duplication finding is compared",
+                "complexity findings are",
+            )
+        };
+
         notices.push(Notice::new(
             "base-files-skipped",
             None,
             format!(
                 "{} file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
-                 unchanged; complexity and duplication findings are still compared, and those in a skipped \
-                 script are new: `{}`.",
+                 unchanged{uncompared}; {still} still compared, and those in a skipped script are new: `{}`.",
                 skipped.len(),
                 skipped.join("`, `")
             ),
@@ -237,15 +247,17 @@ fn complex(working: &Reading, found: &mut [Finding], base: &Base, moved: impl Fn
 /// at the base, a copy the branch took out of it cannot be seen there, so every duplication finding is
 /// new, and the notice says why. A script skipped at the base is always one the branch changed or
 /// removed: one left as it was would stop the working tree's reading (duplication spec FRESH-1 to
-/// FRESH-4).
+/// FRESH-4). Gives whether the findings were compared, with the notice.
 fn duplicated(
     found: &mut [Finding],
     base: &Base,
     moved: impl Fn(&str) -> String,
     skipped: &[&str],
-) -> Option<Notice> {
+) -> (bool, Option<Notice>) {
     // Where no duplication is looked for, there is none to compare.
-    base.reading.duplication.lens()?;
+    if base.reading.duplication.lens().is_none() {
+        return (false, None);
+    }
 
     let kinds: BTreeMap<&str, Kind> = base
         .reading
@@ -269,7 +281,7 @@ fn duplicated(
             finding.baseline = Some(Baseline::New);
         }
 
-        return Some(Notice::new(
+        let notice = Notice::new(
             "duplication-not-compared",
             None,
             format!(
@@ -278,7 +290,9 @@ fn duplicated(
                 changed.len(),
                 changed.join("`, `")
             ),
-        ));
+        );
+
+        return (false, Some(notice));
     }
 
     // The base's groups before acceptance, by fingerprint: each one's copies as their files on the
@@ -329,7 +343,7 @@ fn duplicated(
         finding.baseline = Some(Baseline::New);
     }
 
-    None
+    (true, None)
 }
 
 /// Where a new group is placed and what its message adds: its copies, the first whose exact form no copy
