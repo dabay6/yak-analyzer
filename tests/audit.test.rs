@@ -68,7 +68,7 @@ fn notifications(run: &Value) -> Vec<(&str, Option<&str>)> {
 }
 
 #[test]
-fn prints_one_report_that_names_the_tool_the_interface_version_and_the_six_rules() {
+fn prints_one_report_that_names_the_tool_the_interface_version_and_the_seven_rules() {
     let project = Project::new("audit-report");
 
     project
