@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.13.0](https://github.com/dabay6/yak-analyzer/compare/v0.12.1...v0.13.0) (2026-11-26)
+
+
+### Features
+
+* **declarations:** add the keys that tune duplication ([ce5dca4](https://github.com/dabay6/yak-analyzer/commit/ce5dca440b7f171e80c4fdab48011083ed99d510))
+* **duplication:** compare the groups with fallow and choose the defaults (part 3 of 3) ([e5c8970](https://github.com/dabay6/yak-analyzer/commit/e5c8970293277e4f4435eca71cfb7dce9b815be9))
+* **duplication:** find copies, group them, and print them with a duplication command ([4dadc79](https://github.com/dabay6/yak-analyzer/commit/4dadc79f334e37dd838138f9c23b61e614a60c69))
+* **duplication:** find groups of repeated statements ([9748492](https://github.com/dabay6/yak-analyzer/commit/9748492858341768498ec27396b8d4634fdb44f4))
+* **duplication:** leave out the groups a person accepted ([47c8066](https://github.com/dabay6/yak-analyzer/commit/47c8066be813aac1e220a82cfa131411535cf611))
+* **duplication:** leave the bodies of tests out of the copies ([9a7872d](https://github.com/dabay6/yak-analyzer/commit/9a7872d97a3c1bb4b815080b7b14b2185c955b44))
+* **duplication:** mark a group new unless the base has its copies ([dbae639](https://github.com/dabay6/yak-analyzer/commit/dbae639790e779a84a84cd9736b3bbe942440353))
+* **duplication:** report each group as a finding in audit ([f220326](https://github.com/dabay6/yak-analyzer/commit/f22032636be1eda7fa6e10017f04aad319cf9761))
+* **duplication:** report each group in audit, new against inherited ([2078d1c](https://github.com/dabay6/yak-analyzer/commit/2078d1cc006a097bed048673b6a92c7057de23d4))
+
+
+### Bug Fixes
+
+* **duplication:** count every line a token written over lines covers ([2d734e4](https://github.com/dabay6/yak-analyzer/commit/2d734e4383e4d181e04cbba578618760d60801a6))
+* **duplication:** leave a generated script out of the scripts skipped ([62c23e8](https://github.com/dabay6/yak-analyzer/commit/62c23e8889003c25cde14afee6049c52febc3b74))
+* **duplication:** leave a JSX text's blank lines out of a run's lines ([40d251f](https://github.com/dabay6/yak-analyzer/commit/40d251fb2bffa1a5b42372de495bcc9b2829b15f))
+* **duplication:** read a computed string key as a string, not a name ([8499f03](https://github.com/dabay6/yak-analyzer/commit/8499f03b14f03136a0ff2a468d67c37e6a41f474))
+* **duplication:** say duplication was not compared when it was not ([7e1d78a](https://github.com/dabay6/yak-analyzer/commit/7e1d78a5afd5f53e5c5aaed7fa9217dd445847ad))
+* **duplication:** write a JSX attribute's line endings as line feeds ([c63b78d](https://github.com/dabay6/yak-analyzer/commit/c63b78d0ad9c5ebd75e4eb0553a9dd7f52b3bcd1))
+* **duplication:** write where an array destructuring's holes sit ([f605f94](https://github.com/dabay6/yak-analyzer/commit/f605f948254860bc95fbb1dc622636236eca89a2))
+
 ## [0.12.1](https://github.com/dabay6/yak-analyzer/compare/v0.12.0...v0.12.1) (2026-11-23)
 
 

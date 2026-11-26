@@ -1,6 +1,6 @@
 {
   "name": "@dabay6/yak-analyzer-darwin-arm64",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "description": "The yak-analyzer binary for macOS on arm64",
   "keywords": [
     "yak-analyzer",
