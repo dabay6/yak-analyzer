@@ -1,8 +1,8 @@
-//! The `duplication` command, and the groups of copies a reading holds, which `audit` will report too:
+//! The `duplication` command, and the groups of copies a reading holds, which `audit` reports too:
 //! the settings the declarations give, the runs of statements that repeat, the groups they make with
-//! their sizes and fingerprints, the groups a person accepted, and the document the command prints
-//! (duplication spec SAME-3, SAME-4, SIZE-1, SIZE-2, TUNE-1 to TUNE-7, DUP-4, QUIET-1 to QUIET-4,
-//! SHOW-1 to SHOW-5).
+//! their sizes and fingerprints, the groups a person accepted, the message of a group's finding, and the
+//! document the command prints (duplication spec SAME-3, SAME-4, SIZE-1, SIZE-2, TUNE-1 to TUNE-7,
+//! DUP-2, DUP-4, QUIET-1 to QUIET-4, SHOW-1 to SHOW-5).
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -199,6 +199,8 @@ pub struct Place {
     pub start: u32,
     /// The byte after its last.
     pub end: u32,
+    /// Its exact form: the fingerprint its run would have with nothing loosened (spec FRESH-1).
+    pub exact: String,
 }
 
 /// One group of copies (spec SAME-1 to SAME-4, SIZE-1).
@@ -285,6 +287,32 @@ pub fn groups(reading: &Reading) -> (Vec<Group>, Vec<Notice>) {
     groups.sort_by(|a, b| order(a).cmp(&order(b)));
 
     (groups, notices)
+}
+
+/// The message of a group's finding: how many copies it has, its size, and where each copy is, with no
+/// code (spec DUP-2).
+pub fn message(group: &Group) -> String {
+    format!(
+        "{} copies of a {}-line run ({} tokens): {}.",
+        group.copies.len(),
+        group.lines,
+        group.tokens,
+        spans(&group.copies)
+    )
+}
+
+/// Where each copy is, as its file and its span from its first line to its last, joined by commas.
+pub fn spans<'p>(copies: impl IntoIterator<Item = &'p Place>) -> String {
+    copies
+        .into_iter()
+        .map(|copy| {
+            format!(
+                "`{}` lines {}–{}",
+                copy.path, copy.start_line, copy.end_line
+            )
+        })
+        .collect::<Vec<String>>()
+        .join(", ")
 }
 
 /// The entry of `duplicationAccepted` that accepts a group: its fingerprint, `/`, and its number of
@@ -420,16 +448,8 @@ impl<'r> Text<'r> {
             return None;
         }
 
-        let parts: Vec<String> = runs
-            .first()?
-            .1
-            .iter()
-            .map(|item| findings::hex(&item.digest))
-            .collect();
-        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
-
         Some(Group {
-            fingerprint: findings::fingerprint(Rule::Duplication, &parts),
+            fingerprint: fingerprint(runs.first()?.1, |item| &item.digest),
             tokens,
             lines,
             copies: runs.iter().map(|(path, run)| place(path, run)).collect(),
@@ -571,7 +591,15 @@ fn lines(run: &[Item]) -> u64 {
     count
 }
 
-/// Where a run is.
+/// The fingerprint of a run, made from one digest of each of its statements (spec DUP-4, FRESH-1).
+fn fingerprint(run: &[Item], digest: impl Fn(&Item) -> &[u8; DIGEST]) -> String {
+    let parts: Vec<String> = run.iter().map(|item| findings::hex(digest(item))).collect();
+    let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+
+    findings::fingerprint(Rule::Duplication, &parts)
+}
+
+/// Where a run is, with its exact form.
 fn place(path: &str, run: &[Item]) -> Place {
     let first = run.first();
     let last = run.last();
@@ -582,6 +610,7 @@ fn place(path: &str, run: &[Item]) -> Place {
         end_line: last.map_or(0, |item| item.end_line),
         start: first.map_or(0, |item| item.start),
         end: last.map_or(0, |item| item.end),
+        exact: fingerprint(run, |item| &item.exact),
     }
 }
 

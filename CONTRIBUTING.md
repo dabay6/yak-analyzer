@@ -71,8 +71,8 @@ node scripts/check-floor.mjs
   entry points with what made each one, the files they reach, the uses of each export, and the
   notices. `yak-analyzer graph --hand-off <file>` reads the project the hand-off file names, with
   its declarations. A run that cannot go on prints one line on standard error and exits 1.
-- `yak-analyzer audit` reads the project as `graph` does and prints one SARIF 2.1.0 report of six
-  kinds, the five dead-code kinds and complexity, with the notices as the run's notifications. `yak-analyzer audit
+- `yak-analyzer audit` reads the project as `graph` does and prints one SARIF 2.1.0 report of seven
+  kinds, the five dead-code kinds, complexity and duplication, with the notices as the run's notifications. `yak-analyzer audit
   --hand-off <file> --base <commit>` reads with the hand-off file's declarations, reads the base
   commit from git as well, and marks each finding new or unchanged. A command line it refuses
   exits 2.
@@ -110,12 +110,14 @@ yak: nothing yak runs reads them before then, so changing them raises nothing. F
 are fixed, and a change that breaks them raises the interface version.
 
 Duplication adds to interface version 1 and breaks nothing in it: the rule name `duplication`; the
-unit of `duplicationMinimum`, tokens, which no pack declared before; and the keys
+unit of `duplicationMinimum`, tokens, which no pack declared before; the keys
 `duplicationMinimumLines`, `duplicationCopies`, `duplicationIgnore`, `duplicationTestCallees` and
-`duplicationAccepted`.
-The form of a run that a group's fingerprint is made from is part of the fingerprint scheme, and a
-draft until the swap: from then, a change that breaks it raises the interface version, since it stops
-every accepted group and recorded reason from matching.
+`duplicationAccepted`; and a `duplication` finding's property bag, `duplication`: `tokens`, `lines`
+and `copies`, each copy's `path`, `startLine` and `endLine`, in the order of the finding's locations.
+The property bag's names, and the form of a run that a group's fingerprint is made from, which is part
+of the fingerprint scheme, are a draft until the swap: from then, a change that breaks either raises
+the interface version, and a change to the form stops every accepted group and recorded reason from
+matching.
 
 What `graph` prints is the builder's and the tests' view of a reading, not part of the interface
 version; its form may change. When it does, the fixtures' written-down output changes in the same

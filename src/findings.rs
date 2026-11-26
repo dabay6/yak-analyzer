@@ -1,6 +1,6 @@
 //! What `audit` reports: the findings a reading shows, each with its rule, its message, its location
 //! and its fingerprint, and the notices that say where some kinds are not reported (spec KIND-1 to
-//! KIND-5, ENTRY-8 to ENTRY-10, REPORT-2, REPORT-3).
+//! KIND-5, ENTRY-8 to ENTRY-10, REPORT-2, REPORT-3; duplication spec DUP-1, DUP-2).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write as _;
@@ -8,6 +8,7 @@ use std::fmt::Write as _;
 use sha2::{Digest, Sha256};
 
 use crate::complexity::{self, Detail, Scores};
+use crate::duplication::{self, Group, Place};
 use crate::entries::Fault;
 use crate::files::{File, Kind};
 use crate::imports::{Form, Import};
@@ -100,6 +101,21 @@ pub struct Location {
     pub line: Option<usize>,
     /// The column, counted from one in UTF-16 code units.
     pub column: Option<usize>,
+    /// The last line, where what it names runs over lines: a copy of a duplication group's (duplication
+    /// spec DUP-2).
+    pub end_line: Option<usize>,
+}
+
+impl From<&Place> for Location {
+    /// Where a copy of a group is: its file, from its first line to its last (duplication spec DUP-2).
+    fn from(copy: &Place) -> Self {
+        Self {
+            path: copy.path.clone(),
+            line: Some(copy.start_line),
+            column: None,
+            end_line: Some(copy.end_line),
+        }
+    }
 }
 
 /// Whether a finding is new on the branch or the base has it too (spec REPORT-1, INH-1).
@@ -141,6 +157,9 @@ pub struct Finding {
     /// What a complexity finding carries in its property bag; none for any other (complexity spec
     /// CPX-3).
     pub complexity: Option<Detail>,
+    /// The group of a duplication finding, whose size its property bag carries; none for any other
+    /// (duplication spec DUP-3).
+    pub group: Option<Group>,
 }
 
 impl Finding {
@@ -155,7 +174,29 @@ impl Finding {
             parts: parts.iter().map(|part| (*part).to_owned()).collect(),
             baseline: None,
             complexity: None,
+            group: None,
         }
+    }
+
+    /// A group's finding: at its first copy, with its other copies as related locations, and the
+    /// fingerprint the group was given, which holds no path; none for a group with no copy (duplication
+    /// spec DUP-1, DUP-2, DUP-4).
+    fn grouped(group: Group) -> Option<Self> {
+        let mut locations = group.copies.iter().map(Location::from);
+        let location = locations.next()?;
+        let related = locations.collect();
+
+        Some(Self {
+            rule: Rule::Duplication,
+            message: duplication::message(&group),
+            location,
+            related,
+            fingerprint: group.fingerprint.clone(),
+            parts: Vec::new(),
+            baseline: None,
+            complexity: None,
+            group: Some(group),
+        })
     }
 
     /// The fingerprint the finding would have with each path it names moved as `moved` says, as a
@@ -223,13 +264,12 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// The findings of a reading, in the report's order, and the notices that come with them.
 pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
-    let mut found = Vec::new();
+    let mut found = counted(reading);
     let mut notices = Vec::new();
 
-    unused(reading, &mut found);
-    unresolved(reading, &mut found);
     circular(reading, &mut found);
     complex(reading, &mut found);
+    duplicated(reading, &mut found, &mut notices);
     not_reported(reading, &mut notices);
     computed(reading, &mut notices);
     notices.extend(reading.limits.notice());
@@ -237,6 +277,17 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
     sort(&mut found);
 
     (found, notices)
+}
+
+/// The findings of the kinds a base marks by counting their fingerprints: the unused files, exports and
+/// types, and the unresolved imports (spec INH-1).
+pub fn counted(reading: &Reading) -> Vec<Finding> {
+    let mut found = Vec::new();
+
+    unused(reading, &mut found);
+    unresolved(reading, &mut found);
+
+    found
 }
 
 /// Puts findings in the report's order: by rule, then path, line and column, then fingerprint (spec
@@ -293,6 +344,7 @@ fn unused(reading: &Reading, found: &mut Vec<Finding>) {
                     path: path.to_owned(),
                     line: None,
                     column: None,
+                    end_line: None,
                 },
                 &[path],
             ));
@@ -332,6 +384,7 @@ fn unused(reading: &Reading, found: &mut Vec<Finding>) {
                     path: path.to_owned(),
                     line: Some(export.line),
                     column: Some(export.column),
+                    end_line: None,
                 },
                 &[path, name],
             ));
@@ -453,6 +506,7 @@ fn unresolved(reading: &Reading, found: &mut Vec<Finding>) {
                         path: path.clone(),
                         line: Some(import.line),
                         column: None,
+                        end_line: None,
                     },
                     &[path, &import.specifier],
                 ));
@@ -674,6 +728,7 @@ fn circular(reading: &Reading, found: &mut Vec<Finding>) {
                 .min()
                 .map(|(line, _)| line),
             column: None,
+            end_line: None,
         };
         let paths: Vec<&str> = set.iter().map(|node| nodes[*node]).collect();
         let mut finding = Finding::new(
@@ -768,6 +823,7 @@ fn complex(reading: &Reading, found: &mut Vec<Finding>) {
                 path: measured.path.clone(),
                 line: Some(scored.line),
                 column: Some(scored.column),
+                end_line: None,
             },
             &parts,
         );
@@ -781,6 +837,22 @@ fn complex(reading: &Reading, found: &mut Vec<Finding>) {
         });
         found.push(finding);
     }
+}
+
+/// One finding for each group of copies a person has not accepted, with the notices for an entry of
+/// `duplicationAccepted` that matches no group and for a run with no `duplicationMinimum` (duplication
+/// spec DUP-1, TUNE-1, QUIET-1, QUIET-2).
+fn duplicated(reading: &Reading, found: &mut Vec<Finding>, notices: &mut Vec<Notice>) {
+    let (groups, unmatched) = duplication::groups(reading);
+
+    found.extend(
+        groups
+            .into_iter()
+            .filter(|group| !group.accepted)
+            .filter_map(Finding::grouped),
+    );
+    notices.extend(unmatched);
+    notices.extend(reading.duplication.notice());
 }
 
 /// One notice for each file with an `import()` or `require()` it cannot follow: what it loads must be

@@ -5,7 +5,8 @@
 //! A statement's form is written as the walk meets its syntax tree: the name of each node, and each
 //! value that makes two nodes of one kind differ. Formatting, comments and quotes are not in the tree,
 //! and parentheses that change nothing are passed over, so they leave the form as it is. What the lens
-//! loosens is written as a placeholder.
+//! loosens is written as a placeholder. Where it loosens anything, the exact form, with nothing
+//! loosened, is written beside it (duplication spec FRESH-1).
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -56,6 +57,9 @@ pub struct Item {
     /// The first bytes of the SHA-256 digest of its form, with what the lens loosens as placeholders
     /// (spec SAME-1, SAME-2).
     pub digest: [u8; DIGEST],
+    /// The same of its exact form, with nothing loosened; its digest where the lens loosens nothing
+    /// (spec FRESH-1).
+    pub exact: [u8; DIGEST],
     /// Whether it can join a run: an import cannot, nor a statement that holds a test callee's call
     /// (spec COPY-2, COPY-3).
     pub joins: bool,
@@ -85,6 +89,7 @@ pub fn lists(
     let mut former = Former {
         lens,
         stream: Vec::new(),
+        exact: (lens.names || lens.strings || lens.numbers).then(Vec::new),
         lists: Vec::new(),
         open: Vec::new(),
         chained: false,
@@ -103,7 +108,7 @@ pub fn lists(
         .map(|raws| List {
             items: raws
                 .iter()
-                .map(|raw| counted.item(raw, &former.stream, lines))
+                .map(|raw| counted.item(raw, &former.stream, former.exact.as_deref(), lines))
                 .collect(),
         })
         .collect()
@@ -187,12 +192,32 @@ struct Dropped {
     lone: BTreeSet<u32>,
 }
 
+/// Writes a piece of a form to the form given: its tag, then its bytes after their length.
+fn piece(form: &mut Vec<u8>, tag: u8, bytes: &[u8]) {
+    form.push(tag);
+    form.extend_from_slice(&u32::try_from(bytes.len()).unwrap_or(u32::MAX).to_le_bytes());
+    form.extend_from_slice(bytes);
+}
+
+/// The first bytes of the SHA-256 digest of a form.
+fn kept(form: &[u8]) -> [u8; DIGEST] {
+    let digest = Sha256::digest(form);
+    let mut kept = [0; DIGEST];
+
+    kept.copy_from_slice(&digest[..DIGEST]);
+    kept
+}
+
 /// One statement as the walk found it.
 struct Raw {
     /// Where its form starts in the stream.
     from: usize,
     /// Where it ends.
     to: usize,
+    /// Where its exact form starts in the exact stream, where there is one.
+    exact_from: usize,
+    /// Where it ends.
+    exact_to: usize,
     /// Where the statement is in the text.
     span: Span,
     /// Whether it can join a run.
@@ -206,6 +231,8 @@ struct Former<'l> {
     lens: &'l Lens,
     /// The forms, end to end.
     stream: Vec<u8>,
+    /// The exact forms, end to end, where the lens loosens anything.
+    exact: Option<Vec<u8>>,
     /// Each list's statements, in the order the walk met the lists.
     lists: Vec<Vec<Raw>>,
     /// The statements the walk is inside, by their list and their place in it.
@@ -226,10 +253,13 @@ impl Former<'_> {
     /// Walks one statement of a list, noting where its form starts and ends in the stream.
     fn item(&mut self, list: usize, span: Span, joins: bool, walk: impl FnOnce(&mut Self)) {
         let index = self.lists[list].len();
+        let exact = self.exact.as_ref().map_or(0, Vec::len);
 
         self.lists[list].push(Raw {
             from: self.stream.len(),
             to: self.stream.len(),
+            exact_from: exact,
+            exact_to: exact,
             span,
             joins,
         });
@@ -237,41 +267,56 @@ impl Former<'_> {
         walk(self);
         self.open.pop();
         self.lists[list][index].to = self.stream.len();
+        self.lists[list][index].exact_to = self.exact.as_ref().map_or(0, Vec::len);
     }
 
-    /// Writes a piece of a form: its tag, then its bytes after their length.
+    /// Writes a piece of both forms: its tag, then its bytes after their length.
     fn put(&mut self, tag: u8, bytes: &[u8]) {
-        self.stream.push(tag);
-        self.stream
-            .extend_from_slice(&u32::try_from(bytes.len()).unwrap_or(u32::MAX).to_le_bytes());
-        self.stream.extend_from_slice(bytes);
+        piece(&mut self.stream, tag, bytes);
+
+        if let Some(exact) = &mut self.exact {
+            piece(exact, tag, bytes);
+        }
+    }
+
+    /// Writes the end of a node to both forms.
+    fn close(&mut self) {
+        self.stream.push(CLOSE);
+
+        if let Some(exact) = &mut self.exact {
+            exact.push(CLOSE);
+        }
+    }
+
+    /// Writes a value the lens may loosen: where it is loosened, its placeholder to the form and the
+    /// value to the exact form; where not, the value to both (spec SAME-2, FRESH-1).
+    fn loose(&mut self, loosened: bool, placeholder: u8, tag: u8, bytes: &[u8]) {
+        if !loosened {
+            self.put(tag, bytes);
+
+            return;
+        }
+
+        self.stream.push(placeholder);
+
+        if let Some(exact) = &mut self.exact {
+            piece(exact, tag, bytes);
+        }
     }
 
     /// Writes a name, or its placeholder where names are loosened (spec SAME-2).
     fn name(&mut self, name: &str) {
-        if self.lens.names {
-            self.stream.push(b'n');
-        } else {
-            self.put(b'N', name.as_bytes());
-        }
+        self.loose(self.lens.names, b'n', b'N', name.as_bytes());
     }
 
     /// Writes a string's value, or its placeholder where strings are loosened (spec SAME-2).
     fn string(&mut self, value: &str) {
-        if self.lens.strings {
-            self.stream.push(b's');
-        } else {
-            self.put(b'S', value.as_bytes());
-        }
+        self.loose(self.lens.strings, b's', b'S', value.as_bytes());
     }
 
     /// Writes a number's value, or its placeholder where numbers are loosened (spec SAME-2).
     fn number(&mut self, value: &[u8]) {
-        if self.lens.numbers {
-            self.stream.push(b'd');
-        } else {
-            self.put(b'D', value);
-        }
+        self.loose(self.lens.numbers, b'd', b'D', value);
     }
 
     /// Writes the values of a node that are neither names, strings nor numbers.
@@ -551,7 +596,7 @@ impl<'a> Visit<'a> for Former<'_> {
                     self.keys.pop();
                 }
 
-                self.stream.push(CLOSE);
+                self.close();
             }
         }
     }
@@ -646,7 +691,7 @@ impl<'a> Visit<'a> for Former<'_> {
         {
             self.put(b'w', b"IdentifierName");
             self.name(&literal.value.display().to_string());
-            self.stream.push(CLOSE);
+            self.close();
         } else {
             walk::walk_property_key(self, key);
         }
@@ -778,17 +823,15 @@ impl Counted {
         }
     }
 
-    /// One statement, with its digest, its size and its place.
-    fn item(&self, raw: &Raw, stream: &[u8], lines: &Lines<'_>) -> Item {
+    /// One statement, with its digests, its size and its place.
+    fn item(&self, raw: &Raw, stream: &[u8], exact: Option<&[u8]>, lines: &Lines<'_>) -> Item {
         let first = self.starts.partition_point(|start| *start < raw.span.start);
         let after = self.starts.partition_point(|start| *start < raw.span.end);
-        let digest = Sha256::digest(&stream[raw.from..raw.to]);
-        let mut kept = [0; DIGEST];
-
-        kept.copy_from_slice(&digest[..DIGEST]);
+        let digest = kept(&stream[raw.from..raw.to]);
 
         Item {
-            digest: kept,
+            digest,
+            exact: exact.map_or(digest, |exact| kept(&exact[raw.exact_from..raw.exact_to])),
             joins: raw.joins,
             tokens: u64::try_from(after - first).unwrap_or(u64::MAX),
             lines: (after > first).then(|| Held {

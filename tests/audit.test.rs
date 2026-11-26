@@ -2,7 +2,8 @@
 //! notifications and how it stops (dead-code spec CMD-1, CMD-3, REPORT-1, REPORT-2, REPORT-4, FIX-3);
 //! and, with a base as a commit and a branch as later commits and edits, which findings are new and
 //! which inherited (dead-code spec CMD-2, COMMIT-1 to COMMIT-5, INH-1, FIX-4), complexity findings by
-//! their scores (complexity spec CPX-1 to CPX-3, NEW-1 to NEW-5, FN-6, CASE-1).
+//! their scores (complexity spec CPX-1 to CPX-3, NEW-1 to NEW-5, FN-6, CASE-1), duplication findings by
+//! their groups' copies (duplication spec DUP-1 to DUP-3, QUIET-1, QUIET-2, FRESH-1 to FRESH-4).
 
 #[path = "support/project.rs"]
 mod project;
@@ -134,17 +135,18 @@ fn the_notices_of_a_run_are_the_notifications_of_its_invocation() {
         notifications(&run),
         [
             ("complexity-not-checked", None),
+            ("duplication-not-checked", None),
             ("no-hand-off-file", None),
             ("untracked-file-skipped", Some("src/not%20done.ts")),
         ]
     );
-    // Besides the notice of the limits it checks complexity against, which `graph` does not read
-    // (complexity spec LIMIT-2).
+    // Besides the notices of the limits it checks complexity against and of the smallest run it looks
+    // for, which `graph` does not read (complexity spec LIMIT-2; duplication spec TUNE-1).
     assert_eq!(
         notifications(&run)
             .iter()
             .map(|(kind, _)| *kind)
-            .filter(|kind| *kind != "complexity-not-checked")
+            .filter(|kind| !kind.ends_with("-not-checked"))
             .collect::<Vec<&str>>(),
         notices(&document)
     );
@@ -166,6 +168,7 @@ fn the_notices_of_a_run_are_the_notifications_of_its_invocation() {
         notifications(&audit(&project, Some(&hand_off))),
         [
             ("complexity-not-checked", None),
+            ("duplication-not-checked", None),
             ("glob-matches-nothing", None),
             ("untracked-file-skipped", Some("src/not%20done.ts")),
         ]
@@ -555,6 +558,7 @@ fn the_kinds_that_depend_on_entry_points_wait_for_a_detection_folder() {
         notifications(&run),
         [
             ("complexity-not-checked", None),
+            ("duplication-not-checked", None),
             ("kinds-not-reported", None),
             ("kinds-not-reported", None),
         ]
@@ -572,7 +576,7 @@ fn the_kinds_that_depend_on_entry_points_wait_for_a_detection_folder() {
         .collect();
 
     assert_eq!(
-        sentences[1..],
+        sentences[2..],
         [
             "1 file(s) the analyzer reads are in no package, so their unused files, exports and types are \
              not reported.",
@@ -606,12 +610,13 @@ fn a_computed_import_gives_a_notice_to_declare_what_it_loads() {
         notifications(&run),
         [
             ("complexity-not-checked", None),
+            ("duplication-not-checked", None),
             ("no-hand-off-file", None),
             ("computed-import", Some("src/index.ts")),
         ]
     );
     assert_eq!(
-        run["invocations"][0]["toolExecutionNotifications"][2]["message"]["text"],
+        run["invocations"][0]["toolExecutionNotifications"][3]["message"]["text"],
         json!(
             "2 call(s) of `import()` or `require()` load a file the analyzer cannot work out, so what they \
              load must be declared in `entries`."
@@ -1115,6 +1120,7 @@ fn names_the_base_commit_and_marks_the_notices_of_the_bases_reading() {
         [
             ("base", None, false),
             ("complexity-not-checked", None, false),
+            ("duplication-not-checked", None, false),
             ("no-hand-off-file", None, false),
             (
                 "tsconfig-extends-left-out",
@@ -1205,6 +1211,7 @@ fn a_base_whose_files_cannot_be_read_skips_them_and_marks_every_finding_new() {
             ("base", None, false),
             ("base-files-skipped", None, false),
             ("complexity-not-checked", None, false),
+            ("duplication-not-checked", None, false),
             ("no-hand-off-file", None, false),
             ("file-skipped", Some("src/broken.ts"), true),
             ("file-skipped", Some("tsconfig.json"), true),
@@ -1213,8 +1220,8 @@ fn a_base_whose_files_cannot_be_read_skips_them_and_marks_every_finding_new() {
     assert_eq!(
         sentence(&run, "base-files-skipped"),
         "2 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
-         unchanged; complexity findings are still compared, and those in a skipped script are new: \
-         `tsconfig.json`, `src/broken.ts`."
+         unchanged, and no duplication finding is compared; complexity findings are still compared, and \
+         those in a skipped script are new: `tsconfig.json`, `src/broken.ts`."
     );
 }
 
@@ -1694,6 +1701,13 @@ fn a_file_skipped_at_the_base_leaves_the_other_complexity_findings_compared() {
             ("src/index.ts", "steady", Some("unchanged")),
         ]
     );
+    assert_eq!(
+        sentence(&run, "base-files-skipped"),
+        "4 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
+         unchanged, and no duplication finding is compared; complexity findings are still compared, and \
+         those in a skipped script are new: `package.json`, `pnpm-workspace.yaml`, `tsconfig.json`, \
+         `src/broken.ts`."
+    );
 }
 
 #[test]
@@ -1830,4 +1844,455 @@ fn a_function_added_or_removed_before_another_can_take_its_place() {
         dropped["properties"]["complexity"]["base"],
         json!({ "cyclomatic": 7, "cognitive": 6 })
     );
+}
+
+/// A function whose body is the same whatever its name: its statements are lines 2 to 6 of its file.
+fn body(name: &str) -> String {
+    format!(
+        "export function {name}(items: number[]) {{\n  const total = items.length;\n  if (total > 10) {{\n    return \
+         total * 2;\n  }}\n  return total;\n}}\n"
+    )
+}
+
+/// A hand-off file whose project declares what is given.
+fn declaring(project: &Project, declared: Value) -> String {
+    project.hand_off(&project.root, &["."], stack(json!({}), declared))
+}
+
+/// A copy of a group as a run's finding names it: its file as the report writes it, with its first and
+/// last lines.
+type Copy<'r> = (&'r str, u64, u64);
+
+/// The duplication findings of a run, in its order: each with its copies, its first location first, and
+/// whether it is new or inherited where the run says.
+fn duplicates(run: &Value) -> Vec<(Vec<Copy<'_>>, Option<&str>)> {
+    run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .filter(|result| result["ruleId"] == json!("duplication"))
+        .map(|result| {
+            let copies = result["locations"]
+                .as_array()
+                .into_iter()
+                .chain(result["relatedLocations"].as_array())
+                .flatten()
+                .map(|location| {
+                    let place = &location["physicalLocation"];
+
+                    (
+                        place["artifactLocation"]["uri"].as_str().expect("a file"),
+                        place["region"]["startLine"].as_u64().expect("a first line"),
+                        place["region"]["endLine"].as_u64().expect("a last line"),
+                    )
+                })
+                .collect();
+
+            (copies, result["baselineState"].as_str())
+        })
+        .collect()
+}
+
+#[test]
+fn reports_each_group_once_at_its_copies_with_its_size_in_its_property_bag() {
+    let project = Project::new("duplication-findings");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/index.ts" }"#,
+        )
+        .write(
+            "src/index.ts",
+            "import { a } from './a';\nimport { b } from './b';\nimport { c } from './c';\n\na([]);\nb([]);\nc([]);\n",
+        )
+        .write("src/a.ts", &body("a"))
+        .write("src/b.ts", &body("b"))
+        .write("src/c.ts", &body("c"))
+        .commit();
+
+    let hand_off = declaring(&project, json!({ "duplicationMinimum": 10 }));
+    let run = audit(&project, Some(&hand_off));
+    let result = run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .find(|result| result["ruleId"] == json!("duplication"))
+        .expect("a duplication finding");
+
+    // One finding for the group, at its first copy by path and line, with the others related; each
+    // location runs from the copy's first line to its last (duplication spec DUP-1, DUP-2).
+    assert_eq!(
+        duplicates(&run),
+        [(
+            vec![("src/a.ts", 2, 6), ("src/b.ts", 2, 6), ("src/c.ts", 2, 6)],
+            None
+        )]
+    );
+    assert_eq!(
+        result["message"]["text"],
+        json!(
+            "3 copies of a 5-line run (20 tokens): `src/a.ts` lines 2–6, `src/b.ts` lines 2–6, \
+             `src/c.ts` lines 2–6."
+        )
+    );
+    // Its property bag holds its size and its copies in the order of its locations (duplication spec
+    // DUP-3).
+    assert_eq!(
+        result["properties"]["duplication"],
+        json!({
+            "copies": [
+                { "endLine": 6, "path": "src/a.ts", "startLine": 2 },
+                { "endLine": 6, "path": "src/b.ts", "startLine": 2 },
+                { "endLine": 6, "path": "src/c.ts", "startLine": 2 },
+            ],
+            "lines": 5,
+            "tokens": 20,
+        })
+    );
+    // `audit` and `duplication` find the groups with the same function (duplication spec SHOW-5).
+    let document = printed(&project.start("duplication", |binary| {
+        binary.args(["--hand-off", &hand_off]);
+    }));
+    let fingerprint = result["partialFingerprints"]["yakAnalyzer/v1"]
+        .as_str()
+        .expect("a fingerprint");
+
+    assert_eq!(document["groups"][0]["fingerprint"], json!(fingerprint));
+    assert!(!notifications(&run).contains(&("duplication-not-checked", None)));
+
+    // An accepted group is not reported; an entry with another number of copies matches nothing, so the
+    // group is reported and the entry named in a notice (duplication spec QUIET-1, QUIET-2).
+    let accepting = |copies: usize| {
+        let hand_off = declaring(
+            &project,
+            json!({
+                "duplicationMinimum": 10,
+                "duplicationAccepted": [format!("{fingerprint}/{copies}")],
+            }),
+        );
+
+        audit(&project, Some(&hand_off))
+    };
+    let accepted = accepting(3);
+    let stale = accepting(2);
+
+    assert!(duplicates(&accepted).is_empty());
+    assert!(!notifications(&accepted).contains(&("accepted-group-not-found", None)));
+    assert_eq!(duplicates(&stale).len(), 1);
+    assert!(notifications(&stale).contains(&("accepted-group-not-found", None)));
+}
+
+/// A function whose body differs from another's only where its number does: its statements are lines 2
+/// to 6 of the function, a run of 20 tokens.
+fn counting(name: &str, number: u32) -> String {
+    format!(
+        "export function {name}(items: number[]) {{\n  const total = items.length + {number};\n  if (total > \
+         {number}) {{\n    return total * {number};\n  }}\n  return total;\n}}\n"
+    )
+}
+
+/// A function whose body holds a string: its statements are lines 2 to 4 of the function.
+fn labelled(name: &str, label: &str) -> String {
+    format!(
+        "export function {name}(items: number[]) {{\n  const total = items.length + 40;\n  console.log(\"{label}\", \
+         total);\n  return total * 40;\n}}\n"
+    )
+}
+
+#[test]
+fn a_group_is_unchanged_only_where_the_base_has_each_of_its_copies_in_its_file_as_it_was() {
+    let project = branched(
+        "base-duplication",
+        &[
+            ("src/pasted-1.ts", &counting("p1", 1)),
+            ("src/pasted-2.ts", &counting("p2", 1)),
+            ("src/removed-1.ts", &counting("r1", 2)),
+            ("src/removed-2.ts", &counting("r2", 2)),
+            ("src/removed-3.ts", &counting("r3", 2)),
+            ("src/around-1.ts", &counting("a1", 3)),
+            ("src/around-2.ts", &counting("a2", 3)),
+            ("src/renamed-1.ts", &counting("n1", 4)),
+            ("src/renamed-2.ts", &counting("n2", 4)),
+            ("src/moved-1.ts", &counting("m1", 5)),
+            ("src/moved-2.ts", &counting("m2", 5)),
+            ("src/edited-1.ts", &counting("e1", 6)),
+            ("src/edited-2.ts", &counting("e2", 6)),
+            ("src/swapped-1.ts", &counting("s1", 7)),
+            ("src/swapped-2.ts", &counting("s2", 7)),
+            ("src/label-1.ts", &labelled("l1", "first")),
+            ("src/label-2.ts", &labelled("l2", "first")),
+        ],
+    );
+
+    project.git(&["rm", "--quiet", "src/removed-3.ts"]);
+    project.git(&["mv", "src/renamed-2.ts", "src/kept-2.ts"]);
+    project
+        // A copy pasted: the group has one more copy than the base's.
+        .write("src/pasted-3.ts", &counting("p3", 1))
+        // Edits only around a copy move its lines, not its run.
+        .write(
+            "src/around-1.ts",
+            &format!("export const before = 1;\n{}", counting("a1", 3)),
+        )
+        // A copy moved to another file.
+        .write("src/moved-2.ts", "export const gone = 1;\n")
+        .write("src/moved-3.ts", &counting("m3", 5))
+        // A line fixed in one of two copies: no run of the size looked for is left.
+        .write(
+            "src/edited-2.ts",
+            &counting("e2", 6).replace("return total * 6", "return total * 60"),
+        )
+        // One copy edited away while another is pasted elsewhere: as many copies as at the base.
+        .write("src/swapped-2.ts", "export const gone = 2;\n")
+        .write("src/swapped-3.ts", &counting("s3", 7))
+        // With strings loosened, a string changed in one copy leaves the fingerprint as it was.
+        .write("src/label-2.ts", &labelled("l2", "second"))
+        // A group only the branch has.
+        .write("src/only-1.ts", &counting("o1", 8))
+        .write("src/only-2.ts", &counting("o2", 8))
+        .commit();
+
+    let hand_off = declaring(
+        &project,
+        json!({ "duplicationMinimum": 10, "duplicationIgnore": ["strings"] }),
+    );
+    let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
+    let messages: Vec<&str> = run["results"]
+        .as_array()
+        .expect("a list of results")
+        .iter()
+        .filter(|result| {
+            result["ruleId"] == json!("duplication") && result["baselineState"] == json!("new")
+        })
+        .filter_map(|result| result["message"]["text"].as_str())
+        // What the comparison adds follows the sentence every group's message has.
+        .filter_map(|message| message.split_once(". ").map(|(_, added)| added))
+        .collect();
+
+    // A group is unchanged where the base has a group of its fingerprint whose copies pair with its own,
+    // each in the same file, its path moved through git's renames, with the same exact form; a new
+    // group is placed at its first copy whose exact form the base lacks, and its message says what
+    // changed (duplication spec FRESH-1, FRESH-3).
+    assert_eq!(
+        duplicates(&run),
+        [
+            (
+                vec![("src/around-1.ts", 3, 7), ("src/around-2.ts", 2, 6)],
+                Some("unchanged")
+            ),
+            (
+                vec![("src/kept-2.ts", 2, 6), ("src/renamed-1.ts", 2, 6)],
+                Some("unchanged")
+            ),
+            (
+                vec![("src/label-2.ts", 2, 4), ("src/label-1.ts", 2, 4)],
+                Some("new")
+            ),
+            (
+                vec![("src/moved-1.ts", 2, 6), ("src/moved-3.ts", 2, 6)],
+                Some("new")
+            ),
+            (
+                vec![("src/only-1.ts", 2, 6), ("src/only-2.ts", 2, 6)],
+                Some("new")
+            ),
+            (
+                vec![
+                    ("src/pasted-1.ts", 2, 6),
+                    ("src/pasted-2.ts", 2, 6),
+                    ("src/pasted-3.ts", 2, 6)
+                ],
+                Some("new")
+            ),
+            (
+                vec![("src/removed-1.ts", 2, 6), ("src/removed-2.ts", 2, 6)],
+                Some("new")
+            ),
+            (
+                vec![("src/swapped-1.ts", 2, 6), ("src/swapped-3.ts", 2, 6)],
+                Some("new")
+            ),
+        ]
+    );
+    assert_eq!(
+        messages,
+        [
+            "New or changed since the base: `src/label-2.ts` lines 2–4.",
+            "New or changed since the base: `src/moved-3.ts` lines 2–6.",
+            "The base reports no group of this run.",
+            "New or changed since the base: `src/pasted-3.ts` lines 2–6.",
+            "At the base this run had 3 copies.",
+            "New or changed since the base: `src/swapped-3.ts` lines 2–6.",
+        ]
+    );
+}
+
+#[test]
+fn a_rewrap_leaves_a_group_as_it_was_unless_it_takes_it_over_the_line_minimum() {
+    let project = branched(
+        "base-duplication-rewrap",
+        &[
+            ("src/long-1.ts", &counting("g1", 1)),
+            ("src/long-2.ts", &counting("g2", 1)),
+            ("src/short-1.ts", &labelled("h1", "same")),
+            ("src/short-2.ts", &labelled("h2", "same")),
+        ],
+    );
+
+    // A formatter's pass re-indents one long copy and rewraps both short ones over more lines, and the
+    // other long copy is checked out with CRLF line endings.
+    project
+        .write(
+            "src/long-1.ts",
+            &counting("g1", 1).replace("\n  ", "\n      "),
+        )
+        .write("src/long-2.ts", &counting("g2", 1).replace('\n', "\r\n"))
+        .write(
+            "src/short-1.ts",
+            &labelled("h1", "same").replace(
+                "console.log(\"same\", ",
+                "console.log(\n    \"same\",\n    ",
+            ),
+        )
+        .write(
+            "src/short-2.ts",
+            &labelled("h2", "same").replace(
+                "console.log(\"same\", ",
+                "console.log(\n    \"same\",\n    ",
+            ),
+        )
+        .commit();
+
+    let hand_off = declaring(
+        &project,
+        json!({ "duplicationMinimum": 10, "duplicationMinimumLines": 4 }),
+    );
+    let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
+
+    // The re-indented group has the same run in the same files, its exact forms the same whatever the
+    // line endings, so it is unchanged (duplication spec DUP-5); the rewrapped one
+    // has its fewest lines over the line minimum only on the branch, so the base reports no such group
+    // and it is new (duplication spec FRESH-1).
+    assert_eq!(
+        duplicates(&run),
+        [
+            (
+                vec![("src/long-1.ts", 2, 6), ("src/long-2.ts", 2, 6)],
+                Some("unchanged")
+            ),
+            (
+                vec![("src/short-1.ts", 2, 6), ("src/short-2.ts", 2, 6)],
+                Some("new")
+            ),
+        ]
+    );
+}
+
+/// The report `audit` prints with a base whose file at the path given does not parse and which the branch
+/// mends, beside two copies of a group.
+fn skipping(name: &str, path: &str, broken: &str, mended: &str) -> Value {
+    let project = branched(
+        name,
+        &[
+            (path, broken),
+            ("src/copy-1.ts", &counting("k1", 1)),
+            ("src/copy-2.ts", &counting("k2", 1)),
+        ],
+    );
+
+    project.write(path, mended).commit();
+
+    let hand_off = declaring(&project, json!({ "duplicationMinimum": 10 }));
+
+    audited(&project, &["--hand-off", &hand_off, "--base", "main"])
+}
+
+#[test]
+fn a_file_skipped_at_the_base_leaves_the_groups_compared_unless_it_is_a_script() {
+    let kept = skipping(
+        "base-duplication-tsconfig",
+        "tsconfig.json",
+        "{ broken",
+        "{}",
+    );
+
+    // A skipped tsconfig changes no run, so the group is compared (duplication spec FRESH-4).
+    assert_eq!(
+        duplicates(&kept),
+        [(
+            vec![("src/copy-1.ts", 2, 6), ("src/copy-2.ts", 2, 6)],
+            Some("unchanged")
+        )]
+    );
+    assert!(!marked(&kept).contains(&("duplication-not-compared", None, false)));
+    assert_eq!(
+        sentence(&kept, "base-files-skipped"),
+        "1 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
+         unchanged; complexity and duplication findings are still compared, and those in a skipped \
+         script are new: `tsconfig.json`."
+    );
+
+    // A script skipped at the base is one the branch changed or removed, since one left as it was would
+    // stop the working tree's reading.
+    let changed = skipping(
+        "base-duplication-script",
+        "src/broken.ts",
+        "const = ;\n",
+        "export const mended = 1;\n",
+    );
+
+    // The branch changed the skipped script, where a copy it took out could not be seen at the base, so
+    // every group is new, and a notice says why (duplication spec FRESH-4).
+    assert_eq!(
+        duplicates(&changed),
+        [(
+            vec![("src/copy-1.ts", 2, 6), ("src/copy-2.ts", 2, 6)],
+            Some("new")
+        )]
+    );
+    assert_eq!(
+        sentence(&changed, "duplication-not-compared"),
+        "The branch changed or removed 1 script(s) skipped at the base, where a copy it took out cannot be \
+         seen, so every duplication finding is new: `src/broken.ts`."
+    );
+    assert_eq!(
+        sentence(&changed, "base-files-skipped"),
+        "1 file(s) were skipped at the base, so no finding of the five dead-code kinds is marked \
+         unchanged, and no duplication finding is compared; complexity findings are still compared, and \
+         those in a skipped script are new: `src/broken.ts`."
+    );
+}
+
+#[test]
+fn a_generated_script_skipped_at_the_base_leaves_the_groups_compared() {
+    let project = branched(
+        "base-duplication-generated",
+        &[
+            ("src/generated/api.ts", "const = ;\n"),
+            ("src/copy-1.ts", &counting("k1", 1)),
+            ("src/copy-2.ts", &counting("k2", 1)),
+        ],
+    );
+
+    project
+        .write("src/generated/api.ts", "export const api = 1;\n")
+        .commit();
+
+    let hand_off = declaring(
+        &project,
+        json!({ "duplicationMinimum": 10, "generated": ["src/generated/**"] }),
+    );
+    let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
+
+    // A generated script holds no copy at the base or on the branch, so skipping it there hides none,
+    // and the group is compared (duplication spec COPY-4, FRESH-4).
+    assert_eq!(
+        duplicates(&run),
+        [(
+            vec![("src/copy-1.ts", 2, 6), ("src/copy-2.ts", 2, 6)],
+            Some("unchanged")
+        )]
+    );
+    assert!(!marked(&run).contains(&("duplication-not-compared", None, false)));
 }
