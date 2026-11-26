@@ -34,6 +34,8 @@ test('the guide names the commands, and says how a fixture is written and run (s
     '--hand-off <file> --base <commit>`',
     '`yak-analyzer complexity` reads the project as `audit` does',
     '`yak-analyzer complexity --hand-off <file> --all`',
+    '`yak-analyzer duplication` reads the project as `audit` does',
+    '`yak-analyzer duplication --hand-off <file> --all`',
     'not part of the interface\nversion',
     '## Fixtures',
     '`tests/support/project.rs`',
@@ -43,7 +45,7 @@ test('the guide names the commands, and says how a fixture is written and run (s
   }
 });
 
-test('the guide says what interface version 1 covers, and that a change that breaks it raises the number (comparison spec FREEZE-1; complexity spec VER-1)', () => {
+test('the guide says what interface version 1 covers, and that a change that breaks it raises the number (comparison spec FREEZE-1; complexity spec VER-1; duplication spec VERS-1)', () => {
   for (const said of [
     'Interface version 1 covers',
     '`entries`, `data`, `generated`, `internal`',
@@ -55,6 +57,10 @@ test('the guide says what interface version 1 covers, and that a change that bre
     'a draft until the swap',
     'its property bag, `complexity`',
     '`cyclomaticLimit`, `cognitiveLimit` and `over`',
+    'Duplication adds to interface version 1 and breaks nothing in it',
+    'the rule name `duplication`',
+    '`duplicationMinimumLines`, `duplicationCopies`, `duplicationIgnore`, `duplicationTestCallees` and',
+    'The form of a run that a group\'s fingerprint is made from is part of the fingerprint',
   ]) {
     assert.ok(guide.replaceAll('\r\n', '\n').includes(said), said);
   }

@@ -13,9 +13,12 @@ use oxc_ast::ast::{
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
+use oxc_parser::config::RuntimeParserConfig;
 use oxc_semantic::{NodeId, Semantic, SemanticBuilder, SymbolId};
 use oxc_span::{GetSpan, SourceType, Span};
 
+use crate::duplication::Lens;
+use crate::forms::{self, List};
 use crate::functions::{self, Unit};
 
 /// The name an import or an export has for the whole of a file: its namespace, or all it exports.
@@ -144,6 +147,8 @@ pub struct Read {
     /// Its functions, classes and object literals, in source order, from which its functions' names
     /// and scores are read (complexity spec FN-3).
     pub units: Vec<Unit>,
+    /// Its statement lists, where duplication is looked for; none otherwise (duplication spec COPY-5).
+    pub lists: Vec<List>,
 }
 
 /// Why a script did not parse: the line of the first syntax error, where there is one, and its message.
@@ -156,14 +161,18 @@ pub struct Broken {
 }
 
 /// Parses a script, as a module first and then as a script, and finds its imports and its names (spec
-/// PARSE-1).
-pub fn read(path: &str, text: &str) -> Result<Read, Broken> {
-    read_as(text, source_type(path), false)
+/// PARSE-1), and its statement lists through the lens where one is given (duplication spec COPY-5).
+pub fn read(path: &str, text: &str, lens: Option<&Lens>) -> Result<Read, Broken> {
+    read_as(text, source_type(path), false, lens)
 }
 
 /// Parses a Vue component's script block in the language its `lang` names: `ts`, `tsx`, `js` or
 /// `jsx`, and JavaScript when it names none; nothing for a block in any other language (spec PARSE-3).
-pub fn read_block(text: &str, lang: Option<&str>) -> Option<Result<Read, Broken>> {
+pub fn read_block(
+    text: &str,
+    lang: Option<&str>,
+    lens: Option<&Lens>,
+) -> Option<Result<Read, Broken>> {
     let source_type = match lang {
         None | Some("js" | "jsx") => SourceType::jsx(),
         Some("ts") => SourceType::ts(),
@@ -171,13 +180,13 @@ pub fn read_block(text: &str, lang: Option<&str>) -> Option<Result<Read, Broken>
         Some(_) => return None,
     };
 
-    Some(read_as(text, source_type, true))
+    Some(read_as(text, source_type, true, lens))
 }
 
 /// Parses statements of an MDX document as a JavaScript module and keeps the `import` and `export …
 /// from` statements among them, and nothing else (spec PARSE-4).
 pub fn read_statements(text: &str) -> Result<Vec<Import>, Broken> {
-    parse(text, SourceType::jsx().with_module(true), false).map(|read| {
+    parse(text, SourceType::jsx().with_module(true), false, None).map(|read| {
         read.imports
             .into_iter()
             .filter(|import| matches!(import.form, Form::Import | Form::Export | Form::ExportAll))
@@ -186,12 +195,17 @@ pub fn read_statements(text: &str) -> Result<Vec<Import>, Broken> {
 }
 
 /// Parses as a module first and then as a script.
-fn read_as(text: &str, source_type: SourceType, component: bool) -> Result<Read, Broken> {
+fn read_as(
+    text: &str,
+    source_type: SourceType,
+    component: bool,
+    lens: Option<&Lens>,
+) -> Result<Read, Broken> {
     let module = source_type.with_module(true);
 
-    match parse(text, module, component) {
+    match parse(text, module, component, lens) {
         Ok(read) => Ok(read),
-        Err(broken) => parse(text, module.with_script(true), component).map_err(|_| broken),
+        Err(broken) => parse(text, module.with_script(true), component, lens).map_err(|_| broken),
     }
 }
 
@@ -215,10 +229,18 @@ fn source_type(path: &str) -> SourceType {
 }
 
 /// Parses once with the source type given. In a Vue component's block, the default export is the
-/// component itself, so what it names is used and not passed on (spec USE-4).
-fn parse(text: &str, source_type: SourceType, component: bool) -> Result<Read, Broken> {
+/// component itself, so what it names is used and not passed on (spec USE-4). With a lens, the parser
+/// keeps its tokens, and the statement lists are read too (duplication spec COPY-5).
+fn parse(
+    text: &str,
+    source_type: SourceType,
+    component: bool,
+    lens: Option<&Lens>,
+) -> Result<Read, Broken> {
     let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, text, source_type).parse();
+    let parsed = Parser::new(&allocator, text, source_type)
+        .with_config(RuntimeParserConfig::new(lens.is_some()))
+        .parse();
     let lines = Lines::of(text);
 
     if let Some(error) = parsed.diagnostics.iter().next() {
@@ -259,8 +281,12 @@ fn parse(text: &str, source_type: SourceType, component: bool) -> Result<Read, B
     finder.followed();
     finder.used();
 
-    // The functions are found and scored in the same parse (complexity spec FN-3).
+    // The functions are found and scored in the same parse (complexity spec FN-3), and the statements
+    // read (duplication spec COPY-5).
     let units = functions::units(&parsed.program, &semantic, &lines);
+    let lists = lens
+        .map(|lens| forms::lists(&parsed.program, &parsed.tokens, text, &lines, lens))
+        .unwrap_or_default();
 
     Ok(Read {
         imports: finder.imports,
@@ -268,6 +294,7 @@ fn parse(text: &str, source_type: SourceType, component: bool) -> Result<Read, B
         exports,
         named: Vec::new(),
         units,
+        lists,
     })
 }
 
@@ -291,7 +318,7 @@ impl<'t> Lines<'t> {
     }
 
     /// The line an offset lies on, counted from one.
-    fn at(&self, offset: u32) -> usize {
+    pub fn at(&self, offset: u32) -> usize {
         let offset = usize::try_from(offset).unwrap_or(usize::MAX);
 
         self.starts.partition_point(|start| *start <= offset)

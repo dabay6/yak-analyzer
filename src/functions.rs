@@ -553,38 +553,56 @@ fn literal(expression: &Expression<'_>) -> Option<String> {
 /// without its arguments, and `new` kept, whatever spacing, comments, parentheses or optional chaining
 /// it is written with; none for any other expression (spec FN-4).
 fn chain(expression: &Expression<'_>) -> Option<String> {
+    written(expression, false)
+}
+
+/// A call's callee as a callee chain, as the duplication spec's terms write one: as `chain` writes it,
+/// with a tagged template written as two backticks (duplication spec TUNE-5).
+pub fn callee(expression: &Expression<'_>) -> Option<String> {
+    written(expression, true)
+}
+
+/// An expression as `chain` writes it; with `tagged`, a tagged template is written as its tag and two
+/// backticks, and without it, it is no chain, so complexity's names do not change.
+fn written(expression: &Expression<'_>, tagged: bool) -> Option<String> {
+    // The chain of an object with the text given after it, written the same way.
+    let followed = |object: &Expression<'_>, text: &str| {
+        written(object, tagged).map(|object| format!("{object}{text}"))
+    };
+
     match expression {
         Expression::Identifier(identifier) => Some(identifier.name.to_string()),
         Expression::ThisExpression(_) => Some("this".to_owned()),
         Expression::Super(_) => Some("super".to_owned()),
         Expression::StaticMemberExpression(member) => {
-            after(&member.object, &format!(".{}", member.property.name))
+            followed(&member.object, &format!(".{}", member.property.name))
         }
-        Expression::ComputedMemberExpression(member) => after(&member.object, "[]"),
+        Expression::ComputedMemberExpression(member) => followed(&member.object, "[]"),
         Expression::PrivateFieldExpression(member) => {
-            after(&member.object, &format!(".#{}", member.field.name))
+            followed(&member.object, &format!(".#{}", member.field.name))
         }
-        Expression::CallExpression(call) => after(&call.callee, "()"),
+        Expression::CallExpression(call) => followed(&call.callee, "()"),
+        Expression::TaggedTemplateExpression(template) if tagged => followed(&template.tag, "``"),
         Expression::NewExpression(call) => {
-            chain(&call.callee).map(|callee| format!("new {callee}()"))
+            written(&call.callee, tagged).map(|callee| format!("new {callee}()"))
         }
         Expression::ChainExpression(chained) => match &chained.expression {
-            ChainElement::CallExpression(call) => after(&call.callee, "()"),
-            ChainElement::TSNonNullExpression(wrapped) => chain(&wrapped.expression),
+            ChainElement::CallExpression(call) => followed(&call.callee, "()"),
+            ChainElement::TSNonNullExpression(wrapped) => written(&wrapped.expression, tagged),
             ChainElement::StaticMemberExpression(member) => {
-                after(&member.object, &format!(".{}", member.property.name))
+                followed(&member.object, &format!(".{}", member.property.name))
             }
-            ChainElement::ComputedMemberExpression(member) => after(&member.object, "[]"),
+            ChainElement::ComputedMemberExpression(member) => followed(&member.object, "[]"),
             ChainElement::PrivateFieldExpression(member) => {
-                after(&member.object, &format!(".#{}", member.field.name))
+                followed(&member.object, &format!(".#{}", member.field.name))
             }
         },
-        Expression::ParenthesizedExpression(wrapped) => chain(&wrapped.expression),
-        Expression::TSAsExpression(wrapped) => chain(&wrapped.expression),
-        Expression::TSSatisfiesExpression(wrapped) => chain(&wrapped.expression),
-        Expression::TSNonNullExpression(wrapped) => chain(&wrapped.expression),
-        Expression::TSTypeAssertion(wrapped) => chain(&wrapped.expression),
-        Expression::TSInstantiationExpression(wrapped) => chain(&wrapped.expression),
+        Expression::ParenthesizedExpression(wrapped) => written(&wrapped.expression, tagged),
+        Expression::TSAsExpression(wrapped) => written(&wrapped.expression, tagged),
+        Expression::TSSatisfiesExpression(wrapped) => written(&wrapped.expression, tagged),
+        Expression::TSNonNullExpression(wrapped) => written(&wrapped.expression, tagged),
+        Expression::TSTypeAssertion(wrapped) => written(&wrapped.expression, tagged),
+        Expression::TSInstantiationExpression(wrapped) => written(&wrapped.expression, tagged),
         _ => None,
     }
 }

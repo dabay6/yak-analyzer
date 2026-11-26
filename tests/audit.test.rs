@@ -103,6 +103,7 @@ fn prints_one_report_that_names_the_tool_the_interface_version_and_the_six_rules
             "unresolved-import",
             "circular-dependency",
             "complexity",
+            "duplication",
         ]
     );
     assert_eq!(run["invocations"][0]["executionSuccessful"], json!(true));

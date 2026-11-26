@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::complexity::Limits;
 use crate::declarations;
+use crate::duplication::Settings;
 use crate::entries::{self, Entries};
 use crate::files::{self, File, Listing};
 use crate::hand_off::{self, HandOff};
@@ -48,6 +49,9 @@ pub struct Reading {
     /// The limit of each measure of complexity the declarations give, one for the whole run
     /// (complexity spec LIMIT-1).
     pub limits: Limits,
+    /// The settings of duplication the declarations give, one of each for the whole run (duplication
+    /// spec TUNE-7).
+    pub duplication: Settings,
 }
 
 /// What every reading of a run starts from: the hand-off file, the root, and the notices so far.
@@ -171,7 +175,16 @@ pub fn read(
         (Err(fault), Ok(_)) | (Ok(_), Err(fault)) => return Err(fault.stop()),
         (Err(first), Err(second)) => return Err(first.earlier(second).stop()),
     };
-    let scripts = scripts::read(tree, files, &marks.data, &mut notices, stages)?;
+    // The base is read with the same settings as the working tree (duplication spec TUNE-7).
+    let duplication = Settings::of(handed);
+    let scripts = scripts::read(
+        tree,
+        files,
+        &marks.data,
+        duplication.lens(),
+        &mut notices,
+        stages,
+    )?;
     let resolver = stages.time("resolve", || Resolver::new(&listing, &packages, &configs));
     let resolved = stages.time("resolve", || resolver.resolve(tree.root(), &scripts))?;
     let entries = stages.time("entries", || {
@@ -204,5 +217,6 @@ pub fn read(
         uses,
         notices,
         limits: Limits::of(handed),
+        duplication,
     })
 }

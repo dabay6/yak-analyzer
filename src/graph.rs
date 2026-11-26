@@ -33,6 +33,7 @@ pub fn printed(reading: Reading) -> String {
         uses,
         notices,
         limits: _,
+        duplication: _,
     } = reading;
     let mut document = json!({
         "entries": entry_points(&entries),

@@ -17,7 +17,7 @@ use crate::resolve::Outcome;
 use crate::scripts;
 
 /// How many hexadecimal digits of the digest a fingerprint keeps (spec REPORT-3).
-const FINGERPRINT_DIGITS: usize = 32;
+pub const FINGERPRINT_DIGITS: usize = 32;
 
 /// How many files of a loop a circular dependency's message names before it says how many more there
 /// are (spec KIND-4).
@@ -38,17 +38,20 @@ pub enum Rule {
     CircularDependency,
     /// A function whose complexity is over a declared limit (complexity spec CPX-1).
     Complexity,
+    /// A group of runs of statements that are the same (duplication spec DUP-1).
+    Duplication,
 }
 
 impl Rule {
     /// Every rule, in the report's order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::UnusedFile,
         Self::UnusedExport,
         Self::UnusedType,
         Self::UnresolvedImport,
         Self::CircularDependency,
         Self::Complexity,
+        Self::Duplication,
     ];
 
     /// The rule's name in the report.
@@ -60,6 +63,7 @@ impl Rule {
             Self::UnresolvedImport => "unresolved-import",
             Self::CircularDependency => "circular-dependency",
             Self::Complexity => "complexity",
+            Self::Duplication => "duplication",
         }
     }
 
@@ -74,6 +78,7 @@ impl Rule {
             Self::Complexity => {
                 "A function whose cyclomatic or cognitive complexity is over its limit."
             }
+            Self::Duplication => "Runs of statements that are the same in two or more places.",
         }
     }
 
@@ -201,9 +206,14 @@ pub fn fingerprint(rule: Rule, parts: &[&str]) -> String {
         hasher.update(part.as_bytes());
     }
 
-    let mut digits = String::with_capacity(FINGERPRINT_DIGITS);
+    hex(&hasher.finalize()[..FINGERPRINT_DIGITS / 2])
+}
 
-    for byte in hasher.finalize().iter().take(FINGERPRINT_DIGITS / 2) {
+/// Bytes in lower-case hexadecimal digits, two to a byte.
+pub fn hex(bytes: &[u8]) -> String {
+    let mut digits = String::with_capacity(bytes.len() * 2);
+
+    for byte in bytes {
         // Writing into a String cannot fail.
         let _ = write!(digits, "{byte:02x}");
     }
