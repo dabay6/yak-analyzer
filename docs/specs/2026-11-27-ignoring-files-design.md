@@ -15,8 +15,13 @@ spec** below). It follows DECL-2 (a project states its own declarations in its `
 is reported in it) and BASE-3 (both sides of a comparison use the declarations in force now). It adds
 one key to the design spec's declarations, which is owed there (OWED-1).
 
+The requirement IDs are this spec's own. KEY-6 to KEY-8 continue the reading spec's KEY numbering,
+since they add to its keys; the other prefixes may repeat IDs that other specs use, and a reference to
+another spec's ID always names that spec.
+
 How to read the marks: **owner** marks what the owner decided in this item's brainstorm, which is on
-the work item's record. Everything else not taken from the design spec or an earlier spec of this
+the work item's record: the log yakshaver keeps of each question, answer and decision of the
+brainstorm (`yak work brainstorm-show --item 2026-11-26-configuration`). Everything else not taken from the design spec or an earlier spec of this
 repository is the **session's call**: the session that wrote this spec decided it, and the owner has
 not ruled on it.
 
@@ -51,7 +56,7 @@ what each tool starts built into the analyzer, which a pack gives today (owner).
 
 Terms:
 
-- **yak**, **the pack**, **the gate**, **the base**, **the hand-off file** and **the swap** are as
+- **yak**, **the engine**, **the pack**, **the gate**, **the base**, **the hand-off file** and **the swap** are as
   the complexity spec (`docs/specs/2026-11-21-complexity-findings-design.md`) defines them.
 - **A source** of a declaration is the pack or the project: the hand-off file keeps the two apart for
   each stack. What made a file an entry point is called its **reason** here, to keep the two apart
@@ -106,7 +111,8 @@ Terms:
 - **KEY-6** `unreported` is a list of globs, a key the analyzer knows (the reading spec's KEY-1).
   Each glob is relative to the checkout's root and follows the reading spec's KEY-5, as a project's
   `data` and `generated` globs do (the reading spec's KEY-3). The globs of every stack that states it
-  join. A glob that matches no file gives the notice `glob-matches-nothing`, as the reading spec's
+  join, and each matches any file of the checkout, not only the files of its stack, as `data` and
+  `generated` do today. A glob that matches no file gives the notice `glob-matches-nothing`, as the reading spec's
   KEY-5 gives for `data` and `generated`. Session's call for the name: `ignore` was the owner's word,
   but `duplicationIgnore` and the `duplication` command's `ignore` field already use it for what
   matches loosely, and `unreported` says what happens to the file, not that it is skipped.
@@ -116,7 +122,7 @@ Terms:
   why is `only a project may state this key` and the fix `change it in the pack`, as `configEntries`
   is refused the other way round.
 - **KEY-8** A file that is both `data` and unreported is data: it is not read (the reading spec's
-  KEY-4), and nothing in it is counted (COUNT-2). A file that is both `generated` and unreported is
+  KEY-4), it is not an entry point, and nothing in it is counted (COUNT-2). A file that is both `generated` and unreported is
   both, and each rule below applies to it: it is an entry point (READ-2), a cycle is left out when
   every file of the set is unreported (CYCLE-1), and its copies are removed from groups (DUPE-1).
   Session's call.
@@ -131,7 +137,13 @@ Terms:
   unused exports (owner, for exports; session's call, for files: the idea review found that counting
   its imports as uses but not reaching through it would still report the files only it imports as
   unused). Making it an entry point only adds to what is reached: an unreported file that was already
-  reached stays reached. An entry point with only the reason `unreported` does not count when the
+  reached stays reached. Unlike every other entry point, an unreported file's own exports are not
+  all used by the dead-code spec's USE-3: nothing outside the project starts it and consumes them.
+  So its re-exports pass no use on to the files they re-export from, and an export of maintained code
+  that only an unreported file re-exports is still reported unused; and the unused exports in the
+  unreported file itself are worked out, then left out by DEAD-1 and counted (COUNT-2). Session's
+  call: otherwise a re-export in an ignored file would hide findings in maintained code, uncounted,
+  which is the first anti-goal. An entry point with only the reason `unreported` does not count when the
   dead-code spec's ENTRY-8 judges whether a package has no entry point at all, so a package whose
   only entry points are unreported files keeps the hint in its unused-file messages that the likely
   fault is a missing `entries` declaration. Session's call: an ignored script does not make a package
@@ -183,10 +195,11 @@ Terms:
 
 ### Saying what was left out
 
-- **COUNT-1** `audit` gives one notice of the kind `findings-unreported` for each `unreported` glob
-  that matches a file: the glob, the stack and how many findings it left out, as "The `unreported`
-  glob `docs/research/**` that the project states for the stack `typescript` left out 12
-  findings." (owner). A glob that matches files but left out no finding still gives its notice, with
+- **COUNT-1** `audit` gives one notice of the kind `findings-unreported` for each distinct
+  `unreported` glob that matches a file: the glob, the stacks that state it, and how many findings it
+  left out, as "The `unreported` glob `docs/research/**` that the project states for the stack
+  `typescript` left out 12 findings." (owner). A glob that two stacks state, written the same, gives
+  one notice naming both stacks, and its findings are counted once. A glob that matches files but left out no finding still gives its notice, with
   0, so a glob with no effect is seen. Session's call, for the 0.
 - **COUNT-2** The count is of the findings the run works out and then leaves out, on the reading with
   the key: what is reached already includes the unreported files as entry points (READ-2). A finding
@@ -195,7 +208,10 @@ Terms:
   file of the set. A finding that two globs match counts against both, so the counts can add up to
   more than the findings left out; the notice says nothing of it. A duplication group still reported,
   with copies removed, counts against no glob: it was not left out. Findings elsewhere that READ-2
-  stops (an export only an unreported file uses, now used) are not counted: they are not hidden, they
+  stops (an export only an unreported file uses, now used) are not counted, and neither is a group
+  that the second pass of SAME-4 drops (its copies are still reported, in the wider group) nor a
+  group that matches an accepted entry once its copies are removed (acceptance left it out, not this
+  key). The first kind is not counted because they are not hidden: they are not hidden, they
   are no longer findings, and counting them would need a second reading without the key. Nor are
   findings that `data` or `generated` already leave out: a finding in a file both generated and
   unreported was left out without this key, so it counts against no glob, and a glob that matches
@@ -216,8 +232,9 @@ Terms:
   `unreported` comes first, the pack pins that release, and only then may a project state the key.
   A project that writes it under an older analyzer has its run stopped by the reading spec's KEY-2.
 - **REFUSE-2** The line that refuses a key the analyzer doesn't know (the reading spec's KEY-2, in the
-  shape KEY-7 quotes) gains a second fix after the first: `, or, if the key is newer than this analyzer, update the
-  analyzer's version pinned in the pack`. Session's call: the line today tells a project to change its
+  shape KEY-7 quotes), whether the pack or the project states the key, gains a second fix after the
+  first: `, or, if the key is newer than this analyzer, update the analyzer's version pinned in the
+  pack`. Session's call: the line today tells a project to change its
   own declarations, which is the wrong fix for a key that is right but too new, and this item is the
   first that adds a key a project is expected to write.
 
@@ -236,7 +253,8 @@ Terms:
   in the test:
   - an unreported file with an unused export, an unresolved import and a function over the limits,
     none reported;
-  - a file and an export used only by an unreported file, neither reported as unused (READ-2);
+  - a file and an export used only by an unreported file, neither reported as unused; and an export
+    that an unreported file only re-exports, still reported unused (READ-2);
   - a duplication group of three copies with one in an unreported file, reported with two; one of two
     copies, not reported; with the counts of COUNT-1 (DUPE-1, COUNT-2);
   - a cycle of an unreported and an ordinary file, reported at the ordinary file with the same
