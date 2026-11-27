@@ -54,7 +54,14 @@ Terms:
 - **yak**, **the pack**, **the gate**, **the base**, **the hand-off file** and **the swap** are as
   the complexity spec (`docs/specs/2026-11-21-complexity-findings-design.md`) defines them.
 - **A source** of a declaration is the pack or the project: the hand-off file keeps the two apart for
-  each stack.
+  each stack. What made a file an entry point is called its **reason** here, to keep the two apart
+  (the dead-code spec's ENTRY-1 calls it a source).
+- **The dead-code spec** is `docs/specs/2026-11-13-dead-code-findings-design.md`, and **the
+  duplication spec** `docs/specs/2026-11-23-duplication-findings-design.md`.
+- **The idea review** was the step of this item's brainstorm where three fresh readers read the idea
+  before the spec was written; their findings are on the work item's record.
+- **The judged list** is as the complexity spec defines it: the written list of differences the
+  owner has judged, and of what is still owed elsewhere.
 - **An unreported file** is a file the project's `unreported` globs match (KEY-6).
 - **An audit check** is one kind of finding `audit` reports: the five dead-code kinds
   (`unused-file`, `unused-export`, `unused-type`, `unresolved-import`, `circular-dependency`),
@@ -100,31 +107,38 @@ Terms:
   Each glob is relative to the checkout's root and follows the reading spec's KEY-5, as a project's
   `data` and `generated` globs do (the reading spec's KEY-3). The globs of every stack that states it
   join. A glob that matches no file gives the notice `glob-matches-nothing`, as the reading spec's
-  KEY-3 gives for `data` and `generated`. Session's call for the name: `ignore` was the owner's word,
+  KEY-5 gives for `data` and `generated`. Session's call for the name: `ignore` was the owner's word,
   but `duplicationIgnore` and the `duplication` command's `ignore` field already use it for what
   matches loosely, and `unreported` says what happens to the file, not that it is skipped.
 - **KEY-7** Only a project may state `unreported` (owner). When a pack states it, the run stops with
-  the reading spec's KEY-2 line, its reason `only a project may state this key`, and its fix `change
-  it in the pack`, as for `configEntries` today the other way round.
+  the reading spec's KEY-2 line. That line, as `src/declarations.rs` writes it today, is "cannot use
+  the declaration `<key>` that the <source> states for the stack `<stack>`: <why>; <fix>"; here the
+  why is `only a project may state this key` and the fix `change it in the pack`, as `configEntries`
+  is refused the other way round.
 - **KEY-8** A file that is both `data` and unreported is data: it is not read (the reading spec's
-  KEY-4). A file that is both `generated` and unreported is both, and each rule below applies; for
-  every check they agree but CYCLE-1, where an unreported file leaves out a cycle that a generated one
-  does not. Session's call.
+  KEY-4), and nothing in it is counted (COUNT-2). A file that is both `generated` and unreported is
+  both, and each rule below applies to it: it is an entry point (READ-2), a cycle is left out when
+  every file of the set is unreported (CYCLE-1), and its copies are removed from groups (DUPE-1).
+  Session's call.
 
 ### What an unreported file is
 
 - **READ-1** An unreported file is listed, read and resolved like any other file of its kind (owner,
   as the session's call the owner confirmed: "the file is still read").
-- **READ-2** An unreported file is an entry point, with the source `unreported` (no file names it, as
-  for the declaration `entries`, and the stack and source are kept). So every file and export it
-  imports is used, and a file only it reaches is neither an unused file nor holds unused exports
-  (owner, for exports; session's call, for files: the idea's readers found that counting its imports
-  as uses but not reaching through it would still report the files only it imports as unused).
-  Making it an entry point only adds to what is reached: an unreported file that was already reached
-  stays reached.
+- **READ-2** An unreported file is an entry point, with the reason `unreported` (no file names it, as
+  for the declaration `entries`, and the stack and the declaration's source are kept). So every file
+  and export it imports is used, and a file only it reaches is neither an unused file nor holds
+  unused exports (owner, for exports; session's call, for files: the idea review found that counting
+  its imports as uses but not reaching through it would still report the files only it imports as
+  unused). Making it an entry point only adds to what is reached: an unreported file that was already
+  reached stays reached. An entry point with only the reason `unreported` does not count when the
+  dead-code spec's ENTRY-8 judges whether a package has no entry point at all, so a package whose
+  only entry points are unreported files keeps the hint in its unused-file messages that the likely
+  fault is a missing `entries` declaration. Session's call: an ignored script does not make a package
+  correctly wired.
 - **READ-3** Wherever the analyzer today leaves a generated file out of what it reports on, it leaves
   an unreported file out the same way, except where DUPE-1 and CYCLE-1 say otherwise. That includes
-  the `kinds-not-reported` notice (the reading spec's ENTRY-9 as `src/findings.rs` gives it), which
+  the `kinds-not-reported` notice (the dead-code spec's ENTRY-9 as `src/findings.rs` gives it), which
   counts only files the analyzer reports on: a package holding only unreported files gives none.
   Session's call: one rule, the generated file's, so an unreported file adds no new kind of exception
   for the builder to find.
@@ -134,7 +148,7 @@ Terms:
 - **DEAD-1** No `unused-file`, `unused-export`, `unused-type` or `unresolved-import` finding is
   reported in an unreported file.
 - **CPLX-1** No `complexity` finding is reported for a function in an unreported file, by `audit` or
-  by the `complexity` command, with or without `--all` (as the complexity spec's FN-2 does for a
+  by the `complexity` command, with or without `--all` (as the complexity spec's CPX-5 does for a
   generated file).
 - **DUPE-1** Duplication is found over every file it is found over today, unreported files included.
   Then each group loses its copies in unreported files, and a group left with fewer copies than
@@ -150,19 +164,21 @@ Terms:
   group's old number of copies no longer matches: the group is reported again and the entry gets the
   notice the duplication spec gives an entry that matches no group, which tells the person the
   accepted group has changed. So a copy in an unreported file is never reported, and neither
-  is a copy elsewhere whose only twin is in an unreported file (owner's decision of the idea review:
-  "a copy elsewhere of its code is not reported"). The same applies to the `duplication` command,
+  is a copy elsewhere whose only twin is in an unreported file (the session's call recorded after the
+  idea review: "a copy elsewhere of its code is not reported"). The same applies to the `duplication` command,
   with or without `--all`. Session's call, for removing the copies after the groups are found rather
   than leaving the files out before: it gives the same groups to report in nearly every case, and it
   lets COUNT-1 count what was left out from one pass. It differs from how a generated file is left out
   (the duplication spec's COPY-4), on purpose.
 - **CYCLE-1** A `circular-dependency` finding is left out only when every file in its set is
-  unreported. Otherwise it is reported, its location the first file of the set that is not
-  unreported, with the files before it moved to the related locations in the set's order, and its
-  fingerprint unchanged, since the fingerprint is made from every path of the set. With `--base`, a new
-  cycle is placed as the dead-code comparison spec's INH-3 places it (at the importing file of the
-  first edge the branch added) when that file is not unreported, and by this requirement's rule when
-  it is. Session's call: a cycle that reaches into the code a person maintains is still theirs to
+  unreported. Otherwise it is reported as the dead-code spec's KIND-4 reports it, with one change:
+  where KIND-4 uses the set's first file by path, this uses the first file by path that is not
+  unreported. That file's first import, by line, that leads to another file of the set is the
+  finding's first location; every other file of the set, unreported ones included, is a related
+  location at its own first such import, in path order; and the message's loop runs through that
+  file. Its fingerprint is unchanged, since it is made from every path of the set. With `--base`, a
+  new cycle is placed as the dead-code spec's INH-3 places it (at the importing file of the first edge
+  the branch added) when that file is not unreported, and by this requirement's rule when it is. Session's call: a cycle that reaches into the code a person maintains is still theirs to
   break, and its location should be in that code.
 
 ### Saying what was left out
@@ -180,8 +196,10 @@ Terms:
   more than the findings left out; the notice says nothing of it. A duplication group still reported,
   with copies removed, counts against no glob: it was not left out. Findings elsewhere that READ-2
   stops (an export only an unreported file uses, now used) are not counted: they are not hidden, they
-  are no longer findings, and counting them would need a second reading without the key. Session's
-  call.
+  are no longer findings, and counting them would need a second reading without the key. Nor are
+  findings that `data` or `generated` already leave out: a finding in a file both generated and
+  unreported was left out without this key, so it counts against no glob, and a glob that matches
+  only data files gives its notice with 0. Session's call.
 - **COUNT-3** With `--base`, the counts are the branch's alone. The base reads the same declarations
   (design BASE-3), so its findings are left out by the same rules, and nothing about the base is
   counted. Session's call.
@@ -189,7 +207,7 @@ Terms:
   are for a person reading one check, and the person reads the key's effect in `audit`. Session's
   call.
 - **COUNT-5** `graph` prints, for each file, whether it is unreported, beside its `data` and
-  `generated` flags, and lists the `unreported` source among an entry point's sources (READ-2). What
+  `generated` flags, and lists the `unreported` reason among an entry point's reasons (READ-2). What
   `graph` prints is outside the interface version (CONTRIBUTING.md).
 
 ### Refusing a key the analyzer doesn't know
@@ -197,18 +215,20 @@ Terms:
 - **REFUSE-1** The key is added before any project writes it: the analyzer release that knows
   `unreported` comes first, the pack pins that release, and only then may a project state the key.
   A project that writes it under an older analyzer has its run stopped by the reading spec's KEY-2.
-- **REFUSE-2** The line that refuses a key the analyzer knows no such key (the reading spec's KEY-2)
-  gains a second fix after the first: `, or, if the key is newer than this analyzer, update the
+- **REFUSE-2** The line that refuses a key the analyzer doesn't know (the reading spec's KEY-2, in the
+  shape KEY-7 quotes) gains a second fix after the first: `, or, if the key is newer than this analyzer, update the
   analyzer's version pinned in the pack`. Session's call: the line today tells a project to change its
   own declarations, which is the wrong fix for a key that is right but too new, and this item is the
   first that adds a key a project is expected to write.
 
 ### The interface version
 
-- **VERS-1** Interface version 1 gains the key `unreported` and the notice kind
-  `findings-unreported`. The entry-point source `unreported` is shown only by `graph`, which is
-  outside the interface (COUNT-5). Each only adds, so the interface version is not raised (the
-  complexity spec's VER-1), and `CONTRIBUTING.md`'s list of keys gains `unreported`.
+- **VERS-1** Interface version 1 gains the key `unreported`. It only adds, so the interface version is
+  not raised (the complexity spec's VER-1). `CONTRIBUTING.md` gets a paragraph for it, as duplication
+  got one for its keys, after the duplication paragraph: the key, that only a project states it, and
+  the notice `findings-unreported`. The notice's kind is not part of the interface, as no notice kind
+  is today; yak shows notices as text. The entry-point reason `unreported` is shown only by `graph`,
+  which is outside the interface (COUNT-5).
 
 ### Fixtures
 
@@ -241,6 +261,8 @@ Terms:
   - that the engine shows the `findings-unreported` notices to the person at the gate, as it shows the
     run's other notices, and that its existing question when a work item changes a project's
     declarations covers a new `unreported` glob (design HAND-7);
+  - a check that yak passes a project's `unreported` list from its `yak.json` into the hand-off file
+    under the project's declarations for the stack, as it passes `data` and `generated`;
   - the release order of REFUSE-1: the pack pins the analyzer release with this key before any project
     is told it may write it.
 
