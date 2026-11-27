@@ -117,6 +117,10 @@ path = "tests/unreported.rs"
 //! no command reports a finding in them, each saying how many it left out (ignoring spec KEY-6 to
 //! KEY-8, READ-1 to READ-3, DEAD-1, CPLX-1, DUPE-1, CYCLE-1, COUNT-1 to COUNT-5, TEST-1).
 
+#[expect(
+    dead_code,
+    reason = "the shared project helpers include running `graph` with no hand-off file and reading a document's paths and notice kinds, which these tests do not need"
+)]
 #[path = "support/project.rs"]
 mod project;
 
@@ -208,8 +212,10 @@ fn graph_flags_each_file_an_unreported_glob_matches() {
     // KEY-6).
     assert_eq!(
         said(&document, "glob-matches-nothing"),
-        ["The `unreported` glob `nothing/**` that the project states for the stack `typescript` \
-          matches no file."]
+        [
+            "The `unreported` glob `nothing/**` that the project states for the stack `typescript` \
+          matches no file."
+        ]
     );
 }
 ```
@@ -240,7 +246,7 @@ fn prints_its_interface_version_and_the_hand_off_formats_it_reads_as_one_line_of
         "{\"handOffFormats\":[1],\"interfaceVersion\":1}\n"
     );
 =======
-fn prints_its_interface_version_the_hand_off_formats_it_reads_and_the_keys_it_knows_as_one_line_of_json() {
+fn prints_its_interface_version_hand_off_formats_and_keys_as_one_line_of_json() {
     let output = run(&["interface"]);
 
     assert!(output.status.success());
@@ -648,13 +654,15 @@ Expected: the format and the check report nothing left to fix, and the commit is
 
 ```rust edit path=tests/unreported.rs
 <<<<<<< find
-        ["The `unreported` glob `nothing/**` that the project states for the stack `typescript` \
-          matches no file."]
+            "The `unreported` glob `nothing/**` that the project states for the stack `typescript` \
+          matches no file."
+        ]
     );
 }
 =======
-        ["The `unreported` glob `nothing/**` that the project states for the stack `typescript` \
-          matches no file."]
+            "The `unreported` glob `nothing/**` that the project states for the stack `typescript` \
+          matches no file."
+        ]
     );
 }
 
@@ -803,13 +811,14 @@ fn an_unreported_file_is_read_and_reaches_what_it_imports_but_nothing_is_reporte
     // `helper` and `only` are used by the unreported script, an entry point; `extra`, which nothing
     // imports, is now reported, and nothing in the script is (ignoring spec READ-2, DEAD-1).
     assert_eq!(found(&run), [("unused-export", "scripts/only.ts", Some(2))]);
-    // Without the declaration the run would report the script and `only.ts` as unused files, `helper`
-    // as an unused export, and the script's import of `./missing`: the two in the script count against
-    // its glob, and the two outside it in the notice for the rest (ignoring spec COUNT-1, COUNT-2).
+    // Without the declaration the run would report the script and `only.ts` as unused files, and the
+    // script's import of `./missing`; `helper` is used even then, since an import in any file read is a
+    // use. The two in the script count against its glob, and `only.ts` in the notice for the rest
+    // (ignoring spec COUNT-1, COUNT-2).
     assert_eq!(
         sentences(&run, "findings-unreported"),
         [
-            "2 more finding(s) outside the `unreported` files are not reported, since only those files \
+            "1 more finding(s) outside the `unreported` files are not reported, since only those files \
              use what they name.",
             "The `unreported` glob `scripts/report.ts` that the project states for the stack `typescript` \
              left out 2 finding(s).",
@@ -985,8 +994,10 @@ fn each_glob_counts_the_findings_it_left_out_once_however_many_stacks_state_it()
     );
     assert_eq!(
         sentences(&run, "glob-matches-nothing"),
-        ["The `unreported` glob `nothing/**` that the project states for the stack `typescript` \
-          matches no file."]
+        [
+            "The `unreported` glob `nothing/**` that the project states for the stack `typescript` \
+          matches no file."
+        ]
     );
     // A data file is not read, so it is no entry point (ignoring spec KEY-8).
     assert_eq!(
@@ -1058,10 +1069,7 @@ fn with_a_base_a_new_cycle_moves_only_to_an_added_import_in_a_file_that_is_not_u
         )
         .write("scripts/w.ts", "import '../src/d';\nexport const w = 1;\n");
 
-    let hand_off = declaring(
-        &project,
-        json!({ "unreported": ["scripts/**", "docs/**"] }),
-    );
+    let hand_off = declaring(&project, json!({ "unreported": ["scripts/**", "docs/**"] }));
     let run = audited(&project, &["--hand-off", &hand_off, "--base", "main"]);
 
     // The branch added an import in `scripts/z.ts`, first by path, and one in `src/e.ts`: the new cycle
@@ -1074,17 +1082,13 @@ fn with_a_base_a_new_cycle_moves_only_to_an_added_import_in_a_file_that_is_not_u
             ("src/e.ts", Some(1), Some("new")),
         ]
     );
-    assert!(
-        message(&run, "circular-dependency", "src/e.ts").ends_with(
-            " The branch added the import of `./c` on line 1 of `src/e.ts`, which leads to `src/c.ts`."
-        )
-    );
-    assert!(
-        message(&run, "circular-dependency", "src/d.ts").ends_with(
-            " The branch added the import of `../src/d` on line 1 of `scripts/w.ts`, which leads to \
+    assert!(message(&run, "circular-dependency", "src/e.ts").ends_with(
+        " The branch added the import of `./c` on line 1 of `src/e.ts`, which leads to `src/c.ts`."
+    ));
+    assert!(message(&run, "circular-dependency", "src/d.ts").ends_with(
+        " The branch added the import of `../src/d` on line 1 of `scripts/w.ts`, which leads to \
              `src/d.ts`."
-        )
-    );
+    ));
     // `docs/old.ts` is left out on both sides, and only the branch's finding is counted (ignoring spec
     // COUNT-3).
     assert!(sentences(&run, "findings-unreported").contains(
@@ -1289,7 +1293,12 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
 =======
     let mut found = Vec::new();
 
-    unused(reading, &reading.uses, &reading.marks.unreported, &mut found);
+    unused(
+        reading,
+        &reading.uses,
+        &reading.marks.unreported,
+        &mut found,
+    );
     unresolved(reading, &reading.marks.unreported, &mut found);
 
     found
@@ -1359,12 +1368,7 @@ fn own(reading: &Reading, file: &File, unreported: &BTreeSet<String>) -> bool {
 
 /// The unused files, exports and types, by the uses given, in every file the analyzer reports on but
 /// the files given (spec KIND-1, KIND-2; ignoring spec DEAD-1).
-fn unused(
-    reading: &Reading,
-    uses: &Uses,
-    unreported: &BTreeSet<String>,
-    found: &mut Vec<Finding>,
-) {
+fn unused(reading: &Reading, uses: &Uses, unreported: &BTreeSet<String>, found: &mut Vec<Finding>) {
     let used: BTreeSet<(&str, Option<&str>)> = uses
         .list
 >>>>>>> replace
@@ -1390,9 +1394,14 @@ fn unused(
         if !uses.reached.contains_key(path) {
 >>>>>>> replace
 <<<<<<< find
+        reading
+            .files
+            .iter()
             .filter(|file| scripts::reads(file.kind) && own(reading, file))
 =======
-            .filter(|file| scripts::reads(file.kind) && own(reading, file, &reading.marks.unreported))
+        reading.files.iter().filter(|file| {
+            scripts::reads(file.kind) && own(reading, file, &reading.marks.unreported)
+        })
 >>>>>>> replace
 <<<<<<< find
 /// The imports that lead to no file, in any file under the root that is read and is neither generated
@@ -1610,14 +1619,23 @@ fn no_complexity_is_reported_in_an_unreported_file_by_audit_or_by_complexity() {
             "package.json",
             r#"{ "name": "app", "main": "./src/index.ts" }"#,
         )
-        .write("src/index.ts", "import { run } from './run';\n\nrun(true);\n")
+        .write(
+            "src/index.ts",
+            "import { run } from './run';\n\nrun(true);\n",
+        )
         .write(
             "src/run.ts",
-            &format!("export function run(a: boolean): void {{\n  {}\n}}\n", ifs(4)),
+            &format!(
+                "export function run(a: boolean): void {{\n  {}\n}}\n",
+                ifs(4)
+            ),
         )
         .write(
             "scripts/tool.ts",
-            &format!("export function tool(a: boolean): void {{\n  {}\n}}\n", ifs(4)),
+            &format!(
+                "export function tool(a: boolean): void {{\n  {}\n}}\n",
+                ifs(4)
+            ),
         )
         .commit();
 
@@ -1632,8 +1650,10 @@ fn no_complexity_is_reported_in_an_unreported_file_by_audit_or_by_complexity() {
     assert_eq!(found(&run), [("complexity", "src/run.ts", Some(1))]);
     assert_eq!(
         sentences(&run, "findings-unreported"),
-        ["The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
-          out 2 finding(s)."]
+        [
+            "The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
+          out 2 finding(s)."
+        ]
     );
 
     // The command lists no function of the script, even with `--all`, and counts only its own kind
@@ -1656,8 +1676,10 @@ fn no_complexity_is_reported_in_an_unreported_file_by_audit_or_by_complexity() {
         assert_eq!(paths, ["src/run.ts"]);
         assert_eq!(
             said(&document, "findings-unreported"),
-            ["The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
-              left out 1 finding(s)."]
+            [
+                "The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
+              left out 1 finding(s)."
+            ]
         );
     }
 }
@@ -1800,8 +1822,10 @@ Expected: the format and the check report nothing left to fix, and the commit is
         assert_eq!(paths, ["src/run.ts"]);
         assert_eq!(
             said(&document, "findings-unreported"),
-            ["The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
-              left out 1 finding(s)."]
+            [
+                "The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
+              left out 1 finding(s)."
+            ]
         );
     }
 }
@@ -1809,8 +1833,10 @@ Expected: the format and the check report nothing left to fix, and the commit is
         assert_eq!(paths, ["src/run.ts"]);
         assert_eq!(
             said(&document, "findings-unreported"),
-            ["The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
-              left out 1 finding(s)."]
+            [
+                "The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
+              left out 1 finding(s)."
+            ]
         );
     }
 }
@@ -1912,8 +1938,10 @@ fn a_group_loses_its_copies_in_unreported_files_and_one_left_too_small_is_left_o
     // COUNT-2).
     assert_eq!(
         sentences(&run, "findings-unreported"),
-        ["The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
-          out 3 finding(s)."]
+        [
+            "The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
+          out 3 finding(s)."
+        ]
     );
 
     // An entry for the group's copies before the removal or after accepts it; an entry for the group
@@ -1925,8 +1953,10 @@ fn a_group_loses_its_copies_in_unreported_files_and_one_left_too_small_is_left_o
         assert!(sentences(&accepted, "accepted-group-not-found").is_empty());
         assert_eq!(
             sentences(&accepted, "findings-unreported"),
-            ["The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
-              left out 2 finding(s)."]
+            [
+                "The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
+              left out 2 finding(s)."
+            ]
         );
     }
 
@@ -1937,8 +1967,10 @@ fn a_group_loses_its_copies_in_unreported_files_and_one_left_too_small_is_left_o
 
     assert_eq!(
         said(&document, "findings-unreported"),
-        ["The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
-          out 1 finding(s)."]
+        [
+            "The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
+          out 1 finding(s)."
+        ]
     );
 
     // The base's group loses its copy in the script too, so it pairs with the branch's (ignoring spec
@@ -1988,7 +2020,11 @@ fn a_group_kept_only_by_its_unreported_copy_is_dropped_inside_a_wider_one() {
     assert_eq!(
         duplicates(&plain),
         [
-            vec![("scripts/r.ts", 2, 2), ("src/p.ts", 2, 2), ("src/q.ts", 2, 2)],
+            vec![
+                ("scripts/r.ts", 2, 2),
+                ("src/p.ts", 2, 2),
+                ("src/q.ts", 2, 2)
+            ],
             vec![("src/p.ts", 1, 2), ("src/q.ts", 1, 2)],
         ]
     );
