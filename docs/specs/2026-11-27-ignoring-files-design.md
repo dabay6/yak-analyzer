@@ -135,8 +135,8 @@ Terms:
   as the session's call the owner confirmed: "the file is still read").
 - **READ-2** An unreported file is an entry point, with the reason `unreported` (no file names it, as
   for the declaration `entries`, and the stack and the declaration's source are kept). So every file
-  and export it imports is used, and a file only it reaches is neither an unused file nor holds
-  unused exports (owner, for exports; session's call, for files: the idea review found that counting
+  and export it imports is used, and a file only it reaches is not an unused file; that file's other
+  exports, which nothing imports, are still reported unused (owner, for exports; session's call, for files: the idea review found that counting
   its imports as uses but not reaching through it would still report the files only it imports as
   unused). Making it an entry point only adds to what is reached: an unreported file that was already
   reached stays reached. Unlike every other entry point, an entry point whose only reason is
@@ -145,7 +145,8 @@ Terms:
   reason (a `main`, an `exports` target, an `entries` glob) keeps USE-3, as without the key.
   So its re-exports pass no use on to the files they re-export from, and an export of maintained code
   that only an unreported file re-exports is still reported unused; and the unused exports in the
-  unreported file itself are worked out, then left out by DEAD-1 and counted (COUNT-2). Session's
+  unreported file itself are worked out, then left out by DEAD-1, and counted when COUNT-2 counts
+  them (when the run without the key would report them too). Session's
   call: otherwise a re-export in an ignored file would hide findings in maintained code, uncounted,
   which is the first anti-goal. An entry point with only the reason `unreported` does not count when the
   dead-code spec's ENTRY-8 judges whether a package has no entry point at all, so a package whose
@@ -175,7 +176,11 @@ Terms:
   of copies is the group's either before or after the removal, so adding an ignore glob does not
   bring back a group a person accepted, and an entry written from the reduced group, as `audit` now
   shows it, works too. The notice for an entry that matches no group is given only when it matches
-  neither. With
+  neither. An entry matches a group as it was found, before the removal, even when the removal drops
+  the group altogether, so narrowing the glob later finds the acceptance still there; the entry is
+  not reported as matching no group. The base comparison's rule that a script it skipped holds no
+  copy (`src/inherit.rs`, for generated scripts) does not apply to unreported scripts: their copies
+  are found and removed as here. With
   `--base`, the base's groups lose their copies in unreported files by the same rule before they are
   compared (the duplication spec's FRESH-1), since the base reads the same declarations (design
   BASE-3); otherwise every reduced group would be marked new on every run. A group still reported
@@ -237,7 +242,8 @@ Terms:
   (design BASE-3), so its findings are left out by the same rules, and nothing about the base is
   counted. Session's call.
 - **COUNT-4** The `complexity` and `duplication` commands give the notices of COUNT-1 too, each
-  counting only the findings of its own check, with or without `--all`. Session's call: they leave
+  counting only the findings of its own check. `--all` does not change the counts: it lists more of
+  what is reported (every function, or the accepted groups), never what the key left out. Session's call: they leave
   out the same files as `audit`, and a person reading one of them should see that too.
 - **COUNT-5** `graph` prints, for each file, whether it is unreported, beside its `data` and
   `generated` flags, and lists the `unreported` reason among an entry point's reasons (READ-2). What
@@ -254,6 +260,12 @@ Terms:
   pack`. Session's call: the line today tells a project to change its
   own declarations, which is the wrong fix for a key that is right but too new, and this item is the
   first that adds a key a project is expected to write.
+- **REFUSE-3** `interface` also prints the declaration keys the analyzer knows, as a list of their
+  names. It only adds to what `interface` prints, so the interface version is not raised. With it,
+  yak can tell, before it runs the analyzer, that a project's `yak.json` states a key the analyzer its
+  pack pins does not know, and say to update the pack, on a machine or in a CI job whose pack lags
+  the commit that added the key (OWED-1). Session's call: REFUSE-1 orders releases, not installs, and
+  without this the older analyzer's line tells the person to delete a key that is right.
 
 ### The interface version
 
@@ -278,6 +290,9 @@ Terms:
     fingerprint as without the key; a cycle of unreported files only, not reported (CYCLE-1);
   - two globs matching one file, each counting its findings, and a glob matching a file with no
     finding, counting 0 (COUNT-1, COUNT-2);
+  - an `unreported` glob that matches no file, giving `glob-matches-nothing` (KEY-6); and one glob
+    that two stacks state, giving one notice naming both (COUNT-1);
+  - an accepted group that removal drops altogether, its entry given no notice (DUPE-1);
   - a pack stating `unreported`, refused (KEY-7); a file both `data` and unreported, not read (KEY-8);
   - an unknown key, refused with both fixes (REFUSE-2);
   - a branch that adds an unreported glob against a base without it: findings it hides are left out
@@ -291,7 +306,8 @@ Terms:
   - a group that the second pass of SAME-4 drops; an accepted group that loses a copy, still accepted
     by its old entry and by a new one (DUPE-1);
   - a new cycle with `--base` whose first added edge starts in an unreported file and a later one in
-    an ordinary file (CYCLE-1); and a base group that loses its unreported copy, marked unchanged
+    an ordinary file, and a new cycle with no added edge (CYCLE-1);
+  - `interface` listing the declaration keys, `unreported` among them (REFUSE-3); and a base group that loses its unreported copy, marked unchanged
     (DUPE-1);
   - a file both `generated` and unreported, an entry point and in a cycle of unreported files left out
     and counted (KEY-8, COUNT-2);
@@ -314,7 +330,10 @@ Terms:
   - a check that yak passes a project's `unreported` list from its `yak.json` into the hand-off file
     under the project's declarations for the stack, as it passes `data` and `generated`;
   - the release order of REFUSE-1: the pack pins the analyzer release with this key before any project
-    is told it may write it.
+    is told it may write it;
+  - that the engine reads REFUSE-3's list of keys from `interface` and, when a project states a key
+    the pinned analyzer does not know, stops before running it with a line that says to update the
+    pack, not to remove the key.
 
   The item closes only once each is filed in that yakshaver item or written in the judged list as
   still owed there. Session's call, as the duplication spec's OWED-1.
@@ -358,8 +377,10 @@ Terms:
   real duplicate, and the fixtures fix what is reported; handled by accepting the difference, written
   in DUPE-1.
 - **A project writes the key before its analyzer knows it.** Its run stops, and the older analyzer
-  prints today's line, which tells the project to change its own declarations. Handled by REFUSE-1's
-  order alone; REFUSE-2's line helps only with keys added after this one.
+  prints today's line, which tells the project to change its own declarations. This happens on any
+  machine or CI job whose pack still pins an older analyzer once the key is committed. Handled by
+  REFUSE-1's order, and by REFUSE-3 with the engine's check (OWED-1), which say to update the pack;
+  REFUSE-2's line helps only with keys added after this one.
 - **Ignoring brings out findings.** A file used only by an ignored script was one `unused-file`
   finding; with the script an entry point, the file is used and its other exports are reported. They
   are true findings, reported (Goals); a person adding a glob may see the report grow before it
@@ -379,7 +400,8 @@ Terms:
   reaches it.
 - Where the counts are gathered: from the full set of findings before filtering, or by each check
   counting what it drops, so long as COUNT-2's definition holds.
-- The wording of the `findings-unreported` notice, keeping its three parts (glob, stack, count), and
-  the order of the notices, which follows the globs' order in the hand-off file.
+- The wording of the `findings-unreported` notices, keeping a glob's notice to its three parts (glob,
+  stacks, count) and the extra notice to its count. Session's call for the order: the globs' notices
+  in their order in the hand-off file, then the extra notice.
 - How `graph` names the per-file flag and the entry source in its output.
 - The fixtures' file names and how many projects TEST-1's cases are spread across.
