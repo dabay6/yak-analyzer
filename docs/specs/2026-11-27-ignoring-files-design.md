@@ -77,7 +77,9 @@ Terms:
 - Taking back a pack's `data` or `generated` glob from a project. Lists still only join.
 - Running the analyzer without yak, or a configuration file of the analyzer's own (owner).
 - The yak commands that write a project's declarations (design DECL-2's `yak stack` commands). They
-  are yakshaver's and not built yet; until they are, a person edits `yak.json` by hand.
+  are yakshaver's and not built yet; until they are, a person edits `yak.json` by hand. That runs
+  against the README's "no setting a person edits by hand", which holds once those commands exist;
+  the gap is yakshaver's to close, and this item leaves the README's line as it is. Session's call.
 - Ignoring one finding or one line. `duplicationAccepted` already accepts a duplication group, and a
   finding of another kind is answered at the gate.
 
@@ -120,11 +122,12 @@ Terms:
   as uses but not reaching through it would still report the files only it imports as unused).
   Making it an entry point only adds to what is reached: an unreported file that was already reached
   stays reached.
-- **READ-3** The marks of `src/marks.rs` gain an `unreported` set beside `data` and `generated`, and
-  the one test each check uses today for "is this file's code to report on" (the function `own` in
-  `src/findings.rs`, and the filters in `src/complexity.rs` and `src/duplication.rs`) leaves out an
-  unreported file as it leaves out a generated one, except where DUPE-1 and CYCLE-1 say otherwise.
-  Session's call, for keeping one test per check rather than a second key each check reads.
+- **READ-3** Wherever the analyzer today leaves a generated file out of what it reports on, it leaves
+  an unreported file out the same way, except where DUPE-1 and CYCLE-1 say otherwise. That includes
+  the `kinds-not-reported` notice (the reading spec's ENTRY-9 as `src/findings.rs` gives it), which
+  counts only files the analyzer reports on: a package holding only unreported files gives none.
+  Session's call: one rule, the generated file's, so an unreported file adds no new kind of exception
+  for the builder to find.
 
 ### What each check leaves out
 
@@ -135,9 +138,18 @@ Terms:
   generated file).
 - **DUPE-1** Duplication is found over every file it is found over today, unreported files included.
   Then each group loses its copies in unreported files, and a group left with fewer copies than
-  `duplicationCopies` (2 without it) is not reported. A group still reported keeps its fingerprint and
-  counts only its remaining copies, in its message, its property bag and the entry
-  `duplicationAccepted` needs for it. So a copy in an unreported file is never reported, and neither
+  `duplicationCopies` (2 without it) is not reported. The rule that drops a group lying inside another
+  (the duplication spec's SAME-4) then runs again on the groups left, since a group kept only by its
+  copy in an unreported file can now lie inside a wider group, and would otherwise be reported twice.
+  The copies are removed before acceptance is matched (the duplication spec's QUIET-1). With
+  `--base`, the base's groups lose their copies in unreported files by the same rule before they are
+  compared (the duplication spec's FRESH-1), since the base reads the same declarations (design
+  BASE-3); otherwise every reduced group would be marked new on every run. A group still reported keeps its fingerprint and its
+  tokens, since its run is the same, and counts only its remaining copies, in its message, its
+  property bag and the entry `duplicationAccepted` needs for it. So an accepted entry written for the
+  group's old number of copies no longer matches: the group is reported again and the entry gets the
+  notice the duplication spec gives an entry that matches no group, which tells the person the
+  accepted group has changed. So a copy in an unreported file is never reported, and neither
   is a copy elsewhere whose only twin is in an unreported file (owner's decision of the idea review:
   "a copy elsewhere of its code is not reported"). The same applies to the `duplication` command,
   with or without `--all`. Session's call, for removing the copies after the groups are found rather
@@ -147,8 +159,11 @@ Terms:
 - **CYCLE-1** A `circular-dependency` finding is left out only when every file in its set is
   unreported. Otherwise it is reported, its location the first file of the set that is not
   unreported, with the files before it moved to the related locations in the set's order, and its
-  fingerprint unchanged, since the fingerprint is made from every path of the set. Session's call: a
-  cycle that reaches into the code a person maintains is still theirs to break.
+  fingerprint unchanged, since the fingerprint is made from every path of the set. With `--base`, a new
+  cycle is placed as the dead-code comparison spec's INH-3 places it (at the importing file of the
+  first edge the branch added) when that file is not unreported, and by this requirement's rule when
+  it is. Session's call: a cycle that reaches into the code a person maintains is still theirs to
+  break, and its location should be in that code.
 
 ### Saying what was left out
 
@@ -157,12 +172,16 @@ Terms:
   glob `docs/research/**` that the project states for the stack `typescript` left out 12
   findings." (owner). A glob that matches files but left out no finding still gives its notice, with
   0, so a glob with no effect is seen. Session's call, for the 0.
-- **COUNT-2** A finding counts against a glob when, with no `unreported` key, `audit` would report it
-  and this item's rules leave it out, and the glob matches: for a finding with one file, that file;
-  for a duplication group, a removed copy's file; for a cycle, any file of the set. A finding that two
-  globs match counts against both, so the counts can add up to more than the findings left out; the
-  notice says nothing of it. A duplication group still reported, with copies removed, counts against
-  no glob: it was not left out. Session's call.
+- **COUNT-2** The count is of the findings the run works out and then leaves out, on the reading with
+  the key: what is reached already includes the unreported files as entry points (READ-2). A finding
+  counts against a glob when DEAD-1, CPLX-1, DUPE-1 or CYCLE-1 leaves it out and the glob matches: for
+  a finding with one file, that file; for a duplication group, a removed copy's file; for a cycle, any
+  file of the set. A finding that two globs match counts against both, so the counts can add up to
+  more than the findings left out; the notice says nothing of it. A duplication group still reported,
+  with copies removed, counts against no glob: it was not left out. Findings elsewhere that READ-2
+  stops (an export only an unreported file uses, now used) are not counted: they are not hidden, they
+  are no longer findings, and counting them would need a second reading without the key. Session's
+  call.
 - **COUNT-3** With `--base`, the counts are the branch's alone. The base reads the same declarations
   (design BASE-3), so its findings are left out by the same rules, and nothing about the base is
   counted. Session's call.
@@ -186,8 +205,9 @@ Terms:
 
 ### The interface version
 
-- **VERS-1** Interface version 1 gains the key `unreported`, the entry-point source `unreported` and
-  the notice kind `findings-unreported`. Each only adds, so the interface version is not raised (the
+- **VERS-1** Interface version 1 gains the key `unreported` and the notice kind
+  `findings-unreported`. The entry-point source `unreported` is shown only by `graph`, which is
+  outside the interface (COUNT-5). Each only adds, so the interface version is not raised (the
   complexity spec's VER-1), and `CONTRIBUTING.md`'s list of keys gains `unreported`.
 
 ### Fixtures
