@@ -401,7 +401,8 @@ Terms:
 - Where the counts are gathered: from the full set of findings before filtering, or by each check
   counting what it drops, so long as COUNT-2's definition holds.
 - The wording of the `findings-unreported` notices, keeping a glob's notice to its three parts (glob,
-  stacks, count) and the extra notice to its count. Session's call for the order: the globs' notices
-  in their order in the hand-off file, then the extra notice.
+  stacks, count) and the extra notice to its count. Session's call for the order: the notices take the
+  shared sort every notice takes today (`src/notice.rs`), with no exception for this kind, so a run's
+  notices keep one rule for their order.
 - How `graph` names the per-file flag and the entry source in its output.
 - The fixtures' file names and how many projects TEST-1's cases are spread across.
