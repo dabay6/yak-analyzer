@@ -295,11 +295,12 @@ fn duplicated(
         return (false, Some(notice));
     }
 
-    // The base's groups before acceptance, by fingerprint: each one's copies as their files on the
-    // branch with their exact forms, sorted (duplication spec FRESH-1).
+    // The base's groups before acceptance, with their copies in unreported files removed, by
+    // fingerprint: each one's copies as their files on the branch with their exact forms, sorted
+    // (duplication spec FRESH-1; ignoring spec DUPE-1).
     let mut held: BTreeMap<String, Vec<Vec<(String, String)>>> = BTreeMap::new();
 
-    for group in duplication::groups(&base.reading).0 {
+    for group in duplication::groups(&base.reading).groups {
         let mut copies: Vec<(String, String)> = group
             .copies
             .iter()

@@ -273,7 +273,7 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
 
     circular(reading, &mut found, &mut left);
     complex(reading, &mut found, &mut left);
-    duplicated(reading, &mut found, &mut notices);
+    duplicated(reading, &mut found, &mut notices, &mut left);
     not_reported(reading, &mut notices);
     computed(reading, &mut notices);
     notices.extend(reading.limits.notice());
@@ -905,19 +905,27 @@ fn complex(reading: &Reading, found: &mut Vec<Finding>, left: &mut Vec<Vec<Strin
 }
 
 /// One finding for each group of copies a person has not accepted, with the notices for an entry of
-/// `duplicationAccepted` that matches no group and for a run with no `duplicationMinimum` (duplication
-/// spec DUP-1, TUNE-1, QUIET-1, QUIET-2).
-fn duplicated(reading: &Reading, found: &mut Vec<Finding>, notices: &mut Vec<Notice>) {
-    let (groups, unmatched) = duplication::groups(reading);
+/// `duplicationAccepted` that matches no group and for a run with no `duplicationMinimum`, and each
+/// group the unreported files left out, by the files of the copies it lost there (duplication spec
+/// DUP-1, TUNE-1, QUIET-1, QUIET-2; ignoring spec DUPE-1).
+fn duplicated(
+    reading: &Reading,
+    found: &mut Vec<Finding>,
+    notices: &mut Vec<Notice>,
+    left: &mut Vec<Vec<String>>,
+) {
+    let grouped = duplication::groups(reading);
 
     found.extend(
-        groups
+        grouped
+            .groups
             .into_iter()
             .filter(|group| !group.accepted)
             .filter_map(Finding::grouped),
     );
-    notices.extend(unmatched);
+    notices.extend(grouped.notices);
     notices.extend(reading.duplication.notice());
+    left.extend(grouped.left);
 }
 
 /// One notice for each file with an `import()` or `require()` it cannot follow: what it loads must be

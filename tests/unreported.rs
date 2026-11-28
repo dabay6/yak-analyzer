@@ -614,3 +614,196 @@ fn no_complexity_is_reported_in_an_unreported_file_by_audit_or_by_complexity() {
         );
     }
 }
+
+/// A function whose statements are lines 2 to 6 of it, a run of 20 tokens.
+fn body(name: &str) -> String {
+    format!(
+        "export function {name}(items: number[]) {{\n  const total = items.length;\n  if (total > 10) {{\n    return \
+         total * 2;\n  }}\n  return total;\n}}\n"
+    )
+}
+
+/// A function whose statements differ from another's only where its number does: lines 2 to 6 of it.
+fn counting(name: &str, number: u32) -> String {
+    format!(
+        "export function {name}(items: number[]) {{\n  const total = items.length + {number};\n  if (total > \
+         {number}) {{\n    return total * {number};\n  }}\n  return total;\n}}\n"
+    )
+}
+
+/// The duplication findings of a run, in its order: each with its copies, its first location first,
+/// each as its file with its first and last lines.
+fn duplicates(run: &Value) -> Vec<Vec<(&str, u64, u64)>> {
+    results(run)
+        .iter()
+        .filter(|result| result["ruleId"] == json!("duplication"))
+        .map(|result| {
+            result["locations"]
+                .as_array()
+                .into_iter()
+                .chain(result["relatedLocations"].as_array())
+                .flatten()
+                .map(|location| {
+                    let place = &location["physicalLocation"];
+
+                    (
+                        place["artifactLocation"]["uri"].as_str().expect("a file"),
+                        place["region"]["startLine"].as_u64().expect("a first line"),
+                        place["region"]["endLine"].as_u64().expect("a last line"),
+                    )
+                })
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn a_group_loses_its_copies_in_unreported_files_and_one_left_too_small_is_left_out() {
+    let project = Project::new("unreported-duplication");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/index.ts" }"#,
+        )
+        .write(
+            "src/index.ts",
+            "import { a } from './a';\nimport { b } from './b';\nimport { d } from './d';\n\na([]);\nb([]);\n\
+             d([]);\n",
+        )
+        .write("src/a.ts", &body("a"))
+        .write("src/b.ts", &body("b"))
+        .write("scripts/x.ts", &body("x"))
+        .write("src/d.ts", &counting("d", 7))
+        .write("scripts/y.ts", &counting("y", 7))
+        .commit();
+
+    let plain = audit(
+        &project,
+        &declaring(&project, json!({ "duplicationMinimum": 10 })),
+    );
+    let wide = fingerprint(&plain, "duplication", "scripts/x.ts").to_owned();
+    let narrow = fingerprint(&plain, "duplication", "scripts/y.ts").to_owned();
+    let with = |accepted: Vec<String>| {
+        declaring(
+            &project,
+            json!({
+                "duplicationMinimum": 10,
+                "unreported": ["scripts/**"],
+                "duplicationAccepted": accepted,
+            }),
+        )
+    };
+    let run = audit(&project, &with(Vec::new()));
+
+    // The group of three loses its copy in the script and keeps its fingerprint, its size worked out
+    // from the two copies left; the group of two is left with one copy, and left out (ignoring spec
+    // DUPE-1).
+    assert_eq!(
+        duplicates(&run),
+        [vec![("src/a.ts", 2, 6), ("src/b.ts", 2, 6)]]
+    );
+    assert_eq!(fingerprint(&run, "duplication", "src/a.ts"), wide);
+    assert_eq!(
+        message(&run, "duplication", "src/a.ts"),
+        "2 copies of a 5-line run (20 tokens): `src/a.ts` lines 2–6, `src/b.ts` lines 2–6."
+    );
+    // The two scripts would be unused files, and the group of two would be reported (ignoring spec
+    // COUNT-2).
+    assert_eq!(
+        sentences(&run, "findings-unreported"),
+        [
+            "The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
+          out 3 finding(s)."
+        ]
+    );
+
+    // An entry for the group's copies before the removal or after accepts it; an entry for the group
+    // left out matches it, so it gives no notice, and the group is not counted (ignoring spec DUPE-1).
+    for entry in [format!("{wide}/3"), format!("{wide}/2")] {
+        let accepted = audit(&project, &with(vec![entry, format!("{narrow}/2")]));
+
+        assert!(duplicates(&accepted).is_empty());
+        assert!(sentences(&accepted, "accepted-group-not-found").is_empty());
+        assert_eq!(
+            sentences(&accepted, "findings-unreported"),
+            [
+                "The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
+              left out 2 finding(s)."
+            ]
+        );
+    }
+
+    // The command counts only the groups it left out (ignoring spec COUNT-4).
+    let document = printed(&project.start("duplication", |binary| {
+        binary.args(["--hand-off", &with(Vec::new())]);
+    }));
+
+    assert_eq!(
+        said(&document, "findings-unreported"),
+        [
+            "The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
+          out 1 finding(s)."
+        ]
+    );
+
+    // The base's group loses its copy in the script too, so it pairs with the branch's (ignoring spec
+    // DUPE-1).
+    project.git(&["switch", "--quiet", "-c", "branch"]);
+
+    let based = audited(
+        &project,
+        &["--hand-off", &with(Vec::new()), "--base", "main"],
+    );
+
+    assert_eq!(
+        states(&based, "duplication"),
+        [("src/a.ts", Some(2), Some("unchanged"))]
+    );
+}
+
+#[test]
+fn a_group_kept_only_by_its_unreported_copy_is_dropped_inside_a_wider_one() {
+    let project = Project::new("unreported-inside");
+    let both = "const tripled = [4, 5, 6].map((value) => value * 3);\nconst doubled = [1, 2, 3].map((value) => \
+                value * 2);\n";
+
+    project
+        .write("src/p.ts", both)
+        .write("src/q.ts", both)
+        .write(
+            "scripts/r.ts",
+            "const other = 0;\nconst doubled = [1, 2, 3].map((value) => value * 2);\n",
+        )
+        .commit();
+
+    let plain = audit(
+        &project,
+        &declaring(&project, json!({ "duplicationMinimum": 10 })),
+    );
+    let run = audit(
+        &project,
+        &declaring(
+            &project,
+            json!({ "duplicationMinimum": 10, "unreported": ["scripts/**"] }),
+        ),
+    );
+
+    // Its copy in `scripts/r.ts` keeps the run of `doubled` a group of its own; without it, the group
+    // lies inside the wider one and is dropped, not reported twice (spec SAME-4; ignoring spec DUPE-1).
+    assert_eq!(
+        duplicates(&plain),
+        [
+            vec![
+                ("scripts/r.ts", 2, 2),
+                ("src/p.ts", 2, 2),
+                ("src/q.ts", 2, 2)
+            ],
+            vec![("src/p.ts", 1, 2), ("src/q.ts", 1, 2)],
+        ]
+    );
+    assert_eq!(
+        duplicates(&run),
+        [vec![("src/p.ts", 1, 2), ("src/q.ts", 1, 2)]]
+    );
+}
