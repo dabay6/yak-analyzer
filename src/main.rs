@@ -101,7 +101,11 @@ fn run() -> ExitCode {
         Ok(Command::Interface) => {
             println!(
                 "{}",
-                serde_json::json!({ "handOffFormats": HAND_OFF_FORMATS, "interfaceVersion": INTERFACE_VERSION })
+                serde_json::json!({
+                    "declarationKeys": declarations::names(),
+                    "handOffFormats": HAND_OFF_FORMATS,
+                    "interfaceVersion": INTERFACE_VERSION,
+                })
             );
 
             ExitCode::SUCCESS

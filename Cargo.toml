@@ -72,6 +72,10 @@ name = "timings"
 path = "tests/timings.test.rs"
 
 [[test]]
+name = "unreported"
+path = "tests/unreported.rs"
+
+[[test]]
 name = "complexity"
 path = "tests/complexity.test.rs"
 

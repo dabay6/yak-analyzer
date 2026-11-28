@@ -155,7 +155,8 @@ fn targets<'s>(
 
 /// The uses that begin in the files and at the entry points, each with where it counts from: what an
 /// import uses of each file it leads to, what a file's own template names, and every export of an
-/// entry point (spec USE-2, USE-3, USE-4, USE-6).
+/// entry point, for each reason but `unreported` (spec USE-2, USE-3, USE-4, USE-6; ignoring spec
+/// READ-2).
 fn begun<'s>(
     scripts: &'s Scripts,
     resolved: &'s BTreeMap<String, Vec<Resolution>>,
@@ -211,7 +212,8 @@ fn begun<'s>(
     }
 
     for (path, sources) in &entries.points {
-        for source in sources {
+        // Nothing starts an unreported file to use its exports: it only reaches what it imports.
+        for source in sources.iter().filter(|source| !source.unreported()) {
             origins.push(Origin::Entry(source.clone()));
             work.push(Pending {
                 file: path,

@@ -19,6 +19,8 @@ use crate::stop::Stop;
 enum Kind {
     /// A list of globs.
     Globs,
+    /// A list of globs, which only a project may state (ignoring spec KEY-7).
+    ProjectGlobs,
     /// A list of paths.
     Paths,
     /// A positive whole number.
@@ -66,11 +68,12 @@ const COMMAND_FIELDS: [&str; 3] = ["file", "commands", "folder"];
 pub const WORDS: [&str; 3] = ["names", "strings", "numbers"];
 
 /// Every key the analyzer knows, with the kind of its value (spec KEY-1; duplication spec TUNE-1 to
-/// TUNE-6).
-const KEYS: [(&str, Kind); 15] = [
+/// TUNE-6; ignoring spec KEY-6).
+const KEYS: [(&str, Kind); 16] = [
     ("entries", Kind::Globs),
     ("data", Kind::Globs),
     ("generated", Kind::Globs),
+    ("unreported", Kind::ProjectGlobs),
     ("internal", Kind::Paths),
     ("cyclomaticLimit", Kind::Number),
     ("cognitiveLimit", Kind::Number),
@@ -84,6 +87,12 @@ const KEYS: [(&str, Kind); 15] = [
     ("scriptCommands", Kind::ScriptCommands),
     ("commandFiles", Kind::CommandFiles),
 ];
+
+/// The name of every key the analyzer knows, in the order of its list, as `interface` prints them
+/// (ignoring spec REFUSE-3).
+pub fn names() -> Vec<&'static str> {
+    KEYS.iter().map(|(name, _)| *name).collect()
+}
 
 /// Who states a declaration: the hand-off file keeps the two apart.
 #[derive(Clone, Copy)]
@@ -126,7 +135,7 @@ pub fn check(stacks: &[Stack]) -> Result<(), Stop> {
                         "cannot use the declaration `{key}` that the {} states for the stack `{}`: {why}; {}",
                         source.word(),
                         stack.name,
-                        source.fix()
+                        fix(key, source)
                     )));
                 }
             }
@@ -134,6 +143,20 @@ pub fn check(stacks: &[Stack]) -> Result<(), Stop> {
     }
 
     Ok(())
+}
+
+/// Where a person changes a declaration that cannot be used: for a key the analyzer doesn't know, also
+/// the update that brings a key newer than this analyzer (ignoring spec REFUSE-2).
+fn fix(key: &str, source: Source) -> String {
+    if KEYS.iter().any(|(known, _)| *known == key) {
+        source.fix().to_owned()
+    } else {
+        format!(
+            "{}, or, if the key is newer than this analyzer, update the analyzer's version pinned in the \
+             pack",
+            source.fix()
+        )
+    }
 }
 
 /// Why a declaration cannot be used, or nothing when it can.
@@ -145,7 +168,10 @@ fn problem(key: &str, value: &Value, source: Source) -> Option<String> {
     };
 
     match kind {
-        Kind::Globs => match texts(value) {
+        Kind::ProjectGlobs if matches!(source, Source::Pack) => {
+            Some("only a project may state this key".to_owned())
+        }
+        Kind::Globs | Kind::ProjectGlobs => match texts(value) {
             Some(globs) => globs.iter().find_map(|glob| glob_problem(glob)),
             None => Some("its value must be a list of globs".to_owned()),
         },

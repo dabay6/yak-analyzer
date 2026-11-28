@@ -109,6 +109,7 @@ fn lists_tracked_files_and_untracked_files_that_nothing_ignores_each_with_its_ki
             "package": ".",
             "path": path,
             "tracked": tracked,
+            "unreported": false,
         });
 
         if ["script", "declaration", "vue", "mdx", "page"].contains(&kind) {

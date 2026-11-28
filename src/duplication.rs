@@ -2,7 +2,8 @@
 //! the settings the declarations give, the runs of statements that repeat, the groups they make with
 //! their sizes and fingerprints, the groups a person accepted, the message of a group's finding, and the
 //! document the command prints (duplication spec SAME-3, SAME-4, SIZE-1, SIZE-2, TUNE-1 to TUNE-7,
-//! DUP-2, DUP-4, QUIET-1 to QUIET-4, SHOW-1 to SHOW-5).
+//! DUP-2, DUP-4, QUIET-1 to QUIET-4, SHOW-1 to SHOW-5); and each group's copies in unreported files
+//! removed (ignoring spec DUPE-1).
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -201,6 +202,10 @@ pub struct Place {
     pub end: u32,
     /// Its exact form: the fingerprint its run would have with nothing loosened (spec FRESH-1).
     pub exact: String,
+    /// Its tokens (spec SIZE-1).
+    pub tokens: u64,
+    /// Its lines (spec SIZE-1).
+    pub lines: u64,
 }
 
 /// One group of copies (spec SAME-1 to SAME-4, SIZE-1).
@@ -218,15 +223,29 @@ pub struct Group {
     pub accepted: bool,
 }
 
+/// The groups of copies a reading holds, with what the run says of them (spec QUIET-1, QUIET-2;
+/// ignoring spec DUPE-1, COUNT-2).
+#[derive(Debug, Default)]
+pub struct Grouped {
+    /// Every group, each marked accepted or not, sorted by its first copy.
+    pub groups: Vec<Group>,
+    /// A notice for each entry of `duplicationAccepted` that matches no group.
+    pub notices: Vec<Notice>,
+    /// Each group the unreported files left with too few copies that nobody accepted, by the files of
+    /// the copies it lost there.
+    pub left: Vec<Vec<String>>,
+}
+
 /// Every group of copies in the reading's own scripts and Vue components, each run as large as it goes,
-/// sorted by its first copy and marked accepted where an entry names its fingerprint and copies, with a
-/// notice for each entry no group matches; none where no `duplicationMinimum` is declared. A file
-/// declared data or generated, and a type declaration file, holds no copy (spec COPY-4, SAME-3, SAME-4,
-/// SIZE-2, QUIET-1, QUIET-2).
-pub fn groups(reading: &Reading) -> (Vec<Group>, Vec<Notice>) {
+/// with its copies in unreported files removed and dropped where too few are left, sorted by its first
+/// copy and marked accepted where an entry names its fingerprint and its copies before the removal or
+/// after, with a notice for each entry no group matches; none where no `duplicationMinimum` is
+/// declared. A file declared data or generated, and a type declaration file, holds no copy (spec
+/// COPY-4, SAME-3, SAME-4, SIZE-2, QUIET-1, QUIET-2; ignoring spec DUPE-1).
+pub fn groups(reading: &Reading) -> Grouped {
     let settings = &reading.duplication;
     let Some(minimum) = settings.minimum_tokens else {
-        return (Vec::new(), Vec::new());
+        return Grouped::default();
     };
     let files: Vec<(&str, &[List])> = reading
         .files
@@ -249,15 +268,70 @@ pub fn groups(reading: &Reading) -> (Vec<Group>, Vec<Notice>) {
         .into_iter()
         .filter_map(|(length, at)| text.group(length, at, settings, minimum))
         .collect();
-    let mut groups = widest(found);
-    // Acceptance comes after the groups inside others are dropped, so an accepted group still hides
-    // them (spec QUIET-1).
-    let entries: BTreeSet<String> = groups.iter().map(accepting).collect();
     let accepted: BTreeSet<&str> = settings
         .accepted
         .iter()
         .map(|accepted| accepted.entry.as_str())
         .collect();
+    // Every entry a group can be accepted by: its own as it was found, and as it is once its copies in
+    // unreported files are removed.
+    let mut entries: BTreeSet<String> = BTreeSet::new();
+    let mut left = Vec::new();
+    let mut reduced = Vec::new();
+    let mut found_as = Vec::new();
+
+    for group in widest(found) {
+        let before = accepting(&group);
+        let (kept, lost): (Vec<Place>, Vec<Place>) = group
+            .copies
+            .iter()
+            .cloned()
+            .partition(|copy| !reading.marks.unreported.contains(&copy.path));
+
+        if u64::try_from(kept.len()).unwrap_or(u64::MAX) < settings.copies {
+            // A group left with too few copies is left out, and counted where nobody accepted it.
+            if !accepted.contains(before.as_str()) {
+                left.push(lost.into_iter().map(|copy| copy.path).collect());
+            }
+        } else {
+            reduced.push(Group {
+                tokens: kept
+                    .iter()
+                    .map(|copy| copy.tokens)
+                    .min()
+                    .unwrap_or(group.tokens),
+                lines: kept
+                    .iter()
+                    .map(|copy| copy.lines)
+                    .min()
+                    .unwrap_or(group.lines),
+                copies: kept,
+                ..group
+            });
+            found_as.push(before.clone());
+        }
+
+        entries.insert(before);
+    }
+
+    // A group kept only by its copy in an unreported file can now lie inside a wider one, so the rule
+    // runs again (spec SAME-4). Acceptance comes after, so an accepted group still hides the groups
+    // inside it (spec QUIET-1).
+    let outer = outermost(&reduced);
+    let mut groups: Vec<Group> = Vec::new();
+
+    for ((mut group, before), kept) in reduced.into_iter().zip(found_as).zip(outer) {
+        if !kept {
+            continue;
+        }
+
+        let after = accepting(&group);
+
+        group.accepted = accepted.contains(before.as_str()) || accepted.contains(after.as_str());
+        entries.insert(after);
+        groups.push(group);
+    }
+
     let mut named = BTreeSet::new();
     let notices = settings
         .accepted
@@ -281,12 +355,15 @@ pub fn groups(reading: &Reading) -> (Vec<Group>, Vec<Notice>) {
         group
             .copies
             .sort_by(|a, b| (&a.path, a.start_line).cmp(&(&b.path, b.start_line)));
-        group.accepted = accepted.contains(accepting(group).as_str());
     }
 
     groups.sort_by(|a, b| order(a).cmp(&order(b)));
 
-    (groups, notices)
+    Grouped {
+        groups,
+        notices,
+        left,
+    }
 }
 
 /// The message of a group's finding: how many copies it has, its size, and where each copy is, with no
@@ -611,13 +688,26 @@ fn place(path: &str, run: &[Item]) -> Place {
         start: first.map_or(0, |item| item.start),
         end: last.map_or(0, |item| item.end),
         exact: fingerprint(run, |item| &item.exact),
+        tokens: tokens(run),
+        lines: lines(run),
     }
 }
 
-/// The groups left once each that lies inside another is dropped: one whose every copy lies inside a
-/// different copy of another group with at least as many copies. Of two that each lie inside the other,
-/// the first stays (spec SAME-4).
+/// The groups left once each that lies inside another is dropped (spec SAME-4).
 fn widest(found: Vec<Group>) -> Vec<Group> {
+    let kept = outermost(&found);
+
+    found
+        .into_iter()
+        .zip(kept)
+        .filter_map(|(group, kept)| kept.then_some(group))
+        .collect()
+}
+
+/// For each group, whether it stays: not one whose every copy lies inside a different copy of another
+/// group with at least as many copies. Of two that each lie inside the other, the first stays (spec
+/// SAME-4).
+fn outermost(found: &[Group]) -> Vec<bool> {
     let inside = |inner: &Group, outer: &Group| {
         let mut used = BTreeSet::new();
 
@@ -634,7 +724,7 @@ fn widest(found: Vec<Group>) -> Vec<Group> {
                     .is_some_and(|at| used.insert(at))
             })
     };
-    let kept: Vec<bool> = found
+    found
         .iter()
         .enumerate()
         .map(|(at, group)| {
@@ -642,12 +732,6 @@ fn widest(found: Vec<Group>) -> Vec<Group> {
                 other_at != at && inside(group, other) && !(other_at > at && inside(other, group))
             })
         })
-        .collect();
-
-    found
-        .into_iter()
-        .zip(kept)
-        .filter_map(|(group, kept)| kept.then_some(group))
         .collect()
 }
 
@@ -668,15 +752,18 @@ pub fn run(hand_off: Option<&Path>, all: bool) -> Result<String, Stop> {
         notices,
         &mut Stages::new(false),
     )?;
-    let (groups, found) = groups(&reading);
-    let listed: Vec<Value> = groups
+    let grouped = groups(&reading);
+    let listed: Vec<Value> = grouped
+        .groups
         .iter()
         .filter(|group| all || !group.accepted)
         .map(entry)
         .collect();
 
-    reading.notices.extend(found);
+    reading.notices.extend(grouped.notices);
     reading.notices.extend(reading.duplication.notice());
+    // The command says how many groups the `unreported` globs left out (ignoring spec COUNT-4).
+    reading.notices.extend(reading.marks.counts(&grouped.left));
 
     let mut document = json!({
         "groups": listed,

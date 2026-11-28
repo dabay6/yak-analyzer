@@ -16,6 +16,7 @@ use crate::notice::Notice;
 use crate::reading::Reading;
 use crate::resolve::Outcome;
 use crate::scripts;
+use crate::uses::{self, Uses};
 
 /// How many hexadecimal digits of the digest a fingerprint keeps (spec REPORT-3).
 pub const FINGERPRINT_DIGITS: usize = 32;
@@ -266,13 +267,17 @@ pub fn hex(bytes: &[u8]) -> String {
 pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
     let mut found = counted(reading);
     let mut notices = Vec::new();
+    // Each finding the `unreported` declaration left out, by the files that tie it to its globs
+    // (ignoring spec COUNT-2).
+    let mut left = left_dead(reading, &found);
 
-    circular(reading, &mut found);
-    complex(reading, &mut found);
-    duplicated(reading, &mut found, &mut notices);
+    circular(reading, &mut found, &mut left);
+    complex(reading, &mut found, &mut left);
+    duplicated(reading, &mut found, &mut notices, &mut left);
     not_reported(reading, &mut notices);
     computed(reading, &mut notices);
     notices.extend(reading.limits.notice());
+    notices.extend(reading.marks.counts(&left));
 
     sort(&mut found);
 
@@ -284,10 +289,54 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
 pub fn counted(reading: &Reading) -> Vec<Finding> {
     let mut found = Vec::new();
 
-    unused(reading, &mut found);
-    unresolved(reading, &mut found);
+    unused(
+        reading,
+        &reading.uses,
+        &reading.marks.unreported,
+        &mut found,
+    );
+    unresolved(reading, &reading.marks.unreported, &mut found);
 
     found
+}
+
+/// The findings of the dead-code kinds the `unreported` declaration left out, each by its file: those
+/// the run would report without it, worked out over the same reading from the entry points without the
+/// reason `unreported` and with no file left out, that it does not report with it. None where the
+/// declaration matches no file (ignoring spec COUNT-2).
+fn left_dead(reading: &Reading, reported: &[Finding]) -> Vec<Vec<String>> {
+    if reading.marks.unreported.is_empty() {
+        return Vec::new();
+    }
+
+    let uses = uses::find(
+        &reading.scripts,
+        &reading.resolved,
+        &reading.entries.declared(),
+    );
+    let none = BTreeSet::new();
+    let mut plain = Vec::new();
+
+    unused(reading, &uses, &none, &mut plain);
+    unresolved(reading, &none, &mut plain);
+
+    // How many findings of each fingerprint the run reports, which match as many it would report.
+    let mut held: BTreeMap<&str, usize> = BTreeMap::new();
+
+    for finding in reported {
+        *held.entry(finding.fingerprint.as_str()).or_default() += 1;
+    }
+
+    plain
+        .into_iter()
+        .filter(|finding| {
+            held.get_mut(finding.fingerprint.as_str())
+                .filter(|count| **count > 0)
+                .map(|count| *count -= 1)
+                .is_none()
+        })
+        .map(|finding| vec![finding.location.path])
+        .collect()
 }
 
 /// Puts findings in the report's order: by rule, then path, line and column, then fingerprint (spec
@@ -310,17 +359,19 @@ fn reported(reading: &Reading, path: &str) -> bool {
     })
 }
 
-/// Whether a file is the project's own code to report on: read, and neither data nor generated.
-fn own(reading: &Reading, file: &File) -> bool {
+/// Whether a file is the project's own code to report on: read, neither data nor generated, and not one
+/// of the files given, which are left out (ignoring spec READ-3).
+fn own(reading: &Reading, file: &File, unreported: &BTreeSet<String>) -> bool {
     !reading.marks.data.contains(&file.path)
         && !reading.marks.generated.contains(&file.path)
+        && !unreported.contains(&file.path)
         && !reading.scripts.gone.contains(&file.path)
 }
 
-/// The unused files, exports and types (spec KIND-1, KIND-2).
-fn unused(reading: &Reading, found: &mut Vec<Finding>) {
-    let used: BTreeSet<(&str, Option<&str>)> = reading
-        .uses
+/// The unused files, exports and types, by the uses given, in every file the analyzer reports on but
+/// the files given (spec KIND-1, KIND-2; ignoring spec DEAD-1).
+fn unused(reading: &Reading, uses: &Uses, unreported: &BTreeSet<String>, found: &mut Vec<Finding>) {
+    let used: BTreeSet<(&str, Option<&str>)> = uses
         .list
         .iter()
         .map(|used| (used.file.as_str(), used.name.as_deref()))
@@ -328,7 +379,7 @@ fn unused(reading: &Reading, found: &mut Vec<Finding>) {
 
     for file in &reading.files {
         if !matches!(file.kind, Kind::Script | Kind::Vue)
-            || !own(reading, file)
+            || !own(reading, file, unreported)
             || !reported(reading, &file.path)
         {
             continue;
@@ -336,7 +387,7 @@ fn unused(reading: &Reading, found: &mut Vec<Finding>) {
 
         let path = file.path.as_str();
 
-        if !reading.uses.reached.contains_key(path) {
+        if !uses.reached.contains_key(path) {
             found.push(Finding::new(
                 Rule::UnusedFile,
                 unused_file(reading, path),
@@ -425,10 +476,9 @@ fn unused_file(reading: &Reading, path: &str) -> String {
 /// reported there (spec ENTRY-9).
 fn not_reported(reading: &Reading, notices: &mut Vec<Notice>) {
     let analyzed = || {
-        reading
-            .files
-            .iter()
-            .filter(|file| scripts::reads(file.kind) && own(reading, file))
+        reading.files.iter().filter(|file| {
+            scripts::reads(file.kind) && own(reading, file, &reading.marks.unreported)
+        })
     };
 
     for package in reading
@@ -479,13 +529,14 @@ fn kinds(reading: &Reading) -> BTreeMap<&str, Kind> {
 }
 
 /// The imports that lead to no file, in any file under the root that is read and is neither generated
-/// nor a type declaration file (spec KIND-3).
-fn unresolved(reading: &Reading, found: &mut Vec<Finding>) {
+/// nor a type declaration file nor one of the files given (spec KIND-3; ignoring spec DEAD-1).
+fn unresolved(reading: &Reading, unreported: &BTreeSet<String>, found: &mut Vec<Finding>) {
     let kinds = kinds(reading);
 
     for (path, read) in &reading.scripts.read {
         if kinds.get(path.as_str()) == Some(&Kind::Declaration)
             || reading.marks.generated.contains(path)
+            || unreported.contains(path)
         {
             continue;
         }
@@ -705,17 +756,26 @@ fn strongly_connected(edges: &Edges) -> Vec<Vec<usize>> {
 }
 
 /// The circular dependencies: each strongly connected set of two or more files, or a file that loads
-/// itself, as one finding (spec KIND-4).
-fn circular(reading: &Reading, found: &mut Vec<Finding>) {
+/// itself, as one finding, at its first file by path that is not unreported; a set whose every file is
+/// unreported is left out, by its files (spec KIND-4; ignoring spec CYCLE-1).
+fn circular(reading: &Reading, found: &mut Vec<Finding>, left: &mut Vec<Vec<String>>) {
     let (nodes, edges) = edges(reading);
 
     for set in strongly_connected(&edges) {
-        let first = set[0];
-
-        if set.len() == 1 && !edges[first].contains_key(&first) {
+        if set.len() == 1 && !edges[set[0]].contains_key(&set[0]) {
             continue;
         }
 
+        let paths: Vec<&str> = set.iter().map(|node| nodes[*node]).collect();
+        let Some(first) = set
+            .iter()
+            .copied()
+            .find(|node| !reading.marks.unreported.contains(nodes[*node]))
+        else {
+            left.push(paths.iter().map(|path| (*path).to_owned()).collect());
+
+            continue;
+        };
         let members: BTreeSet<usize> = set.iter().copied().collect();
         // Where a file of the set is: its first import, by line, that loads another file of the set, or
         // itself in a set of one.
@@ -730,7 +790,6 @@ fn circular(reading: &Reading, found: &mut Vec<Finding>) {
             column: None,
             end_line: None,
         };
-        let paths: Vec<&str> = set.iter().map(|node| nodes[*node]).collect();
         let mut finding = Finding::new(
             Rule::CircularDependency,
             looped(&nodes, &edges, &members, first),
@@ -738,7 +797,11 @@ fn circular(reading: &Reading, found: &mut Vec<Finding>) {
             &paths,
         );
 
-        finding.related = set[1..].iter().map(|node| placed(*node)).collect();
+        finding.related = set
+            .iter()
+            .filter(|node| **node != first)
+            .map(|node| placed(*node))
+            .collect();
         found.push(finding);
     }
 }
@@ -803,10 +866,12 @@ fn looped(nodes: &[&str], edges: &Edges, members: &BTreeSet<usize>, first: usize
     message
 }
 
-/// One finding for each function over a limit, whichever measures are over (complexity spec CPX-1 to
-/// CPX-5).
-fn complex(reading: &Reading, found: &mut Vec<Finding>) {
+/// One finding for each function over a limit, whichever measures are over, and each one in an
+/// unreported file left out, by its file (complexity spec CPX-1 to CPX-5; ignoring spec CPLX-1).
+fn complex(reading: &Reading, found: &mut Vec<Finding>, left: &mut Vec<Vec<String>>) {
     let limits = reading.limits;
+
+    left.extend(complexity::left(reading, limits));
 
     for measured in complexity::measured(reading, limits) {
         if measured.over.is_empty() {
@@ -840,19 +905,27 @@ fn complex(reading: &Reading, found: &mut Vec<Finding>) {
 }
 
 /// One finding for each group of copies a person has not accepted, with the notices for an entry of
-/// `duplicationAccepted` that matches no group and for a run with no `duplicationMinimum` (duplication
-/// spec DUP-1, TUNE-1, QUIET-1, QUIET-2).
-fn duplicated(reading: &Reading, found: &mut Vec<Finding>, notices: &mut Vec<Notice>) {
-    let (groups, unmatched) = duplication::groups(reading);
+/// `duplicationAccepted` that matches no group and for a run with no `duplicationMinimum`, and each
+/// group the unreported files left out, by the files of the copies it lost there (duplication spec
+/// DUP-1, TUNE-1, QUIET-1, QUIET-2; ignoring spec DUPE-1).
+fn duplicated(
+    reading: &Reading,
+    found: &mut Vec<Finding>,
+    notices: &mut Vec<Notice>,
+    left: &mut Vec<Vec<String>>,
+) {
+    let grouped = duplication::groups(reading);
 
     found.extend(
-        groups
+        grouped
+            .groups
             .into_iter()
             .filter(|group| !group.accepted)
             .filter_map(Finding::grouped),
     );
-    notices.extend(unmatched);
+    notices.extend(grouped.notices);
     notices.extend(reading.duplication.notice());
+    left.extend(grouped.left);
 }
 
 /// One notice for each file with an `import()` or `require()` it cannot follow: what it loads must be

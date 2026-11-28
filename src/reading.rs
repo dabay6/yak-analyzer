@@ -32,7 +32,7 @@ pub struct Reading {
     pub handed: bool,
     /// The files of the list, in its order.
     pub files: Vec<File>,
-    /// Which files the declarations mark as data or as generated.
+    /// Which files the declarations mark as data, as generated or as unreported.
     pub marks: Marks,
     /// The packages, and which package each file belongs to.
     pub packages: Packages,
@@ -187,7 +187,7 @@ pub fn read(
     )?;
     let resolver = stages.time("resolve", || Resolver::new(&listing, &packages, &configs));
     let resolved = stages.time("resolve", || resolver.resolve(tree.root(), &scripts))?;
-    let entries = stages.time("entries", || {
+    let mut entries = stages.time("entries", || {
         entries::find(
             &entries::Project {
                 tree,
@@ -201,6 +201,10 @@ pub fn read(
             &mut notices,
         )
     })?;
+
+    // An unreported file is an entry point, made one once the faults are found (ignoring spec READ-2).
+    entries.unreported(&marks);
+
     let uses = stages.time("uses", || uses::find(&scripts, &resolved, &entries));
 
     // git failing while the base was read stops the run (dead-code spec COMMIT-4).

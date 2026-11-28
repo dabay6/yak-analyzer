@@ -6,7 +6,8 @@ use std::path::PathBuf;
 /// The option that prints the version. yak runs it after an install to read the installed version.
 const VERSION_OPTION: &str = "--version";
 
-/// The command that prints the interface version and the hand-off formats the analyzer reads.
+/// The command that prints the interface version, the hand-off formats the analyzer reads and the
+/// declaration keys it knows.
 const INTERFACE_COMMAND: &str = "interface";
 
 /// The command that reads a project and prints what it read.
@@ -42,7 +43,7 @@ const ACCEPTED: &str = "--version, interface, graph [--hand-off <file>], audit [
 pub enum Command {
     /// Print the version.
     Version,
-    /// Print the interface version and the hand-off formats.
+    /// Print the interface version, the hand-off formats and the declaration keys.
     Interface,
     /// Read the project and print what was read, with a hand-off file or without one.
     Graph { hand_off: Option<PathBuf> },

@@ -64,8 +64,8 @@ node scripts/check-floor.mjs
 ## The commands
 
 - `yak-analyzer --version` prints the version.
-- `yak-analyzer interface` prints one line of JSON: the interface version, and the hand-off
-  formats the analyzer reads.
+- `yak-analyzer interface` prints one line of JSON: the interface version, the hand-off formats
+  the analyzer reads, and the declaration keys it knows.
 - `yak-analyzer graph` reads the project in the folder it is started in and prints what it read,
   as one JSON document: the packages, the files, each file's imports and where each leads, the
   entry points with what made each one, the files they reach, the uses of each export, and the
@@ -118,6 +118,14 @@ The property bag's names, and the form of a run that a group's fingerprint is ma
 of the fingerprint scheme, are a draft until the swap: from then, a change that breaks either raises
 the interface version, and a change to the form stops every accepted group and recorded reason from
 matching.
+
+Ignoring files adds to interface version 1 and breaks nothing in it: the key `unreported`, a list of
+globs that only a project states, whose files are read like any other but in which no finding is
+reported; and the list of declaration keys `interface` prints, from which yak can tell that a
+project states a key newer than the analyzer its pack pins. `audit`, `complexity` and `duplication`
+say in notices of the kind `findings-unreported` how many findings each glob left out; a notice's
+kind is not part of the interface. The analyzer release that knows a new key comes before any
+project writes it, and the pack pins that release first.
 
 What `graph` prints is the builder's and the tests' view of a reading, not part of the interface
 version; its form may change. When it does, the fixtures' written-down output changes in the same
