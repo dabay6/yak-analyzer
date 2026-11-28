@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.14.0](https://github.com/dabay6/yak-analyzer/compare/v0.13.0...v0.14.0) (2026-11-28)
+
+
+### Features
+
+* **audit:** leave unreported files out of dead code and cycles ([378899f](https://github.com/dabay6/yak-analyzer/commit/378899fdc4856b65b4f10e539ee55c1b285c646b))
+* **complexity:** leave unreported files out of complexity ([b26702a](https://github.com/dabay6/yak-analyzer/commit/b26702a705e706851b9896cc3f72ea3736a40565))
+* **declarations:** add the unreported key a project states ([3ae0db9](https://github.com/dabay6/yak-analyzer/commit/3ae0db996c338374bcc20e757c974494d7f20005))
+* **declarations:** add the unreported key, files read but reported in by no check ([32abed7](https://github.com/dabay6/yak-analyzer/commit/32abed7516d629c98229f42234f06a72d2270fbd))
+* **duplication:** remove copies in unreported files from groups ([1d45871](https://github.com/dabay6/yak-analyzer/commit/1d458717fe0f4af8fbd97d728685312bdc080f73))
+
 ## [0.13.0](https://github.com/dabay6/yak-analyzer/compare/v0.12.1...v0.13.0) (2026-11-26)
 
 
