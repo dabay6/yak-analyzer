@@ -30,13 +30,19 @@ fn prints_its_version_on_standard_output_and_exits_zero() {
 }
 
 #[test]
-fn prints_its_interface_version_and_the_hand_off_formats_it_reads_as_one_line_of_json() {
+fn prints_its_interface_version_hand_off_formats_and_keys_as_one_line_of_json() {
     let output = run(&["interface"]);
 
     assert!(output.status.success());
+    // The keys let yak tell a project's key that is newer than the analyzer its pack pins (ignoring
+    // spec REFUSE-3).
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "{\"handOffFormats\":[1],\"interfaceVersion\":1}\n"
+        "{\"declarationKeys\":[\"entries\",\"data\",\"generated\",\"unreported\",\"internal\",\
+         \"cyclomaticLimit\",\"cognitiveLimit\",\"duplicationMinimum\",\"duplicationMinimumLines\",\
+         \"duplicationCopies\",\"duplicationIgnore\",\"duplicationTestCallees\",\"duplicationAccepted\",\
+         \"configEntries\",\"scriptCommands\",\"commandFiles\"],\"handOffFormats\":[1],\
+         \"interfaceVersion\":1}\n"
     );
     assert!(output.stderr.is_empty());
 }

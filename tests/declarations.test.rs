@@ -101,10 +101,11 @@ fn names_the_stack_the_key_and_who_states_it() {
             json!({})
         ),
         "yak-analyzer: cannot use the declaration `entrypoints` that the pack states for the stack `typescript`: \
-         the analyzer knows no such key, only entries, data, generated, internal, cyclomaticLimit, \
+         the analyzer knows no such key, only entries, data, generated, unreported, internal, cyclomaticLimit, \
          cognitiveLimit, duplicationMinimum, duplicationMinimumLines, duplicationCopies, duplicationIgnore, \
          duplicationTestCallees, duplicationAccepted, configEntries, scriptCommands, commandFiles; change it \
-         in the pack"
+         in the pack, or, if the key is newer than this analyzer, update the analyzer's version pinned in the \
+         pack"
     );
     assert_eq!(
         refused(

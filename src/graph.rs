@@ -1,6 +1,6 @@
 //! The `graph` command: prints what reading a project found as one JSON document (spec OUT-1).
 //!
-//! So far that is the hand-off file, the file list, the `data` and `generated` declarations, the
+//! So far that is the hand-off file, the file list, the `data`, `generated` and `unreported` declarations, the
 //! packages, the tsconfig files, the imports and the names of every script, where each import leads,
 //! the entry points with the source of each, every use of an export, and the files the entry points
 //! reach (spec CMD-4).
@@ -113,6 +113,7 @@ fn file(
     let mut printed = json!({
         "data": marks.data.contains(&file.path),
         "generated": marks.generated.contains(&file.path),
+        "unreported": marks.unreported.contains(&file.path),
         "kind": file.kind.name(),
         "package": packages.of_file.get(&file.path),
         "path": file.path,
