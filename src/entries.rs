@@ -13,6 +13,7 @@ use crate::command_files;
 use crate::files::{File, Kind};
 use crate::glob::Glob;
 use crate::hand_off::HandOff;
+use crate::marks::{Marks, UNREPORTED};
 use crate::notice::Notice;
 use crate::packages::{Package, Packages};
 use crate::resolve::{self, Outcome, Resolution, Resolver};
@@ -39,7 +40,8 @@ const WILDCARDS: [char; 5] = ['*', '?', '[', '{', '\\'];
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Source {
     /// What named it: a field of a `package.json` (`main`, `module`, `types`, `typings`, `bin` or
-    /// `exports`), a tsconfig's `files`, a page's script (`page`), or the declaration `entries`.
+    /// `exports`), a tsconfig's `files`, a page's script (`page`), or the declaration `entries` or
+    /// `unreported`.
     from: &'static str,
     /// The file that names it: the `package.json`, the tsconfig or the page; none for a declaration.
     file: Option<String>,
@@ -63,6 +65,11 @@ impl Source {
     /// The source as `graph` prints it.
     pub fn printed(&self) -> Value {
         json!({ "by": self.by, "file": self.file, "from": self.from, "stack": self.stack })
+    }
+
+    /// Whether the `unreported` declaration made the file an entry point (ignoring spec READ-2).
+    pub fn unreported(&self) -> bool {
+        self.from == UNREPORTED
     }
 }
 
@@ -99,6 +106,49 @@ impl Entries {
     /// Records that a source makes a file an entry point.
     fn add(&mut self, path: String, source: Source) {
         self.points.entry(path).or_default().insert(source);
+    }
+
+    /// Makes each file the `unreported` declaration names an entry point, with the reason `unreported`
+    /// for each stack that names it, but a file declared data, which is not read. It is called once the
+    /// faults are found, so an entry point with only this reason leaves a package's fault as it was
+    /// (ignoring spec READ-2, KEY-8).
+    pub fn unreported(&mut self, marks: &Marks) {
+        for glob in &marks.globs {
+            for path in glob.files.iter().filter(|path| !marks.data.contains(*path)) {
+                for stack in &glob.stacks {
+                    self.add(
+                        path.clone(),
+                        Source {
+                            from: UNREPORTED,
+                            file: None,
+                            stack: Some(stack.clone()),
+                            by: Some("project"),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    /// The entry points as they would be without the `unreported` declaration: each source but its, and
+    /// none that only it made (ignoring spec COUNT-2).
+    pub fn declared(&self) -> Self {
+        Self {
+            points: self
+                .points
+                .iter()
+                .filter_map(|(path, sources)| {
+                    let kept: BTreeSet<Source> = sources
+                        .iter()
+                        .filter(|source| !source.unreported())
+                        .cloned()
+                        .collect();
+
+                    (!kept.is_empty()).then(|| (path.clone(), kept))
+                })
+                .collect(),
+            faults: self.faults.clone(),
+        }
     }
 }
 

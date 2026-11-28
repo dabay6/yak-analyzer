@@ -395,7 +395,8 @@ fn changes<'g>(copies: &'g [Place], at_base: &[Vec<(String, String)>]) -> (Vec<&
 
 /// Marks a circular dependency: inherited when one strongly connected set of the base holds all its
 /// files and the branch added no edge between two of them; otherwise new, placed at the first import, by
-/// path and line, that makes an edge the branch added (dead-code spec INH-3).
+/// path and line, that makes an edge the branch added in a file that is not unreported, or where it was
+/// when there is none (dead-code spec INH-3; ignoring spec CYCLE-1).
 fn cycle(
     working: &Reading,
     graph: &Graph<'_>,
@@ -425,7 +426,7 @@ fn cycle(
 
     added.sort_unstable();
 
-    let Some(&(from, line, place, to)) = added.first() else {
+    let Some(&first) = added.first() else {
         finding.baseline = Some(if one_set {
             Baseline::Unchanged
         } else {
@@ -434,25 +435,34 @@ fn cycle(
 
         return;
     };
+    let moving = added
+        .iter()
+        .copied()
+        .find(|(from, ..)| !working.marks.unreported.contains(*from));
+    let (from, line, place, to) = moving.unwrap_or(first);
     let specifier = working
         .scripts
         .read
         .get(from)
         .and_then(|read| read.imports.get(place))
         .map_or("", |import| import.specifier.as_str());
-    let mut locations: Vec<Location> = std::iter::once(finding.location.clone())
-        .chain(finding.related.drain(..))
-        .filter(|location| location.path != from)
-        .collect();
 
-    locations.sort();
-    finding.location = Location {
-        path: from.to_owned(),
-        line: Some(line),
-        column: None,
-        end_line: None,
-    };
-    finding.related = locations;
+    if moving.is_some() {
+        let mut locations: Vec<Location> = std::iter::once(finding.location.clone())
+            .chain(finding.related.drain(..))
+            .filter(|location| location.path != from)
+            .collect();
+
+        locations.sort();
+        finding.location = Location {
+            path: from.to_owned(),
+            line: Some(line),
+            column: None,
+            end_line: None,
+        };
+        finding.related = locations;
+    }
+
     let _ = write!(
         finding.message,
         " The branch added the import of `{specifier}` on line {line} of `{from}`, which leads to `{to}`."

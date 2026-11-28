@@ -17,10 +17,6 @@ pub const UNREPORTED: &str = "unreported";
 
 /// The kind of the notices that say how many findings the `unreported` globs left out (ignoring spec
 /// COUNT-1).
-#[expect(
-    dead_code,
-    reason = "the counts are made once the checks hand back what they left out"
-)]
 const LEFT_OUT: &str = "findings-unreported";
 
 /// The keys whose globs mark files, and what they mark them as.
@@ -82,10 +78,6 @@ impl Marks {
     /// out given by the files that tie it to the globs: one for each glob that matches a file, counting
     /// each finding one of whose files it matches, and one more for the findings none of whose files is
     /// unreported, where there are any (ignoring spec COUNT-1, COUNT-2).
-    #[expect(
-        dead_code,
-        reason = "the checks hand back what they left out in a later change"
-    )]
     pub fn counts(&self, left: &[Vec<String>]) -> Vec<Notice> {
         let mut notices: Vec<Notice> = self
             .globs
