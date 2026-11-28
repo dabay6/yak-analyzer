@@ -272,7 +272,7 @@ pub fn find(reading: &Reading) -> (Vec<Finding>, Vec<Notice>) {
     let mut left = left_dead(reading, &found);
 
     circular(reading, &mut found, &mut left);
-    complex(reading, &mut found);
+    complex(reading, &mut found, &mut left);
     duplicated(reading, &mut found, &mut notices);
     not_reported(reading, &mut notices);
     computed(reading, &mut notices);
@@ -866,10 +866,12 @@ fn looped(nodes: &[&str], edges: &Edges, members: &BTreeSet<usize>, first: usize
     message
 }
 
-/// One finding for each function over a limit, whichever measures are over (complexity spec CPX-1 to
-/// CPX-5).
-fn complex(reading: &Reading, found: &mut Vec<Finding>) {
+/// One finding for each function over a limit, whichever measures are over, and each one in an
+/// unreported file left out, by its file (complexity spec CPX-1 to CPX-5; ignoring spec CPLX-1).
+fn complex(reading: &Reading, found: &mut Vec<Finding>, left: &mut Vec<Vec<String>>) {
     let limits = reading.limits;
+
+    left.extend(complexity::left(reading, limits));
 
     for measured in complexity::measured(reading, limits) {
         if measured.over.is_empty() {

@@ -168,14 +168,32 @@ pub struct Measured {
 }
 
 /// Every function of the reading's own scripts and Vue components, sorted by path, line and column.
-/// A file declared data or generated, and a type declaration file, gives none (spec FN-2, CPX-5,
-/// SOLO-2).
+/// A file declared data, generated or unreported, and a type declaration file, gives none (spec FN-2,
+/// CPX-5, SOLO-2; ignoring spec CPLX-1).
 pub fn measured(reading: &Reading, limits: Limits) -> Vec<Measured> {
+    every(reading, limits, false)
+}
+
+/// The functions over a limit in the unreported files, which `measured` leaves out, each by its file
+/// (ignoring spec CPLX-1, COUNT-2).
+pub fn left(reading: &Reading, limits: Limits) -> Vec<Vec<String>> {
+    every(reading, limits, true)
+        .into_iter()
+        .filter(|measured| !measured.over.is_empty())
+        .map(|measured| vec![measured.path])
+        .collect()
+}
+
+/// Every function of the reading's own scripts and Vue components in the unreported files where
+/// `unreported` is true, and in every other where it is not, sorted by path, line and column. A file
+/// declared data or generated, and a type declaration file, gives none.
+fn every(reading: &Reading, limits: Limits, unreported: bool) -> Vec<Measured> {
     let mut measured = Vec::new();
 
     for file in &reading.files {
         if !matches!(file.kind, Kind::Script | Kind::Vue)
             || reading.marks.generated.contains(&file.path)
+            || reading.marks.unreported.contains(&file.path) != unreported
         {
             continue;
         }
@@ -316,6 +334,12 @@ pub fn run(hand_off: Option<&Path>, all: bool) -> Result<String, Stop> {
         .collect();
 
     reading.notices.extend(limits.notice());
+
+    // The command says how many of its own findings the `unreported` globs left out (ignoring spec
+    // COUNT-4).
+    let lost = left(&reading, limits);
+
+    reading.notices.extend(reading.marks.counts(&lost));
 
     let mut document = json!({
         "functions": functions,

@@ -535,3 +535,82 @@ fn with_a_base_a_new_cycle_moves_only_to_an_added_import_in_a_file_that_is_not_u
           finding(s)."
     ));
 }
+
+/// A body of as many `if`s as given, one point of cognitive complexity each.
+fn ifs(count: usize) -> String {
+    "if (a) {} ".repeat(count)
+}
+
+#[test]
+fn no_complexity_is_reported_in_an_unreported_file_by_audit_or_by_complexity() {
+    let project = Project::new("unreported-complexity");
+
+    project
+        .write(
+            "package.json",
+            r#"{ "name": "app", "main": "./src/index.ts" }"#,
+        )
+        .write(
+            "src/index.ts",
+            "import { run } from './run';\n\nrun(true);\n",
+        )
+        .write(
+            "src/run.ts",
+            &format!(
+                "export function run(a: boolean): void {{\n  {}\n}}\n",
+                ifs(4)
+            ),
+        )
+        .write(
+            "scripts/tool.ts",
+            &format!(
+                "export function tool(a: boolean): void {{\n  {}\n}}\n",
+                ifs(4)
+            ),
+        )
+        .commit();
+
+    let hand_off = declaring(
+        &project,
+        json!({ "cyclomaticLimit": 10, "cognitiveLimit": 3, "unreported": ["scripts/**"] }),
+    );
+    let run = audit(&project, &hand_off);
+
+    // `tool` is over the cognitive limit, as `run` is, but only `run` is reported; the script would be
+    // an unused file too, and both count (ignoring spec CPLX-1, COUNT-2).
+    assert_eq!(found(&run), [("complexity", "src/run.ts", Some(1))]);
+    assert_eq!(
+        sentences(&run, "findings-unreported"),
+        [
+            "The `unreported` glob `scripts/**` that the project states for the stack `typescript` left \
+          out 2 finding(s)."
+        ]
+    );
+
+    // The command lists no function of the script, even with `--all`, and counts only its own kind
+    // (ignoring spec CPLX-1, COUNT-4).
+    for all in [false, true] {
+        let document = printed(&project.start("complexity", |binary| {
+            binary.args(["--hand-off", &hand_off]);
+
+            if all {
+                binary.arg("--all");
+            }
+        }));
+        let paths: Vec<&str> = document["functions"]
+            .as_array()
+            .expect("a list of functions")
+            .iter()
+            .map(|function| function["path"].as_str().expect("a path"))
+            .collect();
+
+        assert_eq!(paths, ["src/run.ts"]);
+        assert_eq!(
+            said(&document, "findings-unreported"),
+            [
+                "The `unreported` glob `scripts/**` that the project states for the stack `typescript` \
+              left out 1 finding(s)."
+            ]
+        );
+    }
+}
